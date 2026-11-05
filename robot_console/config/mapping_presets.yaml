@@ -1,0 +1,37 @@
+# 建图页的场景预设。每个预设把仿真场景、航点路线（以后还可以加 FAST-LIO 配置）绑在一起。
+# 网页只能按预设名选择，不能传任意命令行参数。
+#
+# args：启动某个进程时追加的参数，按 stacks.yaml 里的进程名分组。
+#   - name:=value 形式的参数会替换命令里同名的参数（例如 world:=），其余的追加在末尾
+#   - 同一次建图里，建图和航点进程沿用启动仿真时选的预设
+# 新增场景：在 sim_robot/worlds 放好 .sdf（小车出生位置写在场景文件里），再在这里加一项
+
+office:
+  label: {zh: 室内办公室, en: Indoor office}
+  description:
+    zh: 两个房间加走廊，约 16 × 10 m；内置航点绕一圈约 40 m，2 分钟左右
+    en: Two rooms and a corridor, about 16 × 10 m; built-in loop of about 40 m, roughly 2 min
+  args:
+    sim: [world:=indoor_office.sdf]
+    waypoints: []                  # 不给路线文件，用 waypoint_driver 内置的办公室路线
+
+warehouse:
+  label: {zh: 仓库, en: Warehouse}
+  description:
+    zh: 货架区，约 30 × 50 m；航点绕一圈约 104 m，5 分钟以上，仿真较慢
+    en: Shelf aisles, about 30 × 50 m; waypoint loop of about 104 m, 5+ min, slower simulation
+  args:
+    sim: [world:=warehouse.sdf]
+    waypoints: [--params-file, '${pkg:sim_robot}/config/route_warehouse_loop.yaml']
+
+hkust_4f_west:
+  label: {zh: 教学楼四楼西侧（BIM）, en: HKUST 4F west (BIM)}
+  description:
+    zh: 由 SLABIM 数据集（Huang 等，ICRA 2025）的 BIM 简化而来，只含墙和柱、无门、平面地面，约 54 × 56 m；长走廊往返路线约 160 m、42 个航点，按 0.5 m/s 约 6–8 分钟，仿真变慢时更久
+    en: Simplified from the SLABIM BIM (Huang et al., ICRA 2025), walls and columns only, no doors, flat floor, about 54 × 56 m; corridor out-and-back route of about 160 m with 42 waypoints, roughly 6–8 min at 0.5 m/s, longer when the simulation slows down
+  args:
+    sim: [world:=hkust_4f_west.sdf]
+    waypoints: [--params-file, '${pkg:sim_robot}/config/route_hkust_4f_west.yaml']
+  # The building model is generated from the SLABIM dataset by each user (no licence to ship it)
+  requires: ['${pkg:sim_robot}/models/bim_hkust_4f_west/model.sdf']
+  requires_hint: 'download SLABIM, then: bash <sim_robot>/tools/make_hkust_models.sh /path/to/SLABIM && colcon build --packages-select sim_robot'

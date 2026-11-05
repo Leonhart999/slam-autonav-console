@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.egg-info/
+node_modules/
+robot_console/web/dist/
+sim_robot/models/fuel/*
+!sim_robot/models/fuel/README.md
+sim_robot/models/bim_*/

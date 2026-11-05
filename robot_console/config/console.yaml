@@ -1,0 +1,127 @@
+# robot_console 配置（通用默认值）。
+# 本机要改的项不要改这个文件，写进 ~/.config/robot_console/console.yaml（只写要改的键，会逐层合并到这里），
+# 或用环境变量 ROBOT_CONSOLE_USER_CONFIG 指定另一个覆盖文件。示例见 config/user_console.example.yaml。
+# 路径写法：~ = 家目录；${data_root} = 下面 paths.data_root；${pkg:名字} = ROS 包的 share 目录。
+# 改完这个文件要重新 colcon build（用 --symlink-install 编译时不用）。
+
+paths:
+  data_root: ~/robot_console_data   # 地图、运行记录、日志、导出结果默认都放在这下面
+
+server:
+  host: 127.0.0.1              # 只监听本机。WSL2 会把 Windows 的 localhost 转发进来，浏览器能访问，局域网访问不到
+  port: 8000
+  venv: ~/venvs/console        # fastapi、uvicorn 所在的虚拟环境
+  web_dist: auto               # 前端打包结果（npm run build 生成）；auto = 源码里的 web/dist
+  log_dir: ${data_root}/logs   # 各进程的输出日志
+  status_rate: 2.0             # 向网页推送状态的频率（Hz）
+
+stacks_file: stacks.yaml       # 允许从网页启动的进程列表（和本文件同一目录）
+
+# 话题监控：hz 为期望频率，null 表示事件触发的话题，不检查频率
+# qos 可选 reliable / best_effort；不写时按发布者的 QoS 自动选择
+topics:
+  - {name: /lidar/points,    hz: 10}     # Gazebo 原始点云
+  - {name: /points_fastlio,  hz: 10}     # cloud_adapter 整理后的点云
+  - {name: /imu,             hz: 200}
+  - {name: /wheel_odom,      hz: 50}
+  - {name: /ground_truth,    hz: 100}    # 仿真真值
+  - {name: /cloud_registered, hz: 10}    # FAST-LIO 当前帧点云
+  - {name: /Odometry,        hz: 10}     # FAST-LIO 里程计
+  - {name: /glim_ros/aligned_points, hz: 10}   # GLIM 当前帧点云（glim_odom 坐标系）
+  - {name: /glim_ros/odom,   hz: 10}     # GLIM 里程计
+  - {name: /scan,            hz: 10}     # 点云切出的 2D 激光（导航时）
+  - {name: /map,             hz: null}   # 2D 栅格地图（只在加载时发一次）
+  - {name: /amcl_pose,       hz: null}   # AMCL 定位结果（机器人移动时才发）
+  - {name: /cmd_vel,         hz: null}
+
+# TF 检查：列出期望存在的父子坐标系。没列出的也会显示在"其他"里
+tf_edges:
+  - [map, odom]                # AMCL 发布
+  - [odom, base_link]          # 差速插件（轮式里程计）发布
+  - [base_link, lidar_link]    # 静态，sim.launch.py 发布
+  - [base_link, imu_link]      # 静态
+  - [camera_init, body]        # FAST-LIO 建图时发布
+  - [glim_odom, glim_imu]      # GLIM 建图时发布（独立的 glim_map → glim_odom → glim_imu → glim_lidar 树）
+
+# 建图页：后端用当前帧点云自己累积体素地图（不订阅 /Laser_map，它每次都重发全部历史点）
+mapping:
+  # SLAM 算法（stacks.yaml 里的进程名 → 话题、坐标系、存图方式），建图页和批量实验都从这里选
+  #   scan_topic  已配准到 frame 的当前帧点云；odom_topic  nav_msgs/Odometry（车体 = IMU 位置）
+  #   save.service + pcd_path  调 Trigger 服务让 SLAM 写出 pcd_path（FAST-LIO 的 /map_save），之后 SLAM 继续运行
+  #   save.dump_dir            SLAM 退出时才写出全局优化后的地图（GLIM）：保存地图会先停止 SLAM，再读这个目录；
+  #                            每次停止后还会把运行记录的 est.tum 换成优化后的轨迹（在线结果另存为 est_online.tum）
+  slam_profiles:
+    mapping_fastlio:
+      algorithm: FAST-LIO2
+      frame: camera_init         # FAST-LIO 的世界坐标系（= 开始建图时的车体位置）
+      scan_topic: /cloud_registered
+      odom_topic: /Odometry
+      save:
+        service: /map_save
+        pcd_path: ~/results/fastlio_map.pcd  # 必须和 FAST-LIO 配置里的 map_file_path 一致（FAST-LIO 不展开 ~，安装脚本会写成绝对路径）
+        timeout: 60              # 存大地图较慢（s）
+    mapping_glim:
+      algorithm: GLIM
+      frame: glim_odom           # GLIM 里程计坐标系（= 开始建图时的 IMU 位置，z 轴对齐重力）
+      scan_topic: /glim_ros/aligned_points
+      odom_topic: /glim_ros/odom
+      save:
+        dump_dir: ${data_root}/slam/glim_dump   # 和 stacks.yaml 里 mapping_glim 的 dump_path 一致
+  gt_topic: /ground_truth      # 仿真真值，用来显示实时位置误差；实物时删掉或留空
+  voxel: 0.10                  # 地图体素边长（m）
+  scan_voxel: 0.05             # 当前帧显示时的体素（m）
+  scan_max_points: 20000       # 当前帧最多发多少点
+  process_rate: 5.0            # 每秒最多处理几帧点云（SLAM 是 10 Hz，相邻帧几乎重叠）
+  stacks:                      # 建图页各步骤对应 stacks.yaml 里的进程（slam 是默认选中的算法）
+    sim: sim
+    slam: mapping_fastlio
+    waypoints: waypoints
+  presets_file: mapping_presets.yaml   # 场景预设（和本文件同一目录）
+  default_preset: office       # 不指定预设启动仿真时（例如在监控页启动）用哪个
+  # 保存地图：按 slam_profiles 的 save 写出点云，再复制进 maps_dir/<名称>/ 并投影成 2D
+  maps_dir: ${data_root}/maps
+  scenes_dir: ${data_root}/scenes  # 自行上传的 Gazebo 场景，重启控制台后仍可选用
+  runs_dir: ${data_root}/runs  # 运行记录：每次建图的估计轨迹、真值轨迹和概况
+
+# Evaluation page (step 5a): evo APE/RPE per run, cached as <run>/eval.json
+evaluation:
+  evo_python: ~/venvs/evo/bin/python   # evo has its own venv (NumPy 2), never imported by the console
+  max_diff: 0.01               # s, timestamp association tolerance (evo default)
+  rpe_delta: 1.0               # m, RPE segment length
+  results_dir: ${data_root}/results   # exports: <time>/summary.csv + PNG figures
+
+# Batch mapping experiments (evaluation page): sim -> SLAM -> waypoints, repeated N times (robot_console/batch.py)
+batch:
+  slam_stacks: [mapping_fastlio, mapping_glim]   # stacks.yaml names offered as SLAM algorithms (labels come from stacks.yaml)
+  run_timeout: 900             # s (wall clock) for one repetition; slower runs are recorded as failed
+  ready_timeout: 120           # s to wait for the simulation clock / first SLAM odometry
+  max_runs: 20
+  speeds: [1, 2, 5, 10]        # sim speed-ups offered for a batch (Gazebo real_time_factor target; the machine may reach less, reached RTF is recorded per run)
+
+# 遥控（建图页第 ③ 步）：网页 10 Hz 发速度，后端限幅后发到 topic
+teleop:
+  topic: /cmd_vel
+  max_v: 5.0                   # 线速度上限（m/s），网页上的滑块不能超过它
+  recommended_v: [0.5, 3.0]    # 滑块上标出的推荐区间（m/s）；太快时 FAST-LIO 容易跟丢、地图变糊
+  max_w: 1.2                   # 角速度上限（rad/s）
+  timeout: 0.5                 # 超过这么久（s）没收到网页指令就自动停车
+
+# 导航页的倍速（原理见 robot_console/nav_speed.py）：
+#   控制台从 params_file 复制一份 Nav2 参数，把速度上限提高到 “1× 速度 × 最大倍数”，用它启动导航；
+#   再持续发布 /speed_limit = 1× 速度 × 当前倍数。1× 速度直接读 params_file 里的 FollowPath.max_vel_x。
+#   原来的 lidar_nav 参数文件不改，命令行做的实验仍然是原来的速度。
+navigation:
+  stack: navigation
+  params_file: ''              # 留空 = lidar_nav 包里的 config/nav2_params_sim.yaml
+  default_map: ~/maps/office_fastlio.yaml   # 不带 map:= 启动导航（例如在监控页启动）时 lidar_nav/nav.launch.py 加载的地图，和它保持一致
+  max_w_cap: 2.5               # 倍速再大，角速度也不超过它（rad/s）
+  speed_scale_range: [0.5, 4.0]
+  goal_timeout: 240.0          # 航点任务里单个目标的超时（s，仿真时间），超时取消并记为 timeout，继续下一个
+
+estop:
+  cmd_vel_topic: /cmd_vel
+  zero_duration: 1.0           # 急停后连续发零速度的时长（s）
+  cancel_actions:              # 急停时取消这些动作的全部目标
+    - /navigate_to_pose
+    - /follow_waypoints
+    - /navigate_through_poses

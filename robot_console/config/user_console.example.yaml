@@ -1,0 +1,15 @@
+# Example user override. Copy to ~/.config/robot_console/console.yaml and keep only the keys you need;
+# they are merged onto config/console.yaml (dicts key by key, lists and other values replaced).
+# Placeholders: ~ (home), ${data_root} (paths.data_root), ${pkg:NAME} (share/ folder of a ROS package).
+paths:
+  data_root: ~/robot_console_data        # everything below defaults to folders under it
+server:
+  port: 8000
+  # log_dir: ${data_root}/logs
+mapping:
+  # maps_dir: /data/slam/maps            # e.g. keep maps on a bigger disk
+  # runs_dir: ${data_root}/runs
+  gt_topic: /ground_truth                # empty on a real robot without ground truth
+evaluation:
+  # results_dir: ${data_root}/results    # CSV + PNG exports
+  rpe_delta: 1.0

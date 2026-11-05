@@ -1,0 +1,302 @@
+/* 全局主题：白色磨砂玻璃 + 科幻 HUD 风格。
+   颜色、圆角、阴影都定义成变量，各组件统一引用；改主题只需要改这里 */
+:root {
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'Cascadia Mono', 'JetBrains Mono', Consolas, monospace;
+
+  /* 文字：主文字、次要文字、标签 */
+  --ink: #0b1526;
+  --ink-2: #4a5872;
+  --ink-3: #7a879d;
+  /* 强调色：青 → 靛蓝渐变的两端 */
+  --accent: #0891b2;
+  --accent-2: #4f46e5;
+  --accent-grad: linear-gradient(135deg, #06b6d4 0%, #2563eb 100%);
+  /* 状态色 */
+  --ok: #059669;
+  --warn: #d97706;
+  --bad: #dc2626;
+  --idle: #94a3b8;
+
+  /* 磨砂玻璃：半透明白底 + 背景模糊 + 亮边 */
+  --glass: rgba(255, 255, 255, 0.58);
+  --glass-strong: rgba(255, 255, 255, 0.86);
+  --glass-edge: rgba(255, 255, 255, 0.95);
+  --hairline: rgba(15, 30, 60, 0.08);
+  --blur: blur(22px) saturate(170%);
+  --radius: 16px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 0 0 1px rgba(15, 30, 60, 0.05),
+    0 10px 30px -14px rgba(20, 60, 120, 0.28);
+
+  /* Element Plus 主题色改成青色（light-N 是和白色按比例混合的结果） */
+  --el-color-primary: #0891b2;
+  --el-color-primary-light-3: #52b2c9;
+  --el-color-primary-light-5: #83c8d8;
+  --el-color-primary-light-7: #b5dee8;
+  --el-color-primary-light-8: #cee9f0;
+  --el-color-primary-light-9: #e6f4f7;
+  --el-color-primary-dark-2: #06748e;
+  --el-font-family: var(--font-ui);
+  --el-border-radius-base: 8px;
+  --el-text-color-primary: var(--ink);
+  --el-text-color-regular: var(--ink-2);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: #eef2f8;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 背景第一层：淡青、淡紫两团光晕，磨砂玻璃透过它们才有层次 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 620px at 8% -10%, rgba(56, 189, 248, 0.3), transparent 60%),
+    radial-gradient(820px 620px at 105% 112%, rgba(129, 140, 248, 0.26), transparent 60%),
+    radial-gradient(640px 420px at 68% 18%, rgba(255, 255, 255, 0.95), transparent 70%),
+    linear-gradient(180deg, #f7f9fd, #e8edf6);
+}
+/* 背景第二层：细网格，越往边缘越淡 */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(15, 40, 80, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 40, 80, 0.055) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse at 50% 40%, #000 25%, transparent 80%);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 磨砂玻璃面板的通用样式 */
+.glass {
+  background: var(--glass);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--shadow);
+}
+
+/* 状态小胶囊：圆点 + 文字。用法 <span class="chip success">正常</span>，加 live 圆点会呼吸闪烁 */
+.chip {
+  --chip: var(--idle);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--chip) 85%, #000);
+  background: color-mix(in srgb, var(--chip) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip) 24%, transparent);
+}
+.chip::before {
+  content: '';
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--chip);
+}
+.chip.live::before {
+  animation: pulse 1.8s ease-out infinite;
+}
+.chip.success { --chip: var(--ok); }
+.chip.warning { --chip: var(--warn); }
+.chip.danger { --chip: var(--bad); }
+.chip.primary { --chip: var(--accent); }
+.chip.info { --chip: var(--idle); color: var(--ink-2); }
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--chip) 55%, transparent); }
+  100% { box-shadow: 0 0 0 7px transparent; }
+}
+
+/* ---------------- Element Plus 组件改成玻璃风格 ---------------- */
+
+.el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: transparent;
+  --el-table-row-hover-bg-color: rgba(8, 145, 178, 0.06);
+  --el-table-border-color: var(--hairline);
+  --el-table-header-text-color: var(--ink-3);
+  --el-table-text-color: var(--ink);
+  background: transparent;
+}
+.el-table th.el-table__cell {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.el-table .el-table__inner-wrapper::before {
+  display: none;
+}
+
+.el-button {
+  font-weight: 500;
+}
+.el-button--primary:not(.is-disabled):not(.is-link):not(.is-text) {
+  background-image: var(--accent-grad);
+  border-color: transparent;
+  box-shadow: 0 6px 16px -8px rgba(37, 99, 235, 0.75);
+}
+.el-button--primary:not(.is-disabled):not(.is-link):not(.is-text):hover {
+  filter: brightness(1.08);
+}
+.el-button--default:not(.is-link):not(.is-text) {
+  --el-button-bg-color: rgba(255, 255, 255, 0.75);
+  --el-button-disabled-bg-color: rgba(255, 255, 255, 0.45);
+}
+
+.el-overlay {
+  background-color: rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(2px);
+}
+.el-drawer {
+  --el-drawer-bg-color: rgba(247, 250, 253, 0.84);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-left: 1px solid var(--glass-edge);
+}
+.el-drawer__header {
+  margin-bottom: 12px;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.el-message {
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--shadow);
+}
+
+/* 场景与地图导入：普通表单共用现有的磨砂玻璃主题。 */
+.el-dialog.import-dialog {
+  --el-dialog-bg-color: var(--glass-strong);
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+  margin-top: 6vh;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  box-shadow: var(--shadow);
+}
+.import-dialog .el-dialog__header,
+.import-dialog .el-dialog__footer {
+  flex: none;
+}
+.import-dialog .el-dialog__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+.import-dialog .import-form {
+  margin-top: 16px;
+}
+.import-dialog .el-form-item {
+  margin-bottom: 16px;
+}
+.import-dialog .import-note {
+  margin: 0 0 12px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.65;
+}
+.import-dialog .import-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.import-dialog .import-file .el-button {
+  flex: none;
+  margin-left: 0;
+}
+.import-dialog .import-filename {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.import-dialog .import-spawn {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+.import-dialog .el-input-number,
+.import-dialog .el-select {
+  width: 100%;
+}
+.import-dialog .import-progress {
+  margin-top: 14px;
+  color: var(--accent);
+  font-size: 12px;
+}
+.import-dialog .import-progress p {
+  margin: 6px 0 0;
+}
+.import-dialog .el-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.import-dialog .el-dialog__footer .el-button {
+  margin-left: 0;
+}
+
+/* 细滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 30, 60, 0.16);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 系统设置了"减少动画"时关掉所有动画 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,17 @@
+# Backend web server for robot_console, installed into ~/venvs/console (created with --system-site-packages,
+# so numpy, scipy, PyYAML, Pillow, psutil and rclpy come from Ubuntu/ROS). Versions pinned from the thesis machine.
+fastapi==0.162.0
+starlette==1.7.0
+pydantic==2.14.2
+pydantic_core==2.50.2
+annotated-doc==0.0.5
+annotated-types==0.8.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+opentelemetry-api==1.45.2
+anyio==4.16.0
+exceptiongroup==1.3.1
+h11==0.16.0
+uvicorn==0.54.0
+websockets==16.1.1
+python-multipart==0.0.32

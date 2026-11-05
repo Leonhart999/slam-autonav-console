@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.egg-info/
+# Gazebo Fuel models: licenses forbid redistribution, download with tools/fetch_fuel_models.sh
+models/fuel/*
+!models/fuel/README.md

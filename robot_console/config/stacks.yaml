@@ -1,0 +1,58 @@
+# 网页上能启动的进程。网页只能按名字启动这里列出的命令，不能传任意命令行。
+#   label        网页上显示的名字，{zh: 中文, en: 英文}（只写一个字符串时中英文都用它）
+#   description  说明，格式同 label
+#   cmd          命令和参数（列表形式，不经过 shell）；可用 ~、${data_root}、${pkg:包名}（见 console.yaml）
+#   before_stop  停止前先调用的服务（例如让 FAST-LIO 存图），超时后照常停止
+#   stop_timeout 发 SIGINT 后最多等多少秒再发 SIGTERM（默认 10；GLIM 退出时要做全局优化并写地图，给得长一些）
+#   stop_on_estop  按急停时是否一起停掉（会自己发 /cmd_vel 的进程要设 true）
+
+sim:
+  label: {zh: 仿真, en: Simulation}
+  description:
+    zh: Gazebo 仿真 + 桥接 + 点云适配（无界面）。场景由建图页选择，在这里直接启动时是室内办公室
+    en: Gazebo simulation + ROS bridge + point cloud adapter (headless). The mapping page picks the world; started here it is the indoor office
+  cmd: [ros2, launch, sim_robot, sim.launch.py]
+
+sim_gui:
+  label: {zh: 仿真（带窗口）, en: Simulation (GUI)}
+  description:
+    zh: 同上，并打开 Gazebo 窗口
+    en: Same as above, with the Gazebo window
+  cmd: [ros2, launch, sim_robot, sim.launch.py, gui:=true]
+
+mapping_fastlio:
+  label: {zh: 建图 FAST-LIO2, en: Mapping (FAST-LIO2)}
+  description:
+    zh: FAST-LIO2：激光雷达-IMU 滤波里程计（无回环）。停止前把地图存到 ~/results/fastlio_map.pcd
+    en: FAST-LIO2 - lidar-inertial filter odometry (no loop closure). Saves the map to ~/results/fastlio_map.pcd before stopping
+  cmd: [ros2, launch, fast_lio, mapping.launch.py,
+        'config_path:=${pkg:sim_robot}/config',
+        config_file:=fastlio_sim_vlp16.yaml,
+        use_sim_time:=true, rviz:=false]
+  before_stop: {service: /map_save, timeout: 15}
+
+mapping_glim:
+  label: {zh: 建图 GLIM, en: Mapping (GLIM)}
+  description:
+    zh: GLIM（CPU 版）：激光雷达-IMU 里程计 + 全局因子图（带回环）。退出时把优化后的地图和轨迹写到 <data_root>/slam/glim_dump
+    en: GLIM (CPU build) - lidar-inertial odometry + global factor graph (loop closure). Writes the optimized map and trajectory to <data_root>/slam/glim_dump on exit
+  cmd: [ros2, run, glim_ros, glim_rosnode, --ros-args,
+        -p, 'config_path:=${pkg:sim_robot}/config/glim',
+        -p, 'dump_path:=${data_root}/slam/glim_dump',
+        -p, use_sim_time:=true]
+  stop_timeout: 90
+
+waypoints:
+  label: {zh: 自动航点, en: Auto waypoints}
+  description:
+    zh: 用真值闭环，沿当前场景的内置航点路线行驶（采数据用）
+    en: Drives the current world's built-in waypoint route using ground truth (for data collection)
+  cmd: [ros2, run, sim_robot, waypoint_driver, --ros-args, -p, use_sim_time:=true]
+  stop_on_estop: true
+
+navigation:
+  label: {zh: 导航 Nav2, en: Navigation (Nav2)}
+  description:
+    zh: 地图服务器 + AMCL + Nav2 + 点云转激光。地图由导航页选择，在这里直接启动时用 ~/maps/office_fastlio.yaml
+    en: Map server + AMCL + Nav2 + cloud-to-scan. The navigation page picks the map; started here it uses ~/maps/office_fastlio.yaml
+  cmd: [ros2, launch, lidar_nav, nav.launch.py]

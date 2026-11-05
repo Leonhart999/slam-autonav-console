@@ -1,0 +1,102 @@
+<?xml version="1.0"?>
+<!-- 由 tools/make_world.py 生成，不要手改，改布局请改脚本里的列表 -->
+<sdf version="1.8">
+  <world name="indoor_office">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="ignition-gazebo-physics-system" name="ignition::gazebo::systems::Physics"/>
+    <plugin filename="ignition-gazebo-user-commands-system" name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="ignition-gazebo-scene-broadcaster-system" name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <plugin filename="ignition-gazebo-imu-system" name="ignition::gazebo::systems::Imu"/>
+    <!-- 雷达用 ogre2 渲染，服务端用软件渲染运行（见 launch/sim.launch.py）。
+         ogre1 的 gpu_lidar 测距误差太大（实测地面点 z 误差标准差约 0.1 m），不要用 -->
+    <plugin filename="ignition-gazebo-sensors-system" name="ignition::gazebo::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>false</cast_shadows><pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse><direction>-0.3 0.2 -1</direction>
+    </light>
+
+    <model name="ground"><static>true</static>
+      <link name="link">
+        <collision name="c"><geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry></collision>
+        <visual name="v"><geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+          <material><ambient>0.5 0.5 0.5 1</ambient><diffuse>0.5 0.5 0.5 1</diffuse></material></visual>
+      </link></model>
+
+    <model name="wall_north"><static>true</static><pose>0 5 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>16.2 0.2 2.5</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>16.2 0.2 2.5</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+    <model name="wall_south"><static>true</static><pose>0 -5 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>16.2 0.2 2.5</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>16.2 0.2 2.5</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+    <model name="wall_west"><static>true</static><pose>-8 0 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.2 10 2.5</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.2 10 2.5</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+    <model name="wall_east"><static>true</static><pose>8 0 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.2 10 2.5</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.2 10 2.5</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+    <model name="wall_mid_south"><static>true</static><pose>0 -2.9 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.2 4.2 2.5</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.2 4.2 2.5</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+    <model name="wall_mid_north"><static>true</static><pose>0 2.9 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.2 4.2 2.5</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.2 4.2 2.5</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+    <model name="wall_alcove"><static>true</static><pose>-6 1.5 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>4 0.2 2.5</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>4 0.2 2.5</size></box></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+    <model name="box_west"><static>true</static><pose>-5 -2 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>1.0 1.0 1.0</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>1.0 1.0 1.0</size></box></geometry><material><ambient>0.55 0.35 0.2 1</ambient><diffuse>0.55 0.35 0.2 1</diffuse></material></visual>
+      </link></model>
+    <model name="box_east_1"><static>true</static><pose>2.5 -2.5 0.4 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>0.8 0.8 0.8</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>0.8 0.8 0.8</size></box></geometry><material><ambient>0.55 0.35 0.2 1</ambient><diffuse>0.55 0.35 0.2 1</diffuse></material></visual>
+      </link></model>
+    <model name="box_east_2"><static>true</static><pose>6 -3 0.6 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>1.2 0.8 1.2</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>1.2 0.8 1.2</size></box></geometry><material><ambient>0.55 0.35 0.2 1</ambient><diffuse>0.55 0.35 0.2 1</diffuse></material></visual>
+      </link></model>
+    <model name="table"><static>true</static><pose>4 2.5 0.375 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><box><size>1.6 0.8 0.75</size></box></geometry></collision>
+        <visual name="v"><geometry><box><size>1.6 0.8 0.75</size></box></geometry><material><ambient>0.55 0.35 0.2 1</ambient><diffuse>0.55 0.35 0.2 1</diffuse></material></visual>
+      </link></model>
+    <model name="pillar_west"><static>true</static><pose>-2 2.5 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><cylinder><radius>0.3</radius><length>2.5</length></cylinder></geometry></collision>
+        <visual name="v"><geometry><cylinder><radius>0.3</radius><length>2.5</length></cylinder></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+    <model name="pillar_east"><static>true</static><pose>5.5 0.5 1.25 0 0 0</pose>
+      <link name="link">
+        <collision name="c"><geometry><cylinder><radius>0.3</radius><length>2.5</length></cylinder></geometry></collision>
+        <visual name="v"><geometry><cylinder><radius>0.3</radius><length>2.5</length></cylinder></geometry><material><ambient>0.75 0.75 0.75 1</ambient><diffuse>0.75 0.75 0.75 1</diffuse></material></visual>
+      </link></model>
+
+    <include>
+      <uri>model://sim_robot</uri>
+      <pose>-6.5 -3.5 0.1 0 0 0.0</pose>
+    </include>
+  </world>
+</sdf>

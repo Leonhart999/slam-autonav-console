@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>robot_console</name>
+  <version>0.1.0</version>
+  <description>Web console for LiDAR SLAM mapping, evaluation and Nav2 navigation: forwards ROS 2 data to the browser and manages the mapping, navigation and simulation processes</description>
+  <maintainer email="1425109609@qq.com">Leonhart999</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>tf2_msgs</depend>
+  <depend>action_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>nav2_msgs</depend>
+  <depend>tf2_ros</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
+  <exec_depend>python3-pil</exec_depend>
+  <exec_depend>lidar_nav</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-psutil</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+  <!-- fastapi / uvicorn / python-multipart 装在虚拟环境 ~/venvs/console（见 ~/scripts/setup_console_env.sh） -->
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

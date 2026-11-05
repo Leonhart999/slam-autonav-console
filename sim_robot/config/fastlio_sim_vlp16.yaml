@@ -1,0 +1,50 @@
+/**:
+    ros__parameters:
+        # FAST-LIO2 仿真配置：sim_robot 小车（16 线雷达 + 底盘中心 IMU）
+        # 由 FAST_LIO 自带的 velodyne.yaml 修改而来，改动处已注释
+        feature_extract_enable: false
+        point_filter_num: 4
+        max_iteration: 3
+        filter_size_surf: 0.5
+        filter_size_map: 0.5
+        cube_side_length: 1000.0
+        runtime_pos_log_enable: false
+        map_file_path: "/home/USER/results/fastlio_map.pcd"   # 改：地图保存位置
+
+        common:
+            lid_topic:  "/points_fastlio"   # 改：cloud_adapter 整理后的点云
+            imu_topic:  "/imu"              # 改：仿真 IMU
+            time_sync_en: false
+            time_offset_lidar_to_imu: 0.0
+
+        preprocess:
+            lidar_type: 2                # 2 = Velodyne 格式（x y z intensity time ring）
+            scan_line: 16                # 改：16 线
+            scan_rate: 10
+            timestamp_unit: 0            # 改：cloud_adapter 写的 time 单位是秒
+            blind: 0.4                   # 改：丢弃 0.4 m 以内的点（Gazebo 在 0.30 m 处有假点，见 cloud_adapter.py）
+
+        mapping:
+            acc_cov: 0.1
+            gyr_cov: 0.1
+            b_acc_cov: 0.0001
+            b_gyr_cov: 0.0001
+            fov_degree:    360.0
+            det_range:     100.0
+            extrinsic_est_en:  false
+            # 雷达在 IMU 坐标系下的位置，和 models/sim_robot/model.sdf 中 lidar_link 的安装位置一致
+            extrinsic_T: [ 0.1, 0.0, 0.3 ]
+            extrinsic_R: [ 1., 0., 0.,
+                           0., 1., 0.,
+                           0., 0., 1.]
+
+        publish:
+            path_en:  true               # 改：发布轨迹，方便在 rviz2 里看
+            map_en: true                 # 改：累积地图点云，/map_save 存图要用（velodyne.yaml 没写这项，默认 false）
+            scan_publish_en:  true
+            dense_publish_en: true
+            scan_bodyframe_pub_en: true
+
+        pcd_save:
+            pcd_save_en: true
+            interval: -1

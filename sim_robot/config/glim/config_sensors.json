@@ -1,0 +1,35 @@
+{
+  /*** Sensor configurations (sim_robot) ***
+  Changes from the GLIM defaults:
+    - T_lidar_imu: IMU pose in the lidar frame [x, y, z, qx, qy, qz, qw]. The IMU sits at base_link and the lidar
+      at base_link + (0.1, 0, 0.3) without rotation (models/sim_robot/model.sdf), so the IMU origin seen from the
+      lidar is (-0.1, 0, -0.3). FAST-LIO's extrinsic_T [0.1, 0, 0.3] is the inverse of the same transform.
+    - ring_field "ring": cloud_adapter keeps Gazebo's ring channel
+    - IMU noise kept at the GLIM defaults (the simulated IMU is less noisy, so these are conservative)
+    - camera entries removed (no camera)
+  Per-point times: cloud_adapter writes time = 1e-6 s for every point (the simulated lidar has no motion
+  distortion), so deskewing has nothing to correct. autoconf_perpoint_times picks up the "time" field.
+  */
+  "sensors": {
+    "imu_acc_noise": 0.05,
+    "imu_gyro_noise": 0.02,
+    "imu_int_noise": 0.001,
+    "imu_bias_noise": 1e-5,
+    "global_shutter_lidar": false,
+    "T_lidar_imu": [
+      -0.1,
+      0.0,
+      -0.3,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "intensity_field": "intensity",
+    "ring_field": "ring",
+    "autoconf_perpoint_times": true,
+    "autoconf_prefer_frame_time": false,
+    "perpoint_relative_time": true,
+    "perpoint_time_scale": 1.0
+  }
+}

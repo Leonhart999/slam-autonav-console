@@ -1,0 +1,108 @@
+From f28c4f95facea35c09061d8117dfb0f71eb2d3da Mon Sep 17 00:00:00 2001
+From: Leonhart999 <1425109609@qq.com>
+Date: Thu, 5 Nov 2026 16:00:11 +0800
+Subject: [PATCH] Thesis patches: reliable cloud QoS and M3DGR Mid-360 config
+
+- laserMapping.cpp: subscribe to PointCloud2 with QoS(20).reliable()
+  instead of SensorDataQoS (best-effort, depth 5). A 16-line cloud is
+  about 0.7 MB and best-effort dropped many frames (637 of 900 in a sim
+  bag). rosbag2 play and ros_gz_bridge publish reliable, so both work.
+- config/m3dgr_mid360.yaml: parameters for the M3DGR dataset (Mid-360).
+- .gitignore: runtime outputs in Log/ and PCD/.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .gitignore               |  4 ++++
+ config/m3dgr_mid360.yaml | 51 ++++++++++++++++++++++++++++++++++++++++
+ src/laserMapping.cpp     |  5 +++-
+ 3 files changed, 59 insertions(+), 1 deletion(-)
+ create mode 100644 config/m3dgr_mid360.yaml
+
+diff --git a/.gitignore b/.gitignore
+index eb7be62..b5a4afe 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -6,3 +6,7 @@ Log/*.pdf
+ .vscode/c_cpp_properties.json
+ .vscode/settings.json
+ PCD/*.pcd
++
++# Runtime outputs (thesis setup)
++Log/*.txt
++PCD/*.pcd
+diff --git a/config/m3dgr_mid360.yaml b/config/m3dgr_mid360.yaml
+new file mode 100644
+index 0000000..ee1e740
+--- /dev/null
++++ b/config/m3dgr_mid360.yaml
+@@ -0,0 +1,51 @@
++/**:
++    ros__parameters:
++        # M3DGR 数据集，Livox MID-360 雷达 + 雷达内置 IMU
++        # 由 FAST_LIO 自带的 mid360.yaml 修改而来，改动处已注释
++        feature_extract_enable: false
++        point_filter_num: 3
++        max_iteration: 3
++        filter_size_surf: 0.5
++        filter_size_map: 0.5
++        cube_side_length: 1000.0
++        runtime_pos_log_enable: false
++        map_file_path: "/home/USER/results/fastlio_map.pcd"   # 改：地图保存位置（每次运行会覆盖，要保留请及时改名）
++
++        common:
++            lid_topic:  "/livox/mid360/lidar"   # 改：M3DGR 的 MID-360 话题
++            imu_topic:  "/livox/mid360/imu"     # 改：MID-360 内置 IMU
++            time_sync_en: false
++            time_offset_lidar_to_imu: 0.0
++
++        preprocess:
++            lidar_type: 1                # 1 = Livox 系列（CustomMsg）
++            scan_line:  4
++            blind: 0.5                   # 0.5 m 以内的点丢弃（滤掉车身自身）
++            timestamp_unit: 3
++            scan_rate: 10
++
++        mapping:
++            acc_cov: 0.1
++            gyr_cov: 0.1
++            b_acc_cov: 0.0001
++            b_gyr_cov: 0.0001
++            fov_degree:    360.0
++            det_range:     100.0
++            extrinsic_est_en:  false     # 改：外参已标定，关闭在线估计，结果更可复现
++            # 雷达在 IMU 坐标系下的位置，取自 M3DGR calibration.md 1.6 节 mid360 -> mid360_imu
++            extrinsic_T: [ -0.011, -0.02329, 0.04412 ]
++            extrinsic_R: [ 1., 0., 0.,
++                            0., 1., 0.,
++                            0., 0., 1.]
++
++        publish:
++            path_en: true
++            effect_map_en: false
++            map_en: true
++            scan_publish_en:  true
++            dense_publish_en: false
++            scan_bodyframe_pub_en: true
++
++        pcd_save:
++            pcd_save_en: true            # 结束时把整张地图存成 PCD
++            interval: -1
+diff --git a/src/laserMapping.cpp b/src/laserMapping.cpp
+index e5d9950..03ff6d0 100644
+--- a/src/laserMapping.cpp
++++ b/src/laserMapping.cpp
+@@ -924,7 +924,10 @@ public:
+         }
+         else
+         {
+-            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
++            // 改（论文）：原来是 rclcpp::SensorDataQoS()（best-effort，深度 5）。
++            // 一帧 16 线点云约 0.7 MB，best-effort 下大量丢帧（仿真数据 900 帧只处理了 637 帧），
++            // 改为 reliable、深度 20。bag play 和 ros_gz_bridge 默认都是 reliable 发布，兼容。
++            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::QoS(20).reliable(), standard_pcl_cbk);
+         }
+         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
+         pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
+-- 
+2.34.1
+

@@ -1,0 +1,18 @@
+{
+  /*** GLIM configuration for the sim_robot simulation (robot_console stack mapping_glim) ***
+  Copied from the GLIM defaults (glim/config). Changes from the defaults:
+    - CPU modules instead of the GPU ones (the PPA package used here is ros-humble-glim-ros, CPU build)
+    - sensor settings in config_ros.json / config_sensors.json, map density in config_sub_mapping_cpu.json
+  */
+  "global": {
+    "config_path": "",
+    "config_ros": "config_ros.json",
+    "config_logging": "config_logging.json",
+    "config_viewer": "config_viewer.json",
+    "config_sensors": "config_sensors.json",
+    "config_preprocess": "config_preprocess.json",
+    "config_odometry": "config_odometry_cpu.json",
+    "config_sub_mapping": "config_sub_mapping_cpu.json",
+    "config_global_mapping": "config_global_mapping_cpu.json"
+  }
+}
