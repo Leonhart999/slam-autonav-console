@@ -8,9 +8,9 @@
 本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots*
 的配套软件。界面支持中文和英文。
 
-[![控制台视频导览，2:19](robot_console/docs/images/video_cover.jpg)](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4)
+[![控制台视频导览，2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 
-*视频导览（2:19，MP4，49 MB）：在办公室场景用 FAST-LIO2 建图并保存，在仓库场景执行三个航点的 Nav2
+*视频导览（2:19，[在 B 站观看](https://www.bilibili.com/video/BV1wm4v6GEQq)，或[下载 MP4](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4)，49 MB）：在办公室场景用 FAST-LIO2 建图并保存，在仓库场景执行三个航点的 Nav2
 任务，再看系统监控页和实验评估页。没有配音，字幕为中英双语。*
 
 ![导航页：带代价地图和路径的 2D 栅格、3D 点云地图、任务控制](robot_console/docs/images/navigation.png)
