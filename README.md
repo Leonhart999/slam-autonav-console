@@ -1,11 +1,18 @@
 # SLAM and AutoNav Console
 
+English | [中文](README.zh-CN.md)
+
 A browser console for LiDAR SLAM mapping, map management, Nav2 autonomous navigation and trajectory
 evaluation, running on ROS 2 Humble with a Gazebo Fortress simulation. One page takes you from an empty
 world to a saved map, a navigation run and an evo report.
 
 It was built for the bachelor thesis *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile
 Robots* (Harbin Engineering University). The interface is bilingual (中文 / English).
+
+[![Video tour of the console, 2:19](robot_console/docs/images/video_cover.jpg)](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4)
+
+*Video tour (2:19, MP4, 49 MB): mapping the office world with FAST-LIO2, saving the map, a three-waypoint Nav2
+mission in the warehouse, the monitor and evaluation pages. No narration; captions in Chinese and English.*
 
 ![Navigation page: 2D grid with costmap and paths, 3D point cloud map, mission controls](robot_console/docs/images/navigation.png)
 
