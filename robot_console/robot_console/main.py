@@ -91,6 +91,8 @@ def main():
     cleaned = procs.cleanup_orphans()
     if cleaned:
         node.get_logger().warn(f'已停止上次残留的进程：{", ".join(cleaned)}')
+    from .playback import Playback
+    playback = Playback(cfg, node, procs, mapping)
 
     def session_info():
         """当前场景预设和实际执行的命令，写进运行记录（run.json）和地图的 meta.json。"""
@@ -101,6 +103,7 @@ def main():
                 info[f'{key}_cmd'] = ' '.join(s.run_cmd or s.cmd)
                 if key == 'sim':
                     info['preset'] = s.preset
+        info.update(playback.session_info())   # bag, when the SLAM run was fed from a bag
         return info
     mapping.run_info = session_info
     library = MapLibrary(cfg['mapping'], node, mapping, session_info, procs)
@@ -114,7 +117,7 @@ def main():
     nav_maps = NavigationMaps(cfg['mapping'].get('maps_dir', '~/maps'), SolidModels(cfg['presets']))
     navdata = NavigationData(node)
 
-    app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata)
+    app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback)
     node.get_logger().info(f'网页控制台：http://localhost:{port}（监听 {host}）')
     try:
         uvicorn.run(app, host=host, port=port, log_level='warning', timeout_graceful_shutdown=3)

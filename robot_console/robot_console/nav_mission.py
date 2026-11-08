@@ -117,6 +117,10 @@ def world_file(sim_cmd):
 def map_origin(meta, runs_dir, sim_cmd):
     """((x, y, yaw) of the map origin in the world, source text) or (None, None)."""
     run = meta.get('run') if isinstance(meta, dict) else None
+    # A world generated from the map (map_scene.py) has world frame = map frame; the mapping run's ground truth
+    # (if any) belongs to another world
+    if isinstance(meta, dict) and meta.get('scene_source') == 'generated':
+        run = None
     if isinstance(run, str) and RUN_ID_RE.fullmatch(run):
         try:
             o = origin_from_run(Path(runs_dir).expanduser() / run)

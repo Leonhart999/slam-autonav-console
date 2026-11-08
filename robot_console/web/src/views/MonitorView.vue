@@ -258,7 +258,7 @@ const kpis = computed(() => {
             <template #default="{ row }">
               <el-button
                 size="small" type="primary" :loading="busy[row.name]"
-                :disabled="row.state === 'running' || row.state === 'stopping'" @click="start(row)"
+                :disabled="row.state === 'running' || row.state === 'stopping' || row.page_only" @click="start(row)"
               >{{ t('monitor.start') }}</el-button>
               <el-button
                 size="small" :loading="row.state === 'stopping'"

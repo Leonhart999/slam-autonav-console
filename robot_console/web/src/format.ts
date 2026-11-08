@@ -21,3 +21,10 @@ export function fmtCount(n: number): string {
   if (n < 1e6) return `${(n / 1e3).toFixed(1)}k`
   return `${(n / 1e6).toFixed(2)}M`
 }
+
+/** 字节数 → "3.1 GB"、"269 MB"、"12 kB"（十进制单位，和文件管理器一致） */
+export function fmtBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
+  return `${Math.max(1, Math.round(bytes / 1e3))} kB`
+}

@@ -68,6 +68,7 @@ class NavigationMaps:
                         break
             has_solid = bool(self.solids and path.name == 'map.yaml' and self.solids.get(meta.get('preset')))
             return {'name': name, 'has_cloud': cloud is not None, 'has_solid': has_solid, 'preset': meta.get('preset'),
+                    'scene_source': meta.get('scene_source'), 'from_bag': bool(meta.get('bag')),
                     'grid': {'resolution': resolution, 'width': w, 'height': h, 'origin': origin},
                     '_yaml': path, '_image': image, '_cloud': cloud}
         except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError) as exc:

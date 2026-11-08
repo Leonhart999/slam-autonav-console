@@ -11,6 +11,7 @@ import { fmtDuration } from '@/format'
 import { pick } from '@/i18n'
 import { errorText } from '@/messages'
 import { useStatusStore } from '@/stores/status'
+import { openFolder } from '@/openFolder'
 import type { MappingPreset } from '@/types'
 import { evalApi, type ExportResult, type NavGoalRecord, type NavMetrics, type RunDetail, type RunEntry, type RunEval,
   type RunTrashEntry } from '@/evaluation/api'
@@ -66,7 +67,8 @@ const filtered = computed(() => runs.value.filter((r) =>
 function sceneLabel(preset: string | null) {
   if (!preset) return '—'
   const p = presets.value.find((x) => x.name === preset)
-  return p ? pick(p.label) : preset
+  // An uploaded world that has since been deleted: show its name without the internal prefix
+  return p ? pick(p.label) : preset.replace(/^custom_/, '')
 }
 const m3 = (v: number | null | undefined) => (v == null ? '—' : v.toFixed(3))
 
@@ -153,6 +155,12 @@ function evaluateCurrent() {
 
 // ---------------- Navigation runs ----------------
 const currentNav = computed(() => (currentEntry.value?.type === 'navigation' ? currentEntry.value.nav : null))
+// How the shown numbers were computed: in the panel title's "i" instead of a paragraph under the charts
+const methodTip = computed(() => {
+  if (currentNav.value) return t('evalPage.nav.method')
+  const e = currentEval.value
+  return e ? t('evalPage.method', { evo: e.evo, diff: e.params.max_diff, d: e.params.rpe_delta }) : undefined
+})
 const currentGoals = computed<NavGoalRecord[]>(() => current.value?.info.goals ?? [])
 const RESULT_CHIP: Record<string, string> = {
   succeeded: 'success', aborted: 'danger', timeout: 'warning', canceled: 'info', rejected: 'danger',
@@ -496,6 +504,9 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
           <el-option v-for="s in scenes" :key="s" :value="s" :label="sceneLabel(s)" />
         </el-select>
         <span class="count">{{ t('evalPage.count', { n: filtered.length }) }}</span>
+        <el-button size="small" circle :title="t('openFolder.runs')" :aria-label="t('openFolder.runs')" @click="openFolder(store.paths.runs)">
+          <el-icon><FolderOpened /></el-icon>
+        </el-button>
         <el-button size="small" circle :title="t('evalPage.refresh')" :loading="loading" @click="loadList">
           <el-icon><Refresh /></el-icon>
         </el-button>
@@ -525,7 +536,7 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
         <el-table-column :label="t('evalPage.col.type')" width="84">
           <template #default="{ row }">{{ t(`evalPage.type.${row.type}`) }}</template>
         </el-table-column>
-        <el-table-column :label="t('evalPage.col.scene')" min-width="100" show-overflow-tooltip>
+        <el-table-column :label="t('evalPage.col.scene')" min-width="86" show-overflow-tooltip>
           <template #default="{ row }">{{ sceneLabel(row.preset) }}</template>
         </el-table-column>
         <el-table-column :label="t('evalPage.col.duration')" width="82" align="right">
@@ -562,9 +573,11 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
         <el-table-column v-if="typeFilter === 'navigation'" :label="t('evalPage.nav.amcl')" width="100" align="right">
           <template #default="{ row }"><span class="num">{{ m3(row.nav?.amcl_rmse_m) }}</span></template>
         </el-table-column>
-        <el-table-column :label="t('evalPage.col.state')" min-width="118">
+        <el-table-column :label="t('evalPage.col.state')" min-width="132">
           <template #default="{ row }">
-            <span class="chip" :class="STATE_CHIP[stateOf(row)]">{{ t(`evalPage.state.${stateOf(row)}`) }}</span>
+            <!-- The normal case is plain text; only states that need attention get a colored chip -->
+            <span v-if="stateOf(row) === 'evaluated'" class="state-ok">{{ t('evalPage.state.evaluated') }}</span>
+            <span v-else class="chip" :class="STATE_CHIP[stateOf(row)]">{{ t(`evalPage.state.${stateOf(row)}`) }}</span>
           </template>
         </el-table-column>
       </el-table>
@@ -579,10 +592,17 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
           :title="t('evalPage.exportHint')" @click="exportSelected">
           <el-icon><Download /></el-icon><span>{{ t('evalPage.export') }}</span>
         </el-button>
+        <el-button
+          v-if="store.paths.results" size="small" circle :title="t('openFolder.results')" :aria-label="t('openFolder.results')"
+          @click="openFolder(store.paths.results)"
+        >
+          <el-icon><FolderOpened /></el-icon>
+        </el-button>
       </div>
       <div v-if="exportResult" class="export-result">
         <span>{{ t('evalPage.exported', { n: exportResult.files.length }) }}</span>
         <code class="mono">{{ exportResult.dir }}</code>
+        <el-button size="small" link type="primary" @click="openFolder(exportResult.dir)">{{ t('openFolder.button') }}</el-button>
         <el-button size="small" link type="primary" @click="copyPath(exportResult.dir)">{{ t('evalPage.copy') }}</el-button>
         <span v-if="exportResult.skipped.length" class="warn">{{ t('evalPage.exportSkipped', { n: exportResult.skipped.length }) }}</span>
         <el-button size="small" link class="close" @click="exportResult = null">×</el-button>
@@ -590,8 +610,11 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
     </GlassPanel>
 
     <!-- Focused run -->
-    <GlassPanel :title="t('evalPage.detail')">
+    <GlassPanel :title="t('evalPage.detail')" :tip="methodTip">
       <template v-if="currentEntry" #extra>
+        <el-button size="small" @click="openFolder(`${store.paths.runs}/${currentEntry.id}`)">
+          <el-icon><FolderOpened /></el-icon><span>{{ t('openFolder.button') }}</span>
+        </el-button>
         <el-button v-if="currentEntry.type === 'navigation'" size="small" :loading="busy.has(currentEntry.id)" @click="evaluateCurrent">
           {{ t('evalPage.refresh') }}
         </el-button>
@@ -688,7 +711,6 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
             {{ t('evalPage.nav.clearance') }} {{ m3(currentNav.min_clearance_m) }} m ·
             {{ t('evalPage.nav.locErr') }} {{ m3(currentNav.mean_loc_error_m) }} m
           </p>
-          <p class="method">{{ t('evalPage.nav.method') }}</p>
         </template>
 
         <template v-if="currentEval">
@@ -718,7 +740,6 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
               </figure>
             </div>
           </div>
-          <p class="method">{{ t('evalPage.method', { evo: currentEval.evo, diff: currentEval.params.max_diff, d: currentEval.params.rpe_delta }) }}</p>
         </template>
       </template>
     </GlassPanel>
@@ -740,7 +761,7 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
               <span class="name mono">{{ row.id }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('evalPage.col.scene')" width="110">
+          <el-table-column :label="t('evalPage.col.scene')" min-width="110" show-overflow-tooltip>
             <template #default="{ row }">{{ sceneLabel(row.entry.preset) }}</template>
           </el-table-column>
           <el-table-column :label="t('evalPage.col.ate')" width="100" align="right">
@@ -1049,6 +1070,15 @@ figcaption {
   font-size: 12px;
   line-height: 1.6;
   color: var(--ink-3);
+}
+.state-ok {
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.state-ok::before {
+  content: '✓ ';
+  color: var(--ok);
+  font-weight: 700;
 }
 .compare-chart {
   margin-top: 14px;

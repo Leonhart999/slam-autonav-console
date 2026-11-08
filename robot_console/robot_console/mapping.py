@@ -104,6 +104,8 @@ def slam_profiles(cfg):
     save_mode 'service': call a std_srvs/Trigger service that writes pcd_path (FAST-LIO /map_save).
     save_mode 'dump': the SLAM writes its optimized map only when it exits (GLIM); saving stops the process
     and reads dump_dir.
+    inputs / sources: the topics bag playback has to provide, and whether the SLAM is offered for the
+    simulation and / or for bags (see playback.py).
     """
     raw = cfg.get('slam_profiles')
     if not raw:
@@ -124,6 +126,10 @@ def slam_profiles(cfg):
             'service': save.get('service'), 'timeout': float(save.get('timeout', 60)),
             'pcd_path': os.path.expanduser(save['pcd_path']) if save.get('pcd_path') else None,
             'dump_dir': os.path.expanduser(save['dump_dir']) if save.get('dump_dir') else None,
+            # Topics the SLAM subscribes to ({points: ..., imu: ...}); bag playback feeds these (playback.py)
+            'inputs': dict(p.get('inputs') or {}),
+            # Where its data can come from: 'sim' (the Gazebo simulation) and / or 'bag' (rosbag playback)
+            'sources': list(p.get('sources') or ['sim', 'bag']),
         }
     return out
 
@@ -271,6 +277,12 @@ class MappingData:
         """当前体素地图的一份拷贝 (N, 3)，保存地图时写成轻量的预览点云。"""
         with self._lock:
             return self._map.data[:self._map.n].copy()
+
+    def last_stamp(self):
+        """Stamp (s) of the newest SLAM odometry message, or None. Bag playback compares it with /clock to see
+        whether the SLAM keeps up with the playback rate."""
+        with self._lock:
+            return self._t_last
 
     def export_run(self, directory):
         """在同一把锁内刷新并复制当前运行记录，避免复制到半行轨迹。"""
@@ -456,7 +468,8 @@ class MappingData:
                 'stacks': dict(self.stacks), 'topics': dict(self.topics),
                 'slam': self.stacks['slam'], 'algorithm': self.profile['algorithm'],
                 'save_mode': self.profile['save_mode'],
-                'slam_options': [{'name': n, 'algorithm': p['algorithm'], 'save_mode': p['save_mode']}
+                'slam_options': [{'name': n, 'algorithm': p['algorithm'], 'save_mode': p['save_mode'],
+                                  'sources': p['sources'], 'needs_imu': 'imu' in p['inputs']}
                                  for n, p in self.profiles.items()],
             }
 

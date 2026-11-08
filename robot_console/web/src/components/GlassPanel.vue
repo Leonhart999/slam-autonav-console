@@ -1,13 +1,15 @@
 <!-- 磨砂玻璃面板：标题行（左边标题，右边 extra 插槽）+ 内容。左上、右下有 HUD 风格的角标
-     flush：内容不留内边距（放表格时用） -->
+     flush：内容不留内边距（放表格时用）；tip：标题后的小 i，放说明文字，不占正文位置 -->
 <script setup lang="ts">
-defineProps<{ title?: string; flush?: boolean }>()
+import InfoTip from '@/components/InfoTip.vue'
+
+defineProps<{ title?: string; flush?: boolean; tip?: string }>()
 </script>
 
 <template>
   <section class="panel glass">
     <header v-if="title || $slots.extra" class="head">
-      <h3 class="title"><i class="tick" />{{ title }}</h3>
+      <h3 class="title"><i class="tick" /><span>{{ title }}<InfoTip v-if="tip" :content="tip" placement="bottom" /></span></h3>
       <div class="extra"><slot name="extra" /></div>
     </header>
     <div class="body" :class="{ flush }"><slot /></div>

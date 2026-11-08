@@ -47,6 +47,64 @@ export interface MappingStatus {
   }
   run: string | null // 当前运行记录编号（~/runs/<run>/）
   save: SaveJob // 保存地图任务的进度
+  /** Bag playback (robot_console/playback.py); missing from an older backend */
+  playback?: PlaybackStatus
+}
+
+/** A rosbag2 folder found under playback.bag_dirs (GET /api/playback/bags) */
+export interface BagInfo {
+  path: string
+  name: string // relative to its bag folder root
+  root: string
+  storage: string
+  duration: number // s
+  start: number // s since epoch (recording time)
+  messages: number
+  size: number // bytes
+  topics: { name: string; type: string; count: number }[]
+  supported: boolean // the storage plugin is installed
+  reason: 'storage' | null
+  points: string[] // PointCloud2 topics
+  imu: string[] // Imu topics
+  has_clock: boolean
+  has_gt: boolean
+  /** Per SLAM (stacks.yaml name): can it run on this bag, and which bag topic feeds which input */
+  slams: Record<string, { ok: boolean; missing: string[]; remapped: boolean; plan: PlaybackPlan }>
+}
+export type PlaybackPlan = Record<string, { from: string; to: string }>
+
+/** Where uploads go, what the trash holds and how much space is left (GET /api/playback/storage) */
+export interface PlaybackStorage {
+  upload_dir: string
+  trash: { root: string; path: string; size: number; items: number }[]
+  free: { path: string; free: number }[]
+}
+
+export interface PlaybackStatus {
+  stack: string
+  available: boolean
+  state: 'idle' | 'running' | 'stopping' | 'exited'
+  rates: number[]
+  roots: string[]
+  slam: string | null // SLAM stack running now
+  slam_ready: boolean // it has subscribed to its point cloud input
+  needs_slam_restart: boolean // it already received a playback
+  /** s the SLAM's odometry is behind the playback clock (null before the first odometry) */
+  slam_lag?: number | null
+  /** the bag has ended but the SLAM is still working on queued scans */
+  catching_up?: boolean
+  // the current / last playback
+  bag?: string
+  name?: string
+  rate?: number
+  paused?: boolean
+  duration?: number
+  position?: number
+  plan?: PlaybackPlan
+  finished?: boolean
+  /** part of the bag being played, [begin, end] in s */
+  range?: [number, number]
+  exit_code?: number | null
 }
 
 /** 保存地图任务（后端 map_library.py）。step 依次是 map_save、copy、project、meta */
@@ -56,6 +114,9 @@ export interface SlamOption {
   name: string
   algorithm: string
   save_mode: SlamSaveMode
+  /** 'sim' and / or 'bag': offered for the simulation, for bag playback or both */
+  sources?: ('sim' | 'bag')[]
+  needs_imu?: boolean
 }
 
 export interface SaveJob {

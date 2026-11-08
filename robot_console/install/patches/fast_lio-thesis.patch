@@ -9,8 +9,6 @@ Subject: [PATCH] Thesis patches: reliable cloud QoS and M3DGR Mid-360 config
   bag). rosbag2 play and ros_gz_bridge publish reliable, so both work.
 - config/m3dgr_mid360.yaml: parameters for the M3DGR dataset (Mid-360).
 - .gitignore: runtime outputs in Log/ and PCD/.
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
  .gitignore               |  4 ++++
  config/m3dgr_mid360.yaml | 51 ++++++++++++++++++++++++++++++++++++++++

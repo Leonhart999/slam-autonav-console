@@ -23,7 +23,7 @@ const SETTLE = Number(arg('settle', 4000))
 const [VW, VH] = arg('viewport', '1440x1000').split('x').map(Number)
 // --pages: comma-separated routes, optionally with a query (e.g. "navigation?map=office"), to check pages in a
 // state prepared beforehand; --tag: prefix for the screenshot names
-const PAGES = arg('pages', 'mapping,maps,navigation,evaluation,monitor').split(',')
+const PAGES = arg('pages', 'mapping,playback,maps,navigation,evaluation,monitor').split(',')
 const TAG = arg('tag', '')
 const LANGS = ['zh-CN', 'en']
 // Requests that fail by design when no simulation is running; each entry says why.

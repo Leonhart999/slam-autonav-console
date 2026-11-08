@@ -1,6 +1,7 @@
 // REST 接口封装。后端出错时返回 {code, params}，这里包装成 ApiError；
 // 显示给用户的文字用 messages.ts 里的 errorText() 按当前语言生成
-import type { CodedMsg, MappingPreset, NavMap, NavMission, NavSolid, NavStatus, PickedPose, StackInfo } from './types'
+import type { CodedMsg, MapSceneInfo, MappingPreset, NavMap, NavMission, NavSolid, NavStatus, PickedPose, StackInfo } from './types'
+import type { BagInfo, PlaybackStatus, PlaybackStorage } from './mapping/stream'
 
 export class ApiError extends Error {
   readonly coded: CodedMsg
@@ -31,13 +32,16 @@ export interface UploadProgress {
 
 export type UploadProgressHandler = (progress: UploadProgress) => void
 
-/** 浏览器生成 multipart 边界；只报告实际发送的字节，发送完后等待后端校验和导入。 */
-function upload<T>(path: string, data: FormData, onProgress: UploadProgressHandler): Promise<T> {
+/** 浏览器生成 multipart 边界；只报告实际发送的字节，发送完后等待后端校验和导入。
+ *  data may also be a File sent as the raw body (bag uploads use PUT, one file per request). */
+function upload<T>(
+  path: string, data: FormData | Blob, onProgress: UploadProgressHandler, method = 'POST', signal?: AbortSignal,
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     let loaded = 0
     let total: number | null = null
-    xhr.open('POST', path)
+    xhr.open(method, path)
     xhr.upload.onprogress = (event) => {
       loaded = event.loaded
       total = event.lengthComputable ? event.total : null
@@ -64,6 +68,7 @@ function upload<T>(path: string, data: FormData, onProgress: UploadProgressHandl
     // 网络中断时后端可能仍在处理，提示先确认结果再重试，避免重复上传。
     xhr.onerror = () => reject(new ApiError({ code: 'import_network', params: {} }))
     xhr.onabort = () => reject(new ApiError({ code: 'import_network', params: {} }))
+    signal?.addEventListener('abort', () => xhr.abort())
     onProgress({ loaded: 0, total: null, sent: false })
     xhr.send(data)
   })
@@ -72,7 +77,7 @@ function upload<T>(path: string, data: FormData, onProgress: UploadProgressHandl
 export const api = {
   /** preset：建图场景预设名；不给时后端按默认预设或正在运行的仿真决定 */
   /** origin: which page started it (the navigation page warns when the simulation came from elsewhere) */
-  startStack: (name: string, preset?: string, origin?: 'mapping' | 'navigation') => {
+  startStack: (name: string, preset?: string, origin?: 'mapping' | 'navigation' | 'playback') => {
     const q = new URLSearchParams()
     if (preset) q.set('preset', preset)
     if (origin) q.set('origin', origin)
@@ -100,6 +105,16 @@ export const api = {
     request<{ name: string; text: string }>('GET', `/api/stacks/${encodeURIComponent(name)}/log?lines=${lines}`),
   estop: () => request<{ cancelled_actions: string[]; stopped_stacks: string[] }>('POST', '/api/estop'),
   navigationMaps: () => request<NavMap[]>('GET', '/api/navigation/maps'),
+  /** Simulation scene of a map without a recorded one (bag playback / imported maps), see map_scene.py */
+  mapScene: (map: string) =>
+    request<MapSceneInfo>('GET', `/api/navigation/maps/${encodeURIComponent(map)}/scene`),
+  bindMapScene: (map: string, preset: string) =>
+    request<MapSceneInfo>('POST',
+      `/api/navigation/maps/${encodeURIComponent(map)}/scene?preset=${encodeURIComponent(preset)}`),
+  unbindMapScene: (map: string) =>
+    request<MapSceneInfo>('DELETE', `/api/navigation/maps/${encodeURIComponent(map)}/scene`),
+  generateMapScene: (map: string, height: number) =>
+    request<MapSceneInfo>('POST', `/api/navigation/maps/${encodeURIComponent(map)}/scene/generate?height=${height}`),
   navigationStatus: () => request<NavStatus>('GET', '/api/navigation/status'),
   startNavigation: (name: string, variant?: string) =>
     request<StackInfo>('POST', `/api/navigation/start?name=${encodeURIComponent(name)}` +
@@ -120,6 +135,30 @@ export const api = {
   setNavSpeed: (scale: number) => request<unknown>('POST', `/api/navigation/speed?scale=${scale}`),
   navigationSolid: (name: string) =>
     request<NavSolid>('GET', `/api/navigation/maps/${encodeURIComponent(name)}/solid`),
+  /** Bag playback on the playback page (robot_console/playback.py); begin / end: part of the bag in s */
+  playbackBags: () => request<{ roots: string[]; bags: BagInfo[] }>('GET', '/api/playback/bags'),
+  startPlayback: (bag: string, rate: number, begin = 0, end?: number) =>
+    request<PlaybackStatus>('POST', `/api/playback/start?bag=${encodeURIComponent(bag)}&rate=${rate}&begin=${begin}` +
+      (end != null ? `&end=${end}` : '')),
+  pausePlayback: (paused: boolean) => request<PlaybackStatus>('POST', `/api/playback/pause?paused=${paused}`),
+  setPlaybackRate: (rate: number) => request<PlaybackStatus>('POST', `/api/playback/rate?rate=${rate}`),
+  stopPlayback: () => request<PlaybackStatus>('POST', '/api/playback/stop'),
+  /** Bag files (robot_console/bag_files.py): upload folder, trash, free space */
+  playbackStorage: () => request<PlaybackStorage>('GET', '/api/playback/storage'),
+  beginBagUpload: (name: string, size: number, files: number) =>
+    request<{ token: string; target: string }>('POST',
+      `/api/playback/uploads?name=${encodeURIComponent(name)}&size=${size}&files_count=${files}`),
+  putBagFile: (token: string, file: File, onProgress: UploadProgressHandler, signal?: AbortSignal) =>
+    upload<{ path: string; bytes: number }>(
+      `/api/playback/uploads/${encodeURIComponent(token)}?path=${encodeURIComponent(file.name)}`, file, onProgress, 'PUT', signal),
+  finishBagUpload: (token: string) =>
+    request<{ name: string; path: string; size: number }>('POST', `/api/playback/uploads/${encodeURIComponent(token)}/finish`),
+  cancelBagUpload: (token: string) => request<unknown>('DELETE', `/api/playback/uploads/${encodeURIComponent(token)}`),
+  deleteBag: (path: string) => request<{ name: string; trash: string }>('DELETE', `/api/playback/bags?path=${encodeURIComponent(path)}`),
+  emptyBagTrash: () => request<{ freed: number }>('DELETE', '/api/playback/trash'),
+  /** Open a data folder in the desktop file manager of the machine running the console (open_folder.py) */
+  openFolder: (path: string) =>
+    request<{ path: string; opened: string }>('POST', `/api/open-folder?path=${encodeURIComponent(path)}`),
 }
 
 /** Binary or image map assets; throws ApiError like request() */

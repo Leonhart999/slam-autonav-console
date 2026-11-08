@@ -78,7 +78,7 @@ export const useStatusStore = defineStore('status', () => {
   }
 
   /** Data folders for display, from the backend configuration (defaults until the first status arrives) */
-  const paths = computed(() => status.value?.paths ?? { maps: '~/maps', runs: '~/runs' })
+  const paths = computed(() => status.value?.paths ?? { maps: '~/maps', runs: '~/runs', results: '' })
 
   return { connected, status, paths, connect, subscribe, unsubscribe, send, addJsonHandler, addBinaryHandler }
 })

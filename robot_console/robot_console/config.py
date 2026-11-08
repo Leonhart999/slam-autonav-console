@@ -189,6 +189,11 @@ def load(path=None):
             mapping[key] = expand(mapping[key])
     if mapping.get('slam_profiles'):
         mapping['slam_profiles'] = expand.tree(mapping['slam_profiles'])
+    playback = cfg['playback'] = cfg.get('playback') or {}
+    playback['bag_dirs'] = [expand(d) for d in (playback.get('bag_dirs') or ['${data_root}/bags'])]
+    if playback.get('upload_dir'):
+        playback['upload_dir'] = expand(playback['upload_dir'])
+    playback['space_check'] = [expand(d) for d in (playback.get('space_check') or [])]
     ev = cfg['evaluation'] = cfg.get('evaluation') or {}
     ev.setdefault('results_dir', '${data_root}/results')
     ev.setdefault('evo_python', '~/venvs/evo/bin/python')

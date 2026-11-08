@@ -1,0 +1,85 @@
+/* Save-map step (components/MapSaveStep.vue) */
+/* 保存地图 */
+.name-input {
+  margin-bottom: 6px;
+}
+.name-prefix {
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.note.bad,
+.bad {
+  color: var(--bad);
+}
+.note.run {
+  margin: 10px 0 0;
+  word-break: break-all;
+}
+.save-steps {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+}
+.save-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  color: var(--ink-3);
+}
+.save-steps .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--idle);
+}
+.save-steps li.done {
+  color: var(--ink-2);
+}
+.save-steps li.done .dot {
+  box-shadow: none;
+  background: var(--ok);
+}
+.save-steps li.current {
+  color: var(--ink);
+  font-weight: 600;
+}
+.save-steps li.current .dot {
+  box-shadow: none;
+  background: var(--accent);
+  --chip: var(--accent);
+  animation: pulse 1.4s ease-out infinite;
+}
+.saved {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.preview {
+  flex: none;
+  width: 92px;
+  height: 92px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+  image-rendering: pixelated;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.saved-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+  word-break: break-all;
+}
+.saved-text b {
+  font-size: 13px;
+  color: var(--ink);
+}

@@ -2,6 +2,7 @@
 import { createRouter, createWebHashHistory, type RouteRecordSingleView } from 'vue-router'
 import MonitorView from '@/views/MonitorView.vue'
 import MappingView from '@/views/MappingView.vue'
+import PlaybackView from '@/views/PlaybackView.vue'
 import NavigationView from '@/views/NavigationView.vue'
 import MapsView from '@/views/MapsView.vue'
 import EvaluationView from '@/views/EvaluationView.vue'
@@ -14,7 +15,12 @@ interface PageMeta {
 }
 
 export const pages: (RouteRecordSingleView & { meta: PageMeta })[] = [
-  { path: '/mapping', name: 'mapping', component: MappingView, meta: { titleKey: 'nav.mapping', icon: 'MapLocation' } },
+  {
+    path: '/mapping', name: 'mapping', component: MappingView, meta: { titleKey: 'nav.mapping', icon: 'MapLocation' },
+    // bag playback used to be a mode of the mapping page (?source=bag)
+    beforeEnter: (to) => (to.query.source === 'bag' ? { path: '/playback' } : true),
+  },
+  { path: '/playback', name: 'playback', component: PlaybackView, meta: { titleKey: 'nav.playback', icon: 'VideoPlay' } },
   { path: '/maps', name: 'maps', component: MapsView, meta: { titleKey: 'nav.maps', icon: 'Files' } },
   { path: '/navigation', name: 'navigation', component: NavigationView, meta: { titleKey: 'nav.navigation', icon: 'Position' } },
   { path: '/evaluation', name: 'evaluation', component: EvaluationView, meta: { titleKey: 'nav.evaluation', icon: 'DataAnalysis' } },

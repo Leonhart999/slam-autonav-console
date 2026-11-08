@@ -99,6 +99,7 @@ class Stack:
         self.before_stop = spec.get('before_stop')
         self.stop_timeout = float(spec.get('stop_timeout', 10))   # s to wait after SIGINT before SIGTERM
         self.stop_on_estop = bool(spec.get('stop_on_estop', False))
+        self.page_only = bool(spec.get('page_only', False))   # started only by its page (e.g. bag playback)
         self.proc = None
         self.started_at = None      # 本机时间戳（秒）
         self.exit_code = None
@@ -129,6 +130,7 @@ class Stack:
             'exit_code': self.exit_code if st == 'exited' else None,
             'messages': list(self.messages),
             'last_stop': dict(self.last_stop) if self.last_stop else None,
+            'page_only': self.page_only,
         }
 
 

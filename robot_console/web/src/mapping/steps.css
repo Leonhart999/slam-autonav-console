@@ -1,0 +1,171 @@
+/* Step cards of the right-hand panel, shared by the mapping and playback pages
+   (<style scoped src="../mapping/steps.css"> in each component that renders steps) */
+/* ---------------- 操作区 ---------------- */
+.ops {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--radius);
+  overflow: auto;
+}
+.step {
+  position: relative;
+  padding: 12px 14px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.45);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  transition: background 0.25s, box-shadow 0.25s;
+}
+.step.current {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(8, 145, 178, 0.3), 0 8px 22px -14px rgba(8, 145, 178, 0.8);
+}
+.step.current::before {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 14px;
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent-grad);
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.8);
+}
+.step.locked .step-head .title,
+.step.locked .field {
+  opacity: 0.6;
+}
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.no {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent-grad);
+}
+.step.locked .no {
+  background: var(--idle);
+}
+.title {
+  font-weight: 600;
+  font-size: 14px;
+}
+.step-head .chip {
+  margin-left: auto;
+}
+.field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.algos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* 标签在上、内容在下（英文较长时不会挤成两行） */
+.field.stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.algo {
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--ink-2);
+  background: var(--hairline);
+  cursor: pointer;
+}
+.algo:disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.algo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.algo.on {
+  color: var(--accent);
+  font-weight: 600;
+  background: rgba(8, 145, 178, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(8, 145, 178, 0.25);
+}
+.note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+.note.soon {
+  margin: 0;
+}
+.wide {
+  width: 100%;
+}
+.k {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.note.bad,
+.bad {
+  color: var(--bad);
+}
+/* Segmented buttons inside a step (move mode on the mapping page) */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.seg button {
+  height: 26px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.seg button.on {
+  color: var(--accent);
+  font-weight: 600;
+  background: #fff;
+  box-shadow: 0 2px 8px -3px rgba(20, 60, 120, 0.3);
+}
+.seg button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.seg button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.seg.full {
+  display: flex;
+  margin-bottom: 10px;
+}
+.seg.full button {
+  flex: 1;
+}

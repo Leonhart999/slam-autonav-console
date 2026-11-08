@@ -9,8 +9,10 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api, fetchAsset } from '@/api'
 import { errorText } from '@/messages'
+import { pick as pickText } from '@/i18n'
 import { useStatusStore } from '@/stores/status'
 import type {
+  MappingPreset,
   CostmapLayer, MapTool, NavGoalState, NavMap, NavMission, NavSolid, NavStatus, PickedPose, StackState, WaypointMark,
 } from '@/types'
 import NavGrid2D from '@/components/NavGrid2D.vue'
@@ -18,6 +20,7 @@ import NavScene3D from '@/components/NavScene3D.vue'
 import NavigationImportDialog from '@/components/NavigationImportDialog.vue'
 import InfoTip from '@/components/InfoTip.vue'
 import WaypointPanel from '@/components/WaypointPanel.vue'
+import MapScenePanel from '@/components/MapScenePanel.vue'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
 
@@ -106,6 +109,7 @@ async function poll() {
 
 onMounted(() => {
   loadMaps()
+  loadPresets()
   loadVariants()
   poll()
 })
@@ -118,6 +122,7 @@ watch(
   (c) => {
     if (c) {
       loadMaps()
+      loadPresets()
       loadVariants()
     }
   },
@@ -205,6 +210,24 @@ const simState = computed<StackState>(() => simInfo.value?.state ?? 'idle')
 const simJob = computed(() => simInfo.value?.job ?? 'idle')
 const simBusy = ref(false)
 const mapScene = computed(() => effectiveMap.value?.preset ?? null)
+// Scene labels from the presets (a scene generated from a map is named after the map, which is long: it is shown
+// as a short "generated from the map" label, the full name stays in the tooltip)
+const presetList = ref<MappingPreset[]>([])
+async function loadPresets() {
+  try {
+    presetList.value = await api.mappingPresets()
+  } catch {
+    // keep the raw names
+  }
+}
+function sceneLabel(name: string | null | undefined): string {
+  if (!name) return '—'
+  const m = effectiveMap.value
+  if (m?.scene_source === 'generated' && m.preset === name) return t('navigation.mapScene.short.generated')
+  const p = presetList.value.find((x) => x.name === name)
+  return p ? pickText(p.label) : name
+}
+const simSceneName = computed(() => (simState.value === 'running' ? nav.value?.sim_preset : mapScene.value) ?? null)
 // Simulation started from another page: the robot may have left its spawn point
 const simForeign = computed(() => simState.value === 'running' && simInfo.value?.origin !== 'navigation')
 const simSwitchBlock = computed(() => {
@@ -629,8 +652,10 @@ onBeforeUnmount(() => {
           <dd>{{ sizeText }}</dd>
           <dt>{{ t('navigation.facts.resolution') }}</dt>
           <dd>{{ effectiveMap.grid.resolution }} m</dd>
-          <dt>{{ t('navigation.facts.scene') }}</dt>
-          <dd>{{ effectiveMap.preset ?? t('navigation.facts.unknown') }}</dd>
+          <dt>{{ effectiveMap.scene_source ? t('navigation.facts.simScene') : t('navigation.facts.scene') }}</dt>
+          <dd :title="effectiveMap.preset ?? ''">
+            {{ effectiveMap.preset ? sceneLabel(effectiveMap.preset) : t('navigation.facts.unknown') }}
+          </dd>
           <dt>{{ t('navigation.facts.cloud') }}</dt>
           <dd>{{ cloud ? (cloud.length / 3).toLocaleString() : effectiveMap.has_cloud ? '…' : '—' }}</dd>
         </dl>
@@ -646,12 +671,19 @@ onBeforeUnmount(() => {
         </h3>
         <dl class="facts sim-facts">
           <dt>{{ t('navigation.sim.scene') }}</dt>
-          <dd>{{ (simState === 'running' ? nav?.sim_preset : mapScene) ?? '—' }}</dd>
+          <dd :title="simSceneName ?? ''">{{ sceneLabel(simSceneName) }}</dd>
           <template v-if="simState === 'running' && simInfo?.origin">
             <dt>{{ t('navigation.sim.startedBy') }}</dt>
             <dd>{{ t(`navigation.sim.origin.${simInfo.origin}`) }}</dd>
           </template>
         </dl>
+        <!-- Maps without a recorded scene (bag playback, imports): link a scene or generate one from the grid -->
+        <MapScenePanel
+          v-if="effectiveMap"
+          :map="effectiveMap"
+          :disabled="active || busy || simBusy || !store.connected"
+          @changed="loadMaps(); loadPresets()"
+        />
         <el-button
           class="wide"
           :type="simOn ? 'danger' : 'primary'"
@@ -1134,10 +1166,15 @@ h3 {
 }
 .facts dt {
   color: var(--ink-3);
+  white-space: nowrap;
 }
 .facts dd {
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
   text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 .kv {

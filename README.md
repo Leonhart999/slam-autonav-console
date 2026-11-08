@@ -21,8 +21,9 @@ mission in the warehouse, the monitor and evaluation pages. Captions in Chinese 
 | Page | What it does |
 |---|---|
 | **Mapping** | Start a world (office, warehouse, or your own uploaded SDF / ZIP), run FAST-LIO2 or GLIM, watch the voxel map grow in a 3D view, drive with an on-screen joystick / WASD or a waypoint route, save the map |
+| **Playback** | Play a rosbag2 bag (or a chosen part of it, 0.5–8x) into FAST-LIO2, GLIM or GLIM (LiDAR only) and save the map like a live run; upload bags from the browser, delete them to a trash. `robot_console/tools/pcd_frames_to_bag.py` turns per-frame PCD exports into a bag |
 | **Maps** | Browse saved maps (3D point cloud + 2D grid side by side), regenerate the 2D grid from the cloud with other parameters, edit the grid with a brush, import maps, trash and restore |
-| **Navigation** | Load a map, start the simulation and Nav2, set the initial pose and goals on the map, run multi-waypoint missions, overlay global / local costmaps, change the speed factor, switch between point cloud and solid world model |
+| **Navigation** | Load a map, start the simulation and Nav2, set the initial pose and goals on the map, run multi-waypoint missions, overlay global / local costmaps, change the speed factor, switch between point cloud and solid world model. A map built from a bag gets a simulation world either by linking the world the bag was recorded in or by generating one from its own occupancy grid |
 | **Evaluation** | ATE / RPE of mapping runs with evo, navigation metrics (success rate, time, path length, goal error, AMCL error, clearance), comparisons, repeated batch experiments with mean ± std, CSV / PNG export |
 | **Monitor** | Processes started from the console, topic rates against expected rates, TF chain, node list, how each process was stopped |
 
@@ -97,9 +98,11 @@ under `~/robot_console_data` by default.
 
 ## Limitations
 
-- Simulation only: the Mapping and Navigation pages expect a running Gazebo world with ground truth.
-  A real robot would need its own stacks and topic configuration.
-- No rosbag playback or offline trajectory import yet.
+- Simulation first: navigation runs closed-loop in Gazebo, and driving a real robot would need its own
+  stacks and topic configuration. Real-robot data can be mapped from a bag on the Playback page (sqlite3
+  storage; MCAP needs `ros-humble-rosbag2-storage-mcap`) and navigated in a world generated from the map,
+  where the simulated lidar sees ideal walls.
+- No offline trajectory import yet.
 - Tested on Ubuntu 22.04 + ROS 2 Humble (x86_64) only.
 - Saving a map with GLIM stops the GLIM run, because GLIM writes its optimized map on exit.
 

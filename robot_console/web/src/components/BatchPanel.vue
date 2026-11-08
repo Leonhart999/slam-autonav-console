@@ -27,7 +27,7 @@ const { t, te } = useI18n({ messages: {
     start: '开始批量', cancel: '取消批量', confirmCancel: '取消正在进行的批量实验？当前这一次会被中止，已完成的记录保留。',
     yes: '确认', no: '返回',
     progress: '第 {i}/{n} 次', elapsed: '总用时 {t}', runElapsed: '本次 {t}', waypoints: '航点 {done}/{total}',
-    timeout: '单次超时 {m} 分钟',
+    timeout: '单次运行超过 {m} 分钟记为失败，批量继续下一次。',
     phase: {
       starting: '准备', start_sim: '启动仿真', wait_sim: '等待仿真时钟和真值', start_slam: '启动 SLAM',
       wait_slam: '等待 SLAM 初始化', drive: '自动航点行驶中', save_map: '保存地图', stopping: '停止进程',
@@ -63,7 +63,7 @@ const { t, te } = useI18n({ messages: {
     start: 'Start batch', cancel: 'Cancel batch', confirmCancel: 'Cancel the running batch? The current run is aborted; finished runs are kept.',
     yes: 'Confirm', no: 'Back',
     progress: 'Run {i}/{n}', elapsed: 'total {t}', runElapsed: 'this run {t}', waypoints: 'waypoints {done}/{total}',
-    timeout: 'per-run timeout {m} min',
+    timeout: 'A run that takes longer than {m} min is recorded as failed and the batch goes on.',
     phase: {
       starting: 'Preparing', start_sim: 'Starting simulation', wait_sim: 'Waiting for sim clock and ground truth',
       start_slam: 'Starting SLAM', wait_slam: 'Waiting for SLAM to initialize', drive: 'Driving the waypoints',
@@ -247,13 +247,17 @@ watch([history, () => live.value.state], () => {
   if (!viewing.value && live.value.state === 'idle' && history.value.length) viewing.value = history.value[0].id
 })
 
+// What a batch does and the per-run timeout: in the title's "i" instead of a paragraph above the form
+const panelTip = computed(() => options.value
+  ? `${t('batch.hint')} ${t('batch.timeout', { m: Math.round(options.value.run_timeout / 60) })}`
+  : t('batch.hint'))
+
 const runElapsed = computed(() =>
   live.value.run_started ? fmtDuration(Date.now() / 1000 - live.value.run_started) : '—')
 </script>
 
 <template>
-  <GlassPanel :title="t('batch.title')">
-    <p class="hint">{{ t('batch.hint') }}</p>
+  <GlassPanel :title="t('batch.title')" :tip="panelTip">
     <div class="form">
       <label>{{ t('batch.scene') }}
         <el-select v-model="form.preset" size="small" class="sel" :disabled="running">
@@ -275,7 +279,6 @@ const runElapsed = computed(() =>
       </label>
       <label class="sw">{{ t('batch.saveMaps') }} <el-switch v-model="form.save_maps" size="small" :disabled="running" /></label>
       <span class="spacer" />
-      <span v-if="options" class="dim">{{ t('batch.timeout', { m: Math.round(options.run_timeout / 60) }) }}</span>
       <el-popconfirm v-if="running" :title="t('batch.confirmCancel')" :confirm-button-text="t('batch.yes')"
         :cancel-button-text="t('batch.no')" width="280" @confirm="cancel">
         <template #reference><el-button size="small" type="danger">{{ t('batch.cancel') }}</el-button></template>
@@ -287,8 +290,7 @@ const runElapsed = computed(() =>
 
     <!-- Batch list: click = show below, tick = compare in the page's comparison panel -->
     <template v-if="history.length">
-      <h4 class="sub">{{ picked.length ? `${t('batch.cmp.title')} · ${picked.length}` : t('batch.cmp.title') }}</h4>
-      <p class="hint">{{ t('batch.cmp.hint') }}</p>
+      <h4 class="sub">{{ picked.length ? `${t('batch.cmp.title')} · ${picked.length}` : t('batch.cmp.title') }}<InfoTip :content="t('batch.cmp.hint')" /></h4>
       <el-table :data="history" size="small" max-height="220" class="batch-list" :row-key="(b: BatchHistoryEntry) => b.id"
         :row-class-name="({ row }: { row: BatchHistoryEntry }) => (row.id === shownId ? 'is-selected' : '')"
         @selection-change="onPick" @row-click="showBatch">
@@ -321,7 +323,11 @@ const runElapsed = computed(() =>
           </template>
         </el-table-column>
         <el-table-column :label="t('batch.col.result')" width="96">
-          <template #default="{ row }"><span class="chip" :class="STATE_CHIP[row.state as BatchStatus['state']]">{{ t(`batch.state.${row.state}`) }}</span></template>
+          <template #default="{ row }">
+            <!-- Normal outcomes are plain text, only the ones that need attention get a colored chip -->
+            <span v-if="row.state === 'finished'" class="state-ok">{{ t('batch.state.finished') }}</span>
+            <span v-else class="chip" :class="STATE_CHIP[row.state as BatchStatus['state']]">{{ t(`batch.state.${row.state}`) }}</span>
+          </template>
         </el-table-column>
       </el-table>
     </template>
@@ -374,7 +380,8 @@ const runElapsed = computed(() =>
         <el-table-column :label="t('batch.col.result')" min-width="130">
           <template #default="{ row }">
             <span v-if="!row.ended" class="chip primary live">{{ t('batch.state.running') }}</span>
-            <span v-else class="chip" :class="row.ok ? 'success' : 'danger'">{{ failText(row) }}</span>
+            <span v-else-if="row.ok" class="state-ok">{{ failText(row) }}</span>
+            <span v-else class="chip danger">{{ failText(row) }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('batch.col.ate')" width="100" align="right">
@@ -415,7 +422,8 @@ const runElapsed = computed(() =>
           <el-table-column :label="t('batch.max')" width="100" align="right">
             <template #default="{ row }"><span class="mono">{{ fmtStat(row.key, row.v?.max) }}</span></template>
           </el-table-column>
-          <el-table-column label="n" width="60" align="right">
+          <!-- n only when some metric is missing for some runs (otherwise it repeats the count in the heading) -->
+          <el-table-column v-if="statRows.some((r) => (r.v?.n ?? 0) !== view?.summary?.succeeded)" label="n" width="60" align="right">
             <template #default="{ row }"><span class="mono">{{ row.v?.n ?? 0 }}</span></template>
           </el-table-column>
         </el-table>
@@ -447,6 +455,8 @@ const runElapsed = computed(() =>
 .export { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 12.5px; }
 .export code { word-break: break-all; }
 :deep(.el-table__row) { cursor: pointer; }
+.state-ok { font-size: 12px; color: var(--ink-3); }
+.state-ok::before { content: '✓ '; color: var(--ok); font-weight: 700; }
 :deep(.el-table__row.is-selected > td) { background: rgba(8, 145, 178, 0.06); }
 .swatch { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 2px; vertical-align: 1px; }
 </style>

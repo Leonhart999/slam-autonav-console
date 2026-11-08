@@ -1,0 +1,23 @@
+{
+  /*** Sensor configurations (LiDAR only, bag playback) ***
+    - T_lidar_imu identity: there is no IMU, so GLIM's "IMU" frame is the frame of the point cloud and the
+      exported trajectories (traj_imu.txt = traj_lidar.txt) are poses of that frame
+    - ring_field "ring", per-point times auto-detected (fields t / time / time_stamp / timestamp, relative to
+      the message stamp); clouds without per-point times are used without deskewing
+    - IMU noise values are unused
+  */
+  "sensors": {
+    "imu_acc_noise": 0.05,
+    "imu_gyro_noise": 0.02,
+    "imu_int_noise": 0.001,
+    "imu_bias_noise": 1e-5,
+    "global_shutter_lidar": false,
+    "T_lidar_imu": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+    "intensity_field": "intensity",
+    "ring_field": "ring",
+    "autoconf_perpoint_times": true,
+    "autoconf_prefer_frame_time": false,
+    "perpoint_relative_time": true,
+    "perpoint_time_scale": 1.0
+  }
+}

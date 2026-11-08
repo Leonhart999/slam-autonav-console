@@ -44,11 +44,13 @@ export interface StackInfo {
   cmd: string
   state: StackState
   preset: string | null // 最近一次启动时用的场景预设（建图页）
-  origin?: 'mapping' | 'navigation' | 'monitor' | null
+  origin?: 'mapping' | 'navigation' | 'playback' | 'monitor' | null
   started_at: number | null
   uptime: number | null
   exit_code: number | null
   messages: CodedMsg[]
+  /** Started only by its own page (e.g. bag playback from the mapping page), not from the monitor page */
+  page_only?: boolean
 }
 
 /** 建图场景预设（config/mapping_presets.yaml） */
@@ -92,7 +94,23 @@ export interface NavMap {
   has_cloud: boolean
   has_solid: boolean
   preset: string | null
+  /** how preset was set when not recorded while mapping: bound to an existing scene, or generated from the grid */
+  scene_source?: 'bound' | 'generated' | null
+  from_bag?: boolean
   grid: { resolution: number; width: number; height: number; origin: [number, number, number] }
+}
+
+/** Scene of a map for the navigation simulation (GET /api/navigation/maps/{name}/scene, map_scene.py) */
+export interface MapSceneInfo {
+  name: string
+  preset: string | null
+  scene_source: 'bound' | 'generated' | null
+  source: 'bag' | 'sim' | null
+  bag: string | null
+  preset_ok: boolean
+  suggested: string | null
+  has_gt: boolean
+  generated?: { boxes: number; cell: number; height: number }
 }
 
 export interface NavPose {
@@ -236,5 +254,5 @@ export interface StatusMsg {
   stacks: StackInfo[]
   resources: { cpu: number; mem: number }
   /** Data folders of this console, for display (home written as ~); missing with an older backend */
-  paths?: { maps: string; runs: string }
+  paths?: { maps: string; runs: string; results?: string }
 }

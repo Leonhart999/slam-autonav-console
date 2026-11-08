@@ -1,0 +1,27 @@
+{
+  /*** GLIM without IMU, for bag playback (robot_console stack mapping_glim_lidar) ***
+  For recorded bags that have point clouds but no IMU (e.g. a real robot dataset exported as lidar frames).
+  Starts from sim_robot/config/glim (the GLIM 1.2.2 defaults with tuning for sparse lidars). Changes:
+    - odometry: CT-GICP (config_odometry_ct.json, continuous-time ICP, no IMU) instead of the IMU-based VGICP
+      odometry; ivox_resolution 0.5 (indoor scale)
+    - enable_imu false in sub and global mapping
+    - config_ros.json: points on /playback/points (bag playback remaps the bag's cloud topic there)
+    - config_sensors.json: T_lidar_imu identity (no IMU; the trajectory is the pose of the cloud's frame)
+    - config_preprocess.json: near range 1.0 m (drops the robot body), k_correspondences 20
+    - config_sub_mapping_cpu.json: DISPLACEMENT keyframes. With OVERLAP and no IMU a 120 s, 55 m corridor run
+      stayed in one submap (no loop closure possible); DISPLACEMENT gave 4 submaps.
+  Checked offline on a 120 s indoor real-robot recording (two 96-line lidars merged, 10 Hz): consistent map,
+  about 0.9 m z drift over 55 m (no ground truth).
+  */
+  "global": {
+    "config_path": "",
+    "config_ros": "config_ros.json",
+    "config_logging": "config_logging.json",
+    "config_viewer": "config_viewer.json",
+    "config_sensors": "config_sensors.json",
+    "config_preprocess": "config_preprocess.json",
+    "config_odometry": "config_odometry_ct.json",
+    "config_sub_mapping": "config_sub_mapping_cpu.json",
+    "config_global_mapping": "config_global_mapping_cpu.json"
+  }
+}

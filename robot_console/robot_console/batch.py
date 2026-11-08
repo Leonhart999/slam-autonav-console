@@ -75,7 +75,8 @@ class BatchRunner:
         self.gt_topic = cfg['mapping'].get('gt_topic') or '/ground_truth'
         self.runs_dir = Path(os.path.expanduser(cfg['mapping'].get('runs_dir', '~/runs')))
         # Everything that must be idle before a batch starts (a running sim/SLAM/Nav2 would be clobbered)
-        self.guard = sorted({n for n in (self.sim, 'sim_gui', self.waypoints, 'navigation', *self.slam_stacks)
+        self.guard = sorted({n for n in (self.sim, 'sim_gui', self.waypoints, 'navigation', *self.slam_stacks,
+                                         (cfg.get('playback') or {}).get('stack', 'playback'))
                              if n and procs.get(n)})
         self.lock = threading.Lock()
         self.abort_evt = threading.Event()

@@ -9,6 +9,7 @@ import { fmtDuration } from '@/format'
 import { pick } from '@/i18n'
 import { errorText } from '@/messages'
 import { useStatusStore } from '@/stores/status'
+import { openFolder } from '@/openFolder'
 import type { MappingPreset, NavMap } from '@/types'
 import { fmtBytes, mapsApi, type IssueLevel, type MapDetail, type MapEntry } from '@/maps/api'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -284,6 +285,9 @@ function fileRole(role: string | null) {
         <el-button size="small" @click="importOpen=true">{{ t('management.import') }}</el-button>
         <el-button size="small" @click="openTrash">{{ t('management.trash') }}</el-button>
         <span class="count">{{ t('mapsPage.count', { n: maps.length }) }}</span>
+        <el-button size="small" circle :title="t('openFolder.maps')" :aria-label="t('openFolder.maps')" @click="openFolder(store.paths.maps)">
+          <el-icon><FolderOpened /></el-icon>
+        </el-button>
         <el-button size="small" circle :title="t('mapsPage.refresh')" :loading="loadingList" @click="loadList">
           <el-icon><Refresh /></el-icon>
         </el-button>
@@ -322,7 +326,7 @@ function fileRole(role: string | null) {
         <el-table-column :label="t('mapsPage.col.resolution')" width="90" align="right">
           <template #default="{ row }"><span class="num">{{ row.grid ? `${row.grid.resolution} m` : '—' }}</span></template>
         </el-table-column>
-        <el-table-column :label="t('mapsPage.col.extent')" width="125" align="right">
+        <el-table-column :label="t('mapsPage.col.extent')" width="140" align="right">
           <template #default="{ row }"><span class="num">{{ gridText(row) }}</span></template>
         </el-table-column>
         <el-table-column :label="t('mapsPage.col.state')" min-width="112">
@@ -488,6 +492,9 @@ function fileRole(role: string | null) {
         <GlassPanel :title="t('mapsPage.files')" flush>
           <template #extra>
             <span class="count">{{ fmtBytes(detail.total_size) }}</span>
+            <el-button size="small" @click="openFolder(detail.location)">
+              <el-icon><FolderOpened /></el-icon><span>{{ t('openFolder.button') }}</span>
+            </el-button>
           </template>
           <div class="paths">
             <div class="path-row">
@@ -523,6 +530,17 @@ function fileRole(role: string | null) {
             </el-table-column>
             <el-table-column :label="t('mapsPage.col.size')" width="90" align="right">
               <template #default="{ row }"><span class="num">{{ fmtBytes(row.size) }}</span></template>
+            </el-table-column>
+            <!-- figures/, data/: open the sub-folder directly -->
+            <el-table-column width="44" align="center">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.dir" size="small" text circle :title="t('openFolder.sub', { name: row.name })"
+                  :aria-label="t('openFolder.sub', { name: row.name })" @click="openFolder(`${detail.location}/${row.name}`)"
+                >
+                  <el-icon><FolderOpened /></el-icon>
+                </el-button>
+              </template>
             </el-table-column>
           </el-table>
         </GlassPanel>

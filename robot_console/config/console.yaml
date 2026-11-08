@@ -56,6 +56,8 @@ mapping:
       frame: camera_init         # FAST-LIO 的世界坐标系（= 开始建图时的车体位置）
       scan_topic: /cloud_registered
       odom_topic: /Odometry
+      inputs: {points: /points_fastlio, imu: /imu}   # 回放数据包时送进 SLAM 的话题（名字不同时自动重映射）
+      sources: [sim, bag]        # 仿真和数据包回放都能用
       save:
         service: /map_save
         pcd_path: ~/results/fastlio_map.pcd  # 必须和 FAST-LIO 配置里的 map_file_path 一致（FAST-LIO 不展开 ~，安装脚本会写成绝对路径）
@@ -65,8 +67,19 @@ mapping:
       frame: glim_odom           # GLIM 里程计坐标系（= 开始建图时的 IMU 位置，z 轴对齐重力）
       scan_topic: /glim_ros/aligned_points
       odom_topic: /glim_ros/odom
+      inputs: {points: /points_fastlio, imu: /imu}
+      sources: [sim, bag]
       save:
         dump_dir: ${data_root}/slam/glim_dump   # 和 stacks.yaml 里 mapping_glim 的 dump_path 一致
+    mapping_glim_lidar:
+      algorithm: GLIM (LiDAR only)
+      frame: glim_odom
+      scan_topic: /glim_ros/aligned_points
+      odom_topic: /glim_ros/odom
+      inputs: {points: /playback/points}   # 不需要 IMU：给只录了点云的实物数据包用
+      sources: [bag]
+      save:
+        dump_dir: ${data_root}/slam/glim_lidar_dump   # 和 stacks.yaml 里 mapping_glim_lidar 的 dump_path 一致
   gt_topic: /ground_truth      # 仿真真值，用来显示实时位置误差；实物时删掉或留空
   voxel: 0.10                  # 地图体素边长（m）
   scan_voxel: 0.05             # 当前帧显示时的体素（m）
@@ -82,6 +95,19 @@ mapping:
   maps_dir: ${data_root}/maps
   scenes_dir: ${data_root}/scenes  # 自行上传的 Gazebo 场景，重启控制台后仍可选用
   runs_dir: ${data_root}/runs  # 运行记录：每次建图的估计轨迹、真值轨迹和概况
+
+# 数据包回放（数据回放页）：用录好的 rosbag2 代替仿真，送进 SLAM 建图（robot_console/playback.py、bag_files.py）
+#   bag_dirs  在这些目录下（最多 4 层）找含 metadata.yaml 的数据包文件夹；网页只能播放这里找到的包
+#   rates     网页上可选的回放倍速
+#   upload_dir   网页上传的数据包放在这里（默认 bag_dirs 第一项下的 uploads/）
+#   space_check  上传前还要检查这些路径的剩余空间。WSL 里 Linux 盘报的是虚拟磁盘的空间（约 1 TB），
+#                不是虚拟磁盘文件所在的 Windows 盘；这时写上那个 Windows 盘在 WSL 里的挂载点
+playback:
+  stack: playback              # stacks.yaml 里的播放进程（ros2 bag play）
+  bag_dirs: ['${data_root}/bags']
+  rates: [0.5, 1, 2, 4, 8]
+  upload_dir: ''
+  space_check: []
 
 # Evaluation page (step 5a): evo APE/RPE per run, cached as <run>/eval.json
 evaluation:

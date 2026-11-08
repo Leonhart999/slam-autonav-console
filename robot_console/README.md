@@ -6,7 +6,9 @@ navigate with Nav2 and evaluate the runs with evo. The console is a ROS 2 packag
 frontend. The backend starts simulation, SLAM and navigation as separate processes from a fixed whitelist
 (`config/stacks.yaml`).
 
-The system runs in simulation only. Real hardware would need different topics, stacks and configuration.
+The system runs in simulation. Recorded rosbag2 data (from the simulation or a real robot) can be played
+into a SLAM on the Playback page (see Bag playback); driving a real robot would need different topics, stacks
+and configuration.
 
 ## Requirements
 
@@ -138,6 +140,9 @@ Strings in the configuration may use `~`, `${data_root}` (the value of `paths.da
 | `evaluation.results_dir` | `${data_root}/results` | CSV and PNG exports of the evaluation page |
 | `mapping.slam_profiles.*.save.pcd_path` | `~/results/fastlio_map.pcd` | must match FAST-LIO `map_file_path` |
 | `mapping.gt_topic` | `/ground_truth` | simulation ground truth; leave empty without one |
+| `playback.bag_dirs` | `[${data_root}/bags]` | folders searched for rosbag2 bags (Playback page) |
+| `playback.upload_dir` | `<first bag_dirs>/uploads` | where bags uploaded from the page go |
+| `playback.space_check` | `[]` | extra paths whose free space an upload must fit in. Under WSL the Linux disk reports the free space of its virtual disk, not of the Windows drive holding the disk image: list that drive's mount point |
 | `navigation.default_map` | `~/maps/office_fastlio.yaml` | map `lidar_nav/nav.launch.py` loads without `map:=` |
 | `teleop.max_v`, `teleop.max_w` | 5.0, 1.2 | hard speed limits for manual driving |
 
@@ -147,6 +152,56 @@ built with `--symlink-install`. The override file needs only a console restart.
 Use one console per machine and ROS domain. Starting a second console on the same port is refused, because
 on startup the console stops processes left over from its previous run on that port. For tests, run a
 second console on another port and another `ROS_DOMAIN_ID` (see `install/check.sh`).
+
+## Bag playback
+
+The Playback page (menu item 02, between Mapping and Maps) builds maps from recorded bags. It lists every
+rosbag2 folder (a folder with `metadata.yaml`, up to four levels deep) under `playback.bag_dirs`. Then:
+
+1. choose a bag; the card shows its length, size and whether it has a point cloud, IMU and ground truth.
+   **Upload a bag** picks a rosbag2 folder on this computer (metadata.yaml and the .db3 / .mcap files it
+   lists) and sends it file by file into `playback.upload_dir`; the console first checks the free space of
+   that disk and of every path in `playback.space_check`. The bin icon on a card moves the bag to the
+   `.trash` folder of its bag folder; it keeps its disk space until **Empty the trash** (above the list)
+   deletes it for good;
+2. start a SLAM. Only algorithms whose inputs the bag has are offered: FAST-LIO2 and GLIM need an IMU,
+   **GLIM (LiDAR only)** (`config/glim_lidar_only`, CT-GICP odometry) needs only a point cloud;
+3. choose the part of the bag on the timeline (default: all of it), then play it at 0.5× to 8×, pause,
+   change the rate, stop. The start is `--start-offset`; the console stops the player at the end of the part.
+   There is no jumping during a playback, because a jump inside one SLAM run breaks the SLAM. Starting in the
+   middle of a drive gives IMU-based SLAMs a worse initialization (FAST-LIO2 on `office_loop_04`, part
+   20–80 s: ATE 0.044 m against about 0.035 m for the whole bag);
+4. save the map as usual. `run.json` and `meta.json` record `source: bag`, the bag path, rate and part.
+
+The simulation and a playback cannot run at the same time (both publish `/clock` and the SLAM inputs); each
+page says so and links to the other.
+
+What gets played: the SLAM's input topics (`mapping.slam_profiles.<name>.inputs`). A bag topic with the
+input's name is used as is; otherwise the bag's busiest topic of that type is remapped onto it. A bag with
+`/clock` (recorded from the simulation) plays its clock; other bags get `--clock 100`. If the bag has the
+ground truth topic, it is played too and the Evaluation page can compute ATE for the run.
+
+Each SLAM run takes one playback. To play again, restart the SLAM: otherwise the bag time jumps back and
+the SLAM mixes both passes. The page shows when the SLAM falls behind the playback and drops scans; save only after it has caught up,
+or the end of the map is missing.
+
+The simulation bags in `~/bags/sim` (recorded by the thesis scripts) play straight into FAST-LIO2 and GLIM.
+Measured on this machine (12 cores):
+
+| SLAM, bag | 1× | 4× | 8× |
+|---|---|---|---|
+| FAST-LIO2, `office_loop_04` (110 s, 16-line sim lidar) | ATE 0.034 m, 1068 poses | 0.035 m, 1060 | 0.031 m, 1066; player reaches 7.4×, no lag |
+| GLIM (LiDAR only), HEU61 120 s (two 96-line lidars) | 1125 frames, 55.6 m | 1052 frames, 55.1 m | 854 frames (24 % dropped), 54.7 m; up to 37 s behind, caught up 7 s after the bag |
+
+8× suits sparse clouds such as the simulation bags; for dense real-robot clouds use 1× or 2× when every
+scan matters. For a bag from another robot, the SLAM configs
+(extrinsics, lidar type, blind distance) are still the simulated robot's; only GLIM (LiDAR only) has no
+robot-specific extrinsic.
+
+`tools/pcd_frames_to_bag.py` converts a dataset exported as per-frame PCD files (`frames.csv` +
+`calibration_results.yaml`, two lidars) into such a bag: NaN points dropped, both lidars merged into
+`base_link`, per-point time kept. It writes about 26 MB per second of recording; convert a time window first
+(`--start`, `--duration`).
 
 ## Notes on the simulation
 

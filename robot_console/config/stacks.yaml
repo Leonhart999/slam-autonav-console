@@ -5,6 +5,7 @@
 #   before_stop  停止前先调用的服务（例如让 FAST-LIO 存图），超时后照常停止
 #   stop_timeout 发 SIGINT 后最多等多少秒再发 SIGTERM（默认 10；GLIM 退出时要做全局优化并写地图，给得长一些）
 #   stop_on_estop  按急停时是否一起停掉（会自己发 /cmd_vel 的进程要设 true）
+#   page_only    只能由专门的页面启动（参数由页面给出，例如回放哪个数据包），监控页和 /api/stacks 不能直接启动
 
 sim:
   label: {zh: 仿真, en: Simulation}
@@ -41,6 +42,25 @@ mapping_glim:
         -p, 'dump_path:=${data_root}/slam/glim_dump',
         -p, use_sim_time:=true]
   stop_timeout: 90
+
+mapping_glim_lidar:
+  label: {zh: 建图 GLIM（仅激光）, en: 'Mapping (GLIM, LiDAR only)'}
+  description:
+    zh: GLIM 的 CT-GICP 里程计 + 全局因子图，不用 IMU，只能用于数据包回放（点云话题 /playback/points）。退出时把地图和轨迹写到 <data_root>/slam/glim_lidar_dump
+    en: GLIM CT-GICP odometry + global factor graph without IMU, for bag playback only (point cloud on /playback/points). Writes the map and trajectory to <data_root>/slam/glim_lidar_dump on exit
+  cmd: [ros2, run, glim_ros, glim_rosnode, --ros-args,
+        -p, 'config_path:=${pkg:robot_console}/config/glim_lidar_only',
+        -p, 'dump_path:=${data_root}/slam/glim_lidar_dump',
+        -p, use_sim_time:=true]
+  stop_timeout: 90
+
+playback:
+  label: {zh: 数据包回放, en: Bag playback}
+  description:
+    zh: ros2 bag play。数据包、倍速和话题由建图页选择，不能在这里直接启动
+    en: ros2 bag play. The mapping page picks the bag, rate and topics; it cannot be started from here
+  cmd: [ros2, bag, play]
+  page_only: true
 
 waypoints:
   label: {zh: 自动航点, en: Auto waypoints}

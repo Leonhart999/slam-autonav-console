@@ -27,6 +27,10 @@ from .evaluation import register_evaluation_routes
 from .batch import register_batch_routes
 from .run_trash import register_run_trash_routes
 from .map_edit import register_map_edit_routes
+from .playback import register_playback_routes
+from .bag_files import register_bag_file_routes
+from .open_folder import register_open_folder_routes
+from .map_scene import register_map_scene_routes
 
 STREAMS = {'mapping'}       # 网页可以订阅的数据流；不订阅就不发（监控页不需要点云）
 STREAM_PERIOD = 0.2         # 订阅的数据流多久推送一次（s）
@@ -34,7 +38,18 @@ WAYPOINT_RE = re.compile(r'到达航点 (\d+)/(\d+)')
 TOTAL_RE = re.compile(r'共 (\d+) 个航点')
 
 
-def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata):
+class WebFiles(StaticFiles):
+    """Built web page. index.html must be revalidated on every load: it names the hashed JS/CSS bundles, and a
+    cached copy kept the old page (without new panels) after the console was updated and restarted."""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.media_type == 'text/html' or response.headers.get('content-type', '').startswith('text/html'):
+            response.headers['Cache-Control'] = 'no-cache'
+        return response
+
+
+def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback):
     app = FastAPI(title='robot_console')
     period = 1.0 / float(cfg['server'].get('status_rate', 2.0))
     psutil.cpu_percent()            # 第一次调用只是开始计时，返回值无意义
@@ -44,7 +59,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata):
         home = os.path.expanduser('~')
         return '~' + path[len(home):] if path == home or path.startswith(home + '/') else path
     # Data folders shown on the pages (they come from the configuration, so the page must not hard-code them)
-    paths_shown = {'maps': shown(cfg['mapping']['maps_dir']), 'runs': shown(cfg['mapping']['runs_dir'])}
+    paths_shown = {'maps': shown(cfg['mapping']['maps_dir']), 'runs': shown(cfg['mapping']['runs_dir']),
+                   'results': shown(cfg['evaluation']['results_dir'])}
 
     def status():
         snap = node.snapshot()
@@ -76,6 +92,9 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata):
     batch = register_batch_routes(app, cfg, node, procs, mapping, library, evaluation)
     register_run_trash_routes(app, cfg, mapping, batch)
     register_map_edit_routes(app, cfg)
+    register_playback_routes(app, playback, procs)
+    register_bag_file_routes(app, cfg, playback)
+    register_open_folder_routes(app, cfg)
     sim_name = mapping.stacks.get('sim')
 
     def preset_args(name, preset):
@@ -133,11 +152,16 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata):
 
     @app.post('/api/stacks/{name}/start')
     def start_stack(name: str, preset: str | None = None, origin: str | None = None):
-        stack_or_404(name)
+        s = stack_or_404(name)
+        if s.page_only:
+            raise error(409, 'stack_page_only', name=name)
+        # the simulation and bag playback both drive /clock and the SLAM inputs: only one at a time
+        if name in playback.sim_stacks and playback.player_active():
+            raise error(409, 'playback_running', name=playback.stack)
         preset, extra = preset_args(name, preset)
         if name == nav_name:
             extra = [*extra, *prepare_nav_params()]   # same speed-multiplier setup as the navigation page
-        if origin not in ('mapping', 'navigation'):
+        if origin not in ('mapping', 'navigation', 'playback'):
             origin = 'monitor'
         is_slam = name in mapping.profiles
         if is_slam:
@@ -215,6 +239,7 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata):
     nav_cfg = cfg.get('navigation') or {}
     nav_name = nav_cfg.get('stack', 'navigation')
     nav_epoch = {'started_at': None}
+    register_map_scene_routes(app, cfg, nav_maps, scenes, presets, procs, nav_name)
 
     # ---- Speed multiplier (see nav_speed.py): Nav2 runs with a derived params file whose limits are the top
     # speed, and the console publishes /speed_limit = 1x speed x multiplier (continuously, see NavigationData).
@@ -673,6 +698,7 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata):
                     ms['waypoints'] = await asyncio.to_thread(waypoint_progress)
                     ms['teleop'] = teleop.status()
                     ms['save'] = library.status()
+                    ms['playback'] = await asyncio.to_thread(playback.status)
                     await sock.send_json(ms)
                     for f in await asyncio.to_thread(mapping.pull, client['cursor']):
                         if isinstance(f, bytes):
@@ -711,7 +737,7 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata):
     # 开发时用 npm run dev（端口 5173）；打包后（npm run build）由这里直接提供页面
     dist = cfg['server']['web_dist']
     if os.path.isdir(dist):
-        app.mount('/', StaticFiles(directory=dist, html=True), name='web')
+        app.mount('/', WebFiles(directory=dist, html=True), name='web')
     else:
         @app.get('/')
         def no_web():

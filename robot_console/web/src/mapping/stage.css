@@ -1,0 +1,300 @@
+/* Mapping stage (components/MappingStage.vue): 3D view with HUD, and the metrics strip */
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---------------- 3D 视图 ---------------- */
+.viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 35%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.55) 70%),
+    var(--glass);
+}
+/* HUD 角标 */
+.viewport::before,
+.viewport::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
+  border: 0 solid var(--accent);
+  opacity: 0.6;
+}
+.viewport::before {
+  top: 8px;
+  left: 8px;
+  border-width: 1.5px 0 0 1.5px;
+  border-top-left-radius: 6px;
+}
+.viewport::after {
+  right: 8px;
+  bottom: 8px;
+  border-width: 0 1.5px 1.5px 0;
+  border-bottom-right-radius: 6px;
+}
+
+.hud {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+}
+.tl {
+  top: 14px;
+  left: 16px;
+  flex-wrap: wrap;
+  max-width: 60%;
+}
+.tr {
+  top: 14px;
+  right: 16px;
+}
+.bl {
+  left: 16px;
+  bottom: 14px;
+  gap: 14px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.bl i {
+  margin-right: 5px;
+  font-style: normal;
+  color: var(--accent);
+}
+.br {
+  right: 16px;
+  bottom: 14px;
+  gap: 12px;
+  padding: 4px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.k {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+/* 图层开关 */
+.layer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border: none;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.layer.on {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(8, 145, 178, 0.25), 0 4px 12px -6px rgba(8, 145, 178, 0.45);
+}
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  opacity: 0.35;
+  transition: opacity 0.2s;
+}
+.layer.on .swatch {
+  opacity: 1;
+}
+.layer.map .swatch { background: linear-gradient(135deg, #99dbed, #0aa3cc, #2563eb, #5440d9); }
+.layer.scan .swatch { background: #00b4d8; border-radius: 50%; }
+.layer.est .swatch { height: 3px; background: #2563eb; }
+.layer.gt .swatch { height: 0; border-top: 2px dashed #8a97ad; border-radius: 0; }
+.layer.grid .swatch { background: repeating-linear-gradient(90deg, #9db4cc 0 1px, transparent 1px 4px), repeating-linear-gradient(0deg, #9db4cc 0 1px, transparent 1px 4px); }
+
+/* 分段按钮（相机模式、移动方式） */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.seg button {
+  height: 26px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.seg button.on {
+  color: var(--accent);
+  font-weight: 600;
+  background: #fff;
+  box-shadow: 0 2px 8px -3px rgba(20, 60, 120, 0.3);
+}
+.seg.full {
+  display: flex;
+  margin-bottom: 10px;
+}
+.seg.full button {
+  flex: 1;
+}
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 10px;
+  color: var(--ink-2);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  cursor: pointer;
+}
+.icon-btn:hover {
+  color: var(--accent);
+}
+.layer:focus-visible,
+.seg button:focus-visible,
+.icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ramp {
+  width: 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #99dbed, #05a3cc, #2663eb, #5440d9);
+}
+.size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.size .el-slider {
+  width: 84px;
+}
+
+/* 多个 SLAM 同时发布时的警告 */
+.alert {
+  position: absolute;
+  z-index: 4;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  width: min(560px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border-radius: 12px;
+  color: #92400e;
+  background: rgba(255, 251, 235, 0.92);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.35), 0 10px 24px -12px rgba(217, 119, 6, 0.6);
+  font-size: 13px;
+}
+.alert .el-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--warn);
+}
+.alert p {
+  margin: 4px 0 0;
+  line-height: 1.55;
+  color: #a16207;
+}
+
+/* 没有数据时的等待提示 */
+.wait {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  pointer-events: none;
+  text-align: center;
+}
+.wait-title {
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.wait-hint {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* ---------------- 指标条 ---------------- */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  border-radius: var(--radius);
+  padding: 10px 6px;
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 12px;
+  min-width: 0;
+  border-left: 1px solid var(--hairline);
+}
+.metric:first-child {
+  border-left: none;
+}
+.metric .v {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.metric .chip {
+  align-self: flex-start;
+}
+
+@media (max-width: 1500px) {
+  .metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    row-gap: 10px;
+  }
+  .metric:nth-child(5) {
+    border-left: none;
+  }
+}
