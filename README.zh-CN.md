@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-一个在浏览器里操作的控制台，覆盖LiDAR SLAM 建图、地图管理、Nav2 自主导航和轨迹评估，在 ROS 2 Humble 中和 Gazebo Fortress 仿真上运行。
+LiDAR SLAM 建图和自主导航控制台，覆盖LiDAR SLAM 建图、地图管理、Nav2 自主导航、全流程自动化实验和轨迹评估，在 ROS 2 Humble 中和 Gazebo Fortress 仿真上运行。
 从一个建模场景开始，在同一个网页里就能完成建图、存图、导航，最后用 evo 出评估结果。
 
 本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* 的配套软件。界面支持中文和英文。
