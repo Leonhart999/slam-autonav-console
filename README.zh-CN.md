@@ -2,16 +2,14 @@
 
 [English](README.md) | 中文
 
-一个在浏览器里操作的控制台，覆盖激光 SLAM 建图、地图管理、Nav2 自主导航和轨迹评估，运行在 ROS 2 Humble
-和 Gazebo Fortress 仿真上。从一个空场景开始，在同一个网页里就能完成建图、存图、导航，最后用 evo 出评估结果。
+一个在浏览器里操作的控制台，覆盖LiDAR SLAM 建图、地图管理、Nav2 自主导航和轨迹评估，在 ROS 2 Humble 中和 Gazebo Fortress 仿真上运行。
+从一个建模场景开始，在同一个网页里就能完成建图、存图、导航，最后用 evo 出评估结果。
 
-本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots*
-的配套软件。界面支持中文和英文。
+本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* 的配套软件。界面支持中文和英文。
 
 [![控制台视频导览，2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 
-*视频导览（2:19，[在 B 站观看](https://www.bilibili.com/video/BV1wm4v6GEQq)，或[下载 MP4](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4)，49 MB）：在办公室场景用 FAST-LIO2 建图并保存，在仓库场景执行三个航点的 Nav2
-任务，再看系统监控页和实验评估页。没有配音，字幕为中英双语。*
+*视频导览（2:19，[在 B 站观看](https://www.bilibili.com/video/BV1wm4v6GEQq)，或[下载 MP4](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4)，49 MB）：在办公室场景用 FAST-LIO2 建图并保存，在仓库场景执行三个航点的 Nav2任务，再看系统监控页和实验评估页。*
 
 ![导航页：带代价地图和路径的 2D 栅格、3D 点云地图、任务控制](robot_console/docs/images/navigation.png)
 
@@ -47,8 +45,7 @@
 
 ## 快速开始
 
-环境要求：Ubuntu 22.04 x86_64（原生系统，或 Windows 10/11 上的 WSL2），有 `sudo` 权限的普通用户，建议 16 GB 内存，
-约 10 GB 空闲磁盘。
+环境要求：Ubuntu 22.04 x86_64（原生系统，或 Windows 10/11 上的 WSL2），有 `sudo` 权限的普通用户，建议 16 GB 内存，约 10 GB 空闲磁盘。
 
 ```bash
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
