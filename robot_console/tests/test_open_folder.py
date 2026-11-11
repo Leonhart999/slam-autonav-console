@@ -56,6 +56,15 @@ class OpenFolderTests(unittest.TestCase):
             self.assertEqual(self.status(str(self.maps / 'missing')), 404)
         self.assertEqual(self.started, [])
 
+    def test_creates_a_missing_trash_folder_of_a_data_folder_only(self):
+        with mock.patch.object(open_folder, 'opener', return_value=(['explorer.exe', 'X'], 'X')):
+            self.assertEqual(self.status(str(self.maps / '.trash')), 200)
+            self.assertTrue((self.maps / '.trash').is_dir())
+            self.assertEqual(self.status(str(self.maps / 'office' / '.trash')), 404)   # not a data folder's trash
+            self.assertFalse((self.maps / 'office' / '.trash').exists())
+            self.assertEqual(self.status(str(self.base / 'other' / '.trash')), 403)
+            self.assertFalse((self.base / 'other' / '.trash').exists())
+
     def test_no_desktop(self):
         with mock.patch.object(open_folder, 'opener', return_value=(None, None)):
             with self.assertRaises(HTTPException) as cm:

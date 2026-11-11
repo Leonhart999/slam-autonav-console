@@ -2,16 +2,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { pick } from '@/i18n'
 import { errorText } from '@/messages'
 import { fmtDuration } from '@/format'
 import { batchApi, type BatchHistoryEntry, type BatchOptions, type BatchRun, type BatchStatus, type MeanStd } from '@/evaluation/batch'
-import type { ExportResult } from '@/evaluation/api'
+import { evalApi, type ExportResult, type RunTrashEntry } from '@/evaluation/api'
+import { openFolder } from '@/openFolder'
+import { useStatusStore } from '@/stores/status'
 import { SERIES } from '@/evaluation/colors'
 import GlassPanel from '@/components/GlassPanel.vue'
 import InfoTip from '@/components/InfoTip.vue'
 import type { BatchCompareItem } from '@/components/BatchCompare.vue'
+import TrashBin, { type TrashItem } from '@/components/TrashBin.vue'
 
 // Ticks go to the page's comparison panel: runs share the run list's selection (selectedRuns / pickRun),
 // ticked batches are sent up as `batches`.
@@ -54,6 +57,16 @@ const { t, te } = useI18n({ messages: {
       hint: '点击一行查看该批次；勾选两个或以上批次（至少成功一次），会在下方“对比”栏并排对比平均值 ± 标准差。批次里的单次运行也可以勾选，和上方运行记录的勾选是同一份。',
       batch: '批次', okN: '成功', pickAll: '勾选本批次全部成功的运行',
     },
+    trash: {
+      delete: '删除选中', deleteHint: '把勾选的批次移到回收站，之后可以恢复；批次产生的运行记录不受影响',
+      runningHint: '批量实验进行中，结束后再删除',
+      selected: '已选 {n} 个', confirmTitle: '删除批次',
+      confirm: '把选中的 {n} 个批次移到回收站？只移走批次汇总（batch.json），这些批次产生的运行记录仍在上方的运行记录列表里，需要时在那里单独删除。',
+      ok: '移到回收站', cancel: '取消', moved: '已把 {n} 个批次移到回收站', refusedTitle: '{n} 个批次没有删除',
+      refuse: { not_found: '{id}：批次不存在（可能已经删除）', recording: '{id}：批次还在运行', used_by_map: '{id}：被地图 {maps} 使用', failed: '{id}：移动失败（{detail}）' },
+      title: '批次回收站', detail: '{scene}', restored: '已恢复 {id}', purged: '已永久删除', emptied: '回收站已清空',
+      openRuns: '打开运行记录文件夹（批次记录在 batch_* 子文件夹）', openBatch: '打开本批次文件夹',
+    },
   } },
   en: { batch: {
     title: 'Batch mapping experiments',
@@ -90,9 +103,20 @@ const { t, te } = useI18n({ messages: {
       hint: 'Click a row to show that batch. Tick two or more batches (with at least one successful run) to compare their mean ± std in the Comparison panel below. Single runs of a batch can be ticked too; they share the run list\'s ticks above.',
       batch: 'Batch', okN: 'OK', pickAll: 'Tick every successful run of this batch',
     },
+    trash: {
+      delete: 'Delete selected', deleteHint: 'Move the ticked batches to the trash; they can be restored later. The runs they made are not touched',
+      runningHint: 'A batch is running; delete after it ends',
+      selected: '{n} selected', confirmTitle: 'Delete batches',
+      confirm: 'Move the {n} selected batches to the trash? Only the batch summaries (batch.json) are moved; the runs these batches made stay in the run list above, delete them there if needed.',
+      ok: 'Move to trash', cancel: 'Cancel', moved: '{n} batches moved to the trash', refusedTitle: '{n} batches were not deleted',
+      refuse: { not_found: '{id}: no such batch (maybe already deleted)', recording: '{id}: the batch is still running', used_by_map: '{id}: used by map {maps}', failed: '{id}: could not be moved ({detail})' },
+      title: 'Batch recycle bin', detail: '{scene}', restored: '{id} restored', purged: 'Deleted permanently', emptied: 'Trash emptied',
+      openRuns: 'Open the run records folder (batches are the batch_* subfolders)', openBatch: 'Open the folder of this batch',
+    },
   } },
 } })
 
+const store = useStatusStore()
 const options = ref<BatchOptions | null>(null)
 const form = ref({ preset: '', slam: '', n: 3, save_maps: false, speed: 1 })
 const live = ref<BatchStatus>({ state: 'idle' })        // this console's current or last batch
@@ -224,7 +248,7 @@ const colorOf = (id: string) => SERIES[SERIES.length - 1 - (Math.max(0, picked.v
 watch([picked, history, () => options.value], () => {
   const items = picked.value
     .map((id) => history.value.find((h) => h.id === id))
-    .filter((b): b is BatchHistoryEntry => !!b)
+    .filter((b): b is BatchHistoryEntry => !!b && canCompare(b))
     .map((b) => ({ entry: b, color: colorOf(b.id), scene: labelOf(options.value?.presets, b.preset),
       slam: labelOf(options.value?.slam, b.slam) + speedTag(b.speed) }))
   emit('batches', items)
@@ -246,6 +270,83 @@ function showBatch(b: BatchHistoryEntry) {
 watch([history, () => live.value.state], () => {
   if (!viewing.value && live.value.state === 'idle' && history.value.length) viewing.value = history.value[0].id
 })
+
+// ---------------- Delete ticked batches (to <runs_dir>/.trash, shared with run records) and the trash ----------------
+const batchTable = ref<{ toggleRowSelection: (row: BatchHistoryEntry, selected?: boolean) => void } | null>(null)
+const deleting = ref(false)
+async function deleteSelected() {
+  const ids = [...picked.value]
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(t('batch.trash.confirm', { n: ids.length }), t('batch.trash.confirmTitle'), {
+      type: 'warning', confirmButtonText: t('batch.trash.ok'), cancelButtonText: t('batch.trash.cancel'),
+    })
+  } catch {
+    return
+  }
+  deleting.value = true
+  try {
+    const r = await evalApi.trashRuns(ids)
+    for (const id of r.moved) {
+      const row = history.value.find((b) => b.id === id)
+      if (row) batchTable.value?.toggleRowSelection(row, false)
+      if (viewing.value === id) viewing.value = ''
+    }
+    if (r.moved.length) ElMessage.success(t('batch.trash.moved', { n: r.moved.length }))
+    if (r.refused.length) {
+      const lines = r.refused.map((x) => t(`batch.trash.refuse.${x.reason}`,
+        { id: x.id, maps: (x.maps ?? []).join(', '), detail: x.detail ?? '' }))
+      ElMessageBox.alert(lines.join('\n'), t('batch.trash.refusedTitle', { n: r.refused.length }),
+        { type: 'warning', customClass: 'trash-refused' })
+    }
+    await loadHistory()
+    if (trashOpen.value) loadTrash()
+  } catch (e) {
+    ElMessage.error(errorText(e))
+  } finally {
+    deleting.value = false
+  }
+}
+
+const trashOpen = ref(false)
+const trashEntries = ref<RunTrashEntry[]>([])
+const trashLoading = ref(false)
+const trashBusy = ref('')          // entry being restored / deleted ('*' = emptying)
+const trashItems = computed<TrashItem[]>(() => trashEntries.value.filter((e) => e.type === 'batch').map((e) => ({
+  id: e.entry, name: e.run ?? e.entry, deleted: e.deleted, size: e.size, restorable: e.restorable,
+  detail: t('batch.trash.detail', { scene: labelOf(options.value?.presets, e.preset ?? undefined) }),
+})))
+async function loadTrash() {
+  trashLoading.value = true
+  try {
+    trashEntries.value = (await evalApi.trashList()).entries
+  } catch (e) {
+    ElMessage.error(errorText(e))
+  } finally {
+    trashLoading.value = false
+  }
+}
+async function trashAct(action: 'restore' | 'purge' | 'empty', entry = '') {
+  trashBusy.value = entry || '*'
+  try {
+    if (action === 'restore') {
+      const r = await evalApi.trashRestore(entry)
+      ElMessage.success(t('batch.trash.restored', { id: r.restored }))
+      await loadHistory()
+    } else if (action === 'purge') {
+      await evalApi.trashPurge(entry)
+      ElMessage.success(t('batch.trash.purged'))
+    } else {
+      await evalApi.trashEmpty('batch')
+      ElMessage.success(t('batch.trash.emptied'))
+    }
+  } catch (err) {
+    ElMessage.error(errorText(err))
+  } finally {
+    trashBusy.value = ''
+    loadTrash()
+  }
+}
 
 // What a batch does and the per-run timeout: in the title's "i" instead of a paragraph above the form
 const panelTip = computed(() => options.value
@@ -290,14 +391,21 @@ const runElapsed = computed(() =>
 
     <!-- Batch list: click = show below, tick = compare in the page's comparison panel -->
     <template v-if="history.length">
-      <h4 class="sub">{{ picked.length ? `${t('batch.cmp.title')} · ${picked.length}` : t('batch.cmp.title') }}<InfoTip :content="t('batch.cmp.hint')" /></h4>
-      <el-table :data="history" size="small" max-height="220" class="batch-list" :row-key="(b: BatchHistoryEntry) => b.id"
+      <h4 class="sub">
+        {{ picked.length ? `${t('batch.cmp.title')} · ${picked.length}` : t('batch.cmp.title') }}<InfoTip :content="t('batch.cmp.hint')" />
+        <span class="spacer" />
+        <el-button v-if="store.paths.runs" size="small" circle :title="t('batch.trash.openRuns')" :aria-label="t('batch.trash.openRuns')"
+          @click="openFolder(store.paths.runs)">
+          <el-icon><FolderOpened /></el-icon>
+        </el-button>
+      </h4>
+      <el-table ref="batchTable" :data="history" size="small" max-height="220" class="batch-list" :row-key="(b: BatchHistoryEntry) => b.id"
         :row-class-name="({ row }: { row: BatchHistoryEntry }) => (row.id === shownId ? 'is-selected' : '')"
         @selection-change="onPick" @row-click="showBatch">
-        <el-table-column type="selection" width="40" reserve-selection :selectable="canCompare" />
+        <el-table-column type="selection" width="40" reserve-selection />
         <el-table-column :label="t('batch.cmp.batch')" min-width="190">
           <template #default="{ row }">
-            <span class="swatch" :style="{ background: picked.includes(row.id) ? colorOf(row.id) : 'transparent' }" />
+            <span class="swatch" :style="{ background: picked.includes(row.id) && canCompare(row) ? colorOf(row.id) : 'transparent' }" />
             <span class="mono name">{{ row.id }}</span>
           </template>
         </el-table-column>
@@ -331,6 +439,22 @@ const runElapsed = computed(() =>
         </el-table-column>
       </el-table>
     </template>
+    <div class="list-foot">
+      <span class="trash-open">
+        <TrashBin
+          v-model="trashOpen" :title="t('batch.trash.title')" :entries="trashItems" :loading="trashLoading"
+          :busy="trashBusy" :dirs="store.paths.runs ? [`${store.paths.runs}/.trash`] : []" @open="loadTrash"
+          @restore="trashAct('restore', $event)" @purge="trashAct('purge', $event)" @empty="trashAct('empty')"
+        />
+      </span>
+      <template v-if="history.length">
+        <span class="count">{{ t('batch.trash.selected', { n: picked.length }) }}</span>
+        <el-button size="small" type="danger" plain :disabled="!picked.length || running" :loading="deleting"
+          :title="running ? t('batch.trash.runningHint') : t('batch.trash.deleteHint')" @click="deleteSelected">
+          <el-icon><Delete /></el-icon><span>{{ t('batch.trash.delete') }}</span>
+        </el-button>
+      </template>
+    </div>
 
     <p v-if="!view" class="hint top">{{ t('batch.none') }}</p>
     <template v-else>
@@ -349,6 +473,10 @@ const runElapsed = computed(() =>
         <span v-if="view.elapsed != null" class="mono dim">{{ t('batch.elapsed', { t: fmtDuration(view.elapsed) }) }}</span>
         <span v-if="view.reason && view.state !== 'running'" class="dim">{{ t('batch.reason', { r: view.reason }) }}</span>
         <span class="spacer" />
+        <el-button v-if="store.paths.runs && view.id" size="small" :title="t('batch.trash.openBatch')"
+          @click="openFolder(`${store.paths.runs}/${view.id}`)">
+          <el-icon><FolderOpened /></el-icon><span>{{ t('openFolder.button') }}</span>
+        </el-button>
         <el-button v-if="view.state !== 'running' && view.runs?.some((r) => r.ok)" size="small" :loading="exporting"
           @click="exportBatch">{{ t('batch.export') }}</el-button>
       </div>
@@ -431,6 +559,7 @@ const runElapsed = computed(() =>
       <div v-if="exportResult" class="export">
         <span>{{ t('batch.exported', { n: exportResult.files.length }) }}</span>
         <code class="mono">{{ exportResult.dir }}</code>
+        <el-button size="small" link type="primary" @click="openFolder(exportResult.dir)">{{ t('openFolder.button') }}</el-button>
       </div>
     </template>
   </GlassPanel>
@@ -451,7 +580,11 @@ const runElapsed = computed(() =>
 .status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 16px 0 8px; font-size: 13px; }
 .track { height: 3px; margin: 0 0 10px; border-radius: 3px; background: var(--hairline); overflow: hidden; }
 .track i { display: block; height: 100%; background: var(--accent-grad); transition: width .6s ease; }
-.sub { margin: 16px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.sub { display: flex; align-items: center; margin: 16px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.list-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.list-foot .trash-open { margin-right: auto; }
+.list-foot .count { font-size: 12px; color: var(--ink-3); }
+.el-button .el-icon + span { margin-left: 6px; }
 .export { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 12.5px; }
 .export code { word-break: break-all; }
 :deep(.el-table__row) { cursor: pointer; }

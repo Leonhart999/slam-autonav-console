@@ -24,6 +24,8 @@ export interface MapEntry {
   kind: 'folder' | 'flat'
   created: string
   source: string | null
+  /** name of the bag the map was built from (bag playback), else null */
+  bag: string | null
   algorithm: string | null
   preset: string | null
   points: number | null

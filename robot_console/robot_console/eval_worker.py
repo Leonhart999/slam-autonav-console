@@ -4,6 +4,8 @@ Usage: python -I eval_worker.py <job.json>
   {"task": "evaluate", "est": path, "gt": path, "out": eval.json, "params": {...}}
       APE/RPE on the translation part after SE(3) Umeyama alignment, the same as
       `evo_ape tum gt.tum est.tum -a` and `evo_rpe tum gt.tum est.tum -a --delta 1 --delta_unit m`.
+      Optional "planar": true flattens both trajectories to z = 0 first (a reference without height, e.g. wheel
+      odometry). The same task compares two estimates (gt = the baseline run's est.tum) on the Evaluation page.
   {"task": "export", "out_dir": dir, "runs": [{"id", "label", "eval": eval.json path}, ...]}
       Writes PNG figures (trajectory overlay, APE/RPE over time, comparison) with matplotlib.
 evo lives in its own venv (NumPy 2) so it never shares an interpreter with ROS 2.
@@ -40,13 +42,23 @@ def evaluate(job):
     ref, est = sync.associate_trajectories(ref, est, max_diff=p['max_diff'])
     if est.num_poses < 3:
         raise ValueError(f'only {est.num_poses} matched poses (max_diff {p["max_diff"]} s)')
+    if job.get('planar'):
+        # Reference without height (wheel odometry): compare x, y only, both trajectories flattened
+        from evo.core.trajectory import PoseTrajectory3D
+
+        def flat(tr):
+            xyz = tr.positions_xyz.copy()
+            xyz[:, 2] = 0.0
+            return PoseTrajectory3D(positions_xyz=xyz, orientations_quat_wxyz=tr.orientations_quat_wxyz,
+                                    timestamps=tr.timestamps)
+        ref, est = flat(ref), flat(est)
     rot, trans, _ = est.align(ref, correct_scale=False)
 
     ape = metrics.APE(metrics.PoseRelation.translation_part)
     ape.process_data((ref, est))
     out = {
         'evo': evo.__version__, 'created': time.strftime('%Y-%m-%d %H:%M:%S'),
-        'params': {**p, 'align': 'se3', 'pose_relation': 'translation_part'},
+        'params': {**p, 'align': 'se3', 'pose_relation': 'translation_part', 'planar': bool(job.get('planar'))},
         'matched_poses': int(est.num_poses),
         'duration': round(float(est.timestamps[-1] - est.timestamps[0]), 2),
         'length': round(float(est.path_length), 3),

@@ -2,6 +2,7 @@
 // 点数据量大，不放进 Vue 的响应式系统；3D 视图每帧检查 version，有变化才更新显卡里的数据
 import { shallowRef } from 'vue'
 import type { useStatusStore } from '@/stores/status'
+import type { Bilingual } from '@/types'
 
 export interface MappingStatus {
   type: 'mapping'
@@ -68,16 +69,27 @@ export interface BagInfo {
   imu: string[] // Imu topics
   has_clock: boolean
   has_gt: boolean
+  /** reference odometry of the bag's sensor profile (recorded as ref.tum, not ground truth) */
+  reference?: { topic: string; label: Bilingual } | null
   /** Per SLAM (stacks.yaml name): can it run on this bag, and which bag topic feeds which input */
   slams: Record<string, { ok: boolean; missing: string[]; remapped: boolean; plan: PlaybackPlan }>
+  /** Sensor profile of a real robot (config/sensor_profiles.yaml): played through the sensor adapter */
+  sensor: { name: string; label: Bilingual } | null
 }
-export type PlaybackPlan = Record<string, { from: string; to: string }>
+/** via: the sensor adapter's input, when the bag has a sensor profile */
+export type PlaybackPlan = Record<string, { from: string; to: string; via?: string }>
 
 /** Where uploads go, what the trash holds and how much space is left (GET /api/playback/storage) */
 export interface PlaybackStorage {
   upload_dir: string
   trash: { root: string; path: string; size: number; items: number }[]
   free: { path: string; free: number }[]
+}
+
+/** Entries of every bag folder's recycle bin (GET /api/playback/trash); id is the entry's path */
+export interface BagTrash {
+  entries: { id: string; name: string; folder: string; deleted: string; size: number; restorable: boolean }[]
+  dirs: string[]
 }
 
 export interface PlaybackStatus {
@@ -105,6 +117,8 @@ export interface PlaybackStatus {
   /** part of the bag being played, [begin, end] in s */
   range?: [number, number]
   exit_code?: number | null
+  /** run record of this playback (Evaluation page), null until the estimate moved 0.5 m */
+  run?: string | null
 }
 
 /** 保存地图任务（后端 map_library.py）。step 依次是 map_save、copy、project、meta */
@@ -117,6 +131,9 @@ export interface SlamOption {
   /** 'sim' and / or 'bag': offered for the simulation, for bag playback or both */
   sources?: ('sim' | 'bag')[]
   needs_imu?: boolean
+  /** set on a variant of another profile with some options on (lidar, ground), shown as switches on that profile */
+  variant_of?: string | null
+  options?: string[]
 }
 
 export interface SaveJob {

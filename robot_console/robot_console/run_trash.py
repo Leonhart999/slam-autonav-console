@@ -1,4 +1,4 @@
-"""Run-record trash for the evaluation page: move run folders (map_*, nav_*) to <runs_dir>/.trash, restore
+"""Run-record trash for the evaluation page: move run folders (map_*, play_*, nav_*) to <runs_dir>/.trash, restore
 them, or delete them for good.
 
 Rules
@@ -9,7 +9,10 @@ Rules
       * a saved map refers to it (meta.json "run"): the navigation page derives the ground-truth origin of
         that map from the run's est.tum / gt.tum. Delete the map first if the run is really not needed.
     A refused run stays where it is; the response lists why.
-  - Folders in .trash without a run.json at the top (e.g. ~/runs/.trash/p0_20261105, 473 empty runs moved there
+  - Batch records (batch_<time>/batch.json, batch.py) go through the same trash. Deleting a batch moves only its
+    batch folder; the runs it made are ordinary run records and stay in the run list. A batch that is still
+    running is refused ('recording'); maps never refer to batches.
+  - Folders in .trash without a run.json / batch.json at the top (e.g. ~/runs/.trash/p0_20261105, 473 empty runs moved there
     in one go) are listed as a group; they can be deleted for good but not restored from the page.
 Only plain directories directly inside runs_dir / .trash are touched; names are checked against a whitelist,
 symlinks are never followed.
@@ -22,6 +25,8 @@ import time
 from pathlib import Path
 
 from fastapi import Body, HTTPException
+
+from .evaluation import run_kind
 
 RUN_RE = re.compile(r'^[A-Za-z0-9_\-]{1,80}$')
 ENTRY_RE = re.compile(r'^[A-Za-z0-9_\-]{1,120}$')
@@ -58,6 +63,15 @@ def _size(path):
         except OSError:
             pass
     return total
+
+
+def _record(d):
+    """('run' | 'batch', its JSON file) of a run or batch folder, (None, None) for anything else."""
+    if (d / 'run.json').is_file():
+        return 'run', d / 'run.json'
+    if d.name.startswith('batch_') and (d / 'batch.json').is_file():
+        return 'batch', d / 'batch.json'
+    return None, None
 
 
 def _read_json(path):
@@ -114,10 +128,11 @@ class RunTrash:
         moved, refused = [], []
         for run_id in dict.fromkeys(str(i) for i in ids):      # unique, order kept
             d = self.runs_dir / run_id
-            if not RUN_RE.fullmatch(run_id) or not _plain_dir(d) or not (d / 'run.json').is_file():
+            kind, record = _record(d) if RUN_RE.fullmatch(run_id) and _plain_dir(d) else (None, None)
+            if kind is None:
                 refused.append({'id': run_id, 'reason': 'not_found'})
                 continue
-            info = _read_json(d / 'run.json') or {}
+            info = _read_json(record) or {}
             if run_id == recording or info.get('state') == 'running':
                 refused.append({'id': run_id, 'reason': 'recording'})
                 continue
@@ -147,11 +162,13 @@ class RunTrash:
                 m = STAMP_RE.search(d.name)
                 deleted = (time.strftime('%Y-%m-%d %H:%M:%S', time.strptime(m.group(1), '%Y%m%d_%H%M%S')) if m
                            else time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(d.stat().st_mtime)))
-                info = _read_json(d / 'run.json')
+                kind, record = _record(d)
+                info = _read_json(record) if record else None
                 if isinstance(info, dict):
                     run_id = d.name[:m.start()] if m else d.name
-                    entries.append({'entry': d.name, 'run': run_id, 'type': info.get('type', 'mapping'),
-                                    'preset': info.get('preset'), 'started': info.get('started'),
+                    rtype = 'batch' if kind == 'batch' else run_kind(info)
+                    entries.append({'entry': d.name, 'run': run_id, 'type': rtype,
+                                    'preset': info.get('preset'), 'started': info.get('started') or info.get('created'),
                                     'deleted': deleted, 'runs': 1, 'size': _size(d), 'restorable': True})
                 else:
                     n = sum(1 for c in d.iterdir() if _plain_dir(c) and (c / 'run.json').is_file())
@@ -162,7 +179,7 @@ class RunTrash:
 
     def restore(self, entry):
         d = self._entry_dir(entry)
-        if not (d / 'run.json').is_file():
+        if _record(d)[0] is None:
             raise RunTrashError('run_trash_not_restorable', 409, entry=entry)
         m = STAMP_RE.search(entry)
         run_id = entry[:m.start()] if m else entry
@@ -177,8 +194,12 @@ class RunTrash:
         shutil.rmtree(d)
         return {'deleted': entry}
 
-    def empty(self):
-        names = [e['entry'] for e in self.list()['entries']]
+    def empty(self, kind=None):
+        """Delete every entry for good; kind 'batch' = only batch records, 'runs' = everything else."""
+        if kind not in (None, 'batch', 'runs'):
+            raise RunTrashError('run_trash_invalid', 400, n=MAX_IDS)
+        names = [e['entry'] for e in self.list()['entries']
+                 if kind is None or (e['type'] == 'batch') == (kind == 'batch')]
         for name in names:
             shutil.rmtree(self._entry_dir(name))
         return {'deleted': len(names)}
@@ -214,7 +235,7 @@ def register_run_trash_routes(app, cfg, mapping, batch):
         return call(trash.purge, entry)
 
     @app.delete('/api/run-trash')
-    def run_trash_empty():
-        return call(trash.empty)
+    def run_trash_empty(kind: str | None = None):
+        return call(trash.empty, kind)
 
     return trash

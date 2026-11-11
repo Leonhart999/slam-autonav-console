@@ -15,14 +15,17 @@ import { openFolder } from '@/openFolder'
 import type { MappingPreset } from '@/types'
 import { evalApi, type ExportResult, type NavGoalRecord, type NavMetrics, type RunDetail, type RunEntry, type RunEval,
   type RunTrashEntry } from '@/evaluation/api'
-import { fmtBytes } from '@/maps/api'
 import { evalMessages } from '@/evaluation/messages'
 import { AXIS, MONO, REFERENCE, SERIES } from '@/evaluation/colors'
 import GlassPanel from '@/components/GlassPanel.vue'
 import KpiTile from '@/components/KpiTile.vue'
 import EvalChart from '@/components/EvalChart.vue'
 import BatchPanel from '@/components/BatchPanel.vue'
+import TrashBin, { type TrashItem } from '@/components/TrashBin.vue'
 import BatchCompare, { type BatchCompareItem } from '@/components/BatchCompare.vue'
+import PlaybackDetail from '@/components/PlaybackDetail.vue'
+import PlaybackCompare from '@/components/PlaybackCompare.vue'
+import { partText } from '@/evaluation/charts'
 
 const { t } = useI18n({ messages: evalMessages })
 const store = useStatusStore()
@@ -30,14 +33,15 @@ const route = useRoute()
 const router = useRouter()
 
 // ---------------- List and filters ----------------
-type TypeFilter = 'all' | 'mapping' | 'navigation'
+type TypeFilter = 'all' | 'mapping' | 'navigation' | 'playback'
 const runs = ref<RunEntry[]>([])
 const params = ref({ max_diff: 0.01, rpe_delta: 1.0 })
 const loading = ref(false)
 const listError = ref('')
 const presets = ref<MappingPreset[]>([])
-const typeFilter = ref<TypeFilter>('all')
-const sceneFilter = ref('')
+const typeFilter = ref<TypeFilter>(route.query.bag ? 'playback' : 'all')
+// a scene preset name, or 'bag:<bag path>' for playback runs of one bag
+const sceneFilter = ref(typeof route.query.bag === 'string' ? `bag:${route.query.bag}` : '')
 
 async function loadList() {
   loading.value = true
@@ -60,9 +64,34 @@ async function loadList() {
 onMounted(loadList)
 watch(() => store.connected, (c) => { if (c) loadList() })
 
-const scenes = computed(() => [...new Set(runs.value.map((r) => r.preset).filter((p): p is string => !!p))])
+const scenes = computed(() => [...new Set(runs.value.filter((r) => r.type !== 'playback')
+  .map((r) => r.preset).filter((p): p is string => !!p))])
+// bags of the playback runs: path -> name
+const bags = computed(() => {
+  const m = new Map<string, string>()
+  for (const r of runs.value) if (r.playback?.bag) m.set(r.playback.bag, r.playback.bag_name)
+  return [...m.entries()].map(([path, name]) => ({ path, name }))
+})
+const showScenes = computed(() => typeFilter.value !== 'playback')
+const showBags = computed(() => typeFilter.value === 'all' || typeFilter.value === 'playback')
+const sourcePlaceholder = computed(() => t(typeFilter.value === 'playback' ? 'evalPage.allBags'
+  : typeFilter.value === 'all' && bags.value.length ? 'evalPage.allSources' : 'evalPage.allScenes'))
+// a filter that the new type cannot match is dropped
+watch(typeFilter, (k) => {
+  const f = sceneFilter.value
+  if (f && (f.startsWith('bag:') ? k !== 'all' && k !== 'playback' : k === 'playback')) sceneFilter.value = ''
+})
+function matchSource(r: RunEntry) {
+  const f = sceneFilter.value
+  if (!f) return true
+  return f.startsWith('bag:') ? r.playback?.bag === f.slice(4) : r.type !== 'playback' && r.preset === f
+}
 const filtered = computed(() => runs.value.filter((r) =>
-  (typeFilter.value === 'all' || r.type === typeFilter.value) && (!sceneFilter.value || r.preset === sceneFilter.value)))
+  (typeFilter.value === 'all' || r.type === typeFilter.value) && matchSource(r)))
+function showBag(bag: string) {
+  typeFilter.value = 'playback'
+  sceneFilter.value = `bag:${bag}`
+}
 
 function sceneLabel(preset: string | null) {
   if (!preset) return '—'
@@ -70,23 +99,37 @@ function sceneLabel(preset: string | null) {
   // An uploaded world that has since been deleted: show its name without the internal prefix
   return p ? pick(p.label) : preset.replace(/^custom_/, '')
 }
+/** Scene of a simulation run, or "bag · part" of a playback run */
+function sourceLabel(r: RunEntry) {
+  if (r.type === 'playback' && r.playback) return `${r.playback.bag_name} · ${partText(r.playback.range, t('evalPage.pb.whole'))}`
+  return sceneLabel(r.preset)
+}
 const m3 = (v: number | null | undefined) => (v == null ? '—' : v.toFixed(3))
 
 const pct = (v: number | null | undefined) => (v == null ? '—' : `${Math.round(v * 100)}%`)
 const f1 = (v: number | null | undefined, unit = '') => (v == null ? '—' : `${v.toFixed(1)}${unit}`)
 
 type StateKey = 'recording' | 'running' | 'evaluated' | 'notEvaluated' | 'failed' | 'noGt' | 'navPending'
+  | 'noGtBag' | 'hasRef' | 'suspect'
 const STATE_CHIP: Record<StateKey, string> = {
   recording: 'primary live', running: 'primary live', evaluated: 'success', notEvaluated: 'info', failed: 'danger',
-  noGt: 'warning', navPending: 'info',
+  noGt: 'warning', navPending: 'info', noGtBag: 'info', hasRef: 'info', suspect: 'warning',
 }
 function stateOf(r: RunEntry): StateKey {
   if (r.type === 'navigation') return r.recording ? 'running' : r.evaluable ? 'evaluated' : 'navPending'
   if (r.recording) return 'recording'
+  const pb = r.playback
+  if (pb && pb.gt_kind !== 'gt') {
+    // no ground truth is normal for a real robot's bag: neutral chips, not a warning
+    if (pb.gt_suspect) return 'suspect'
+    return pb.gt_kind === 'ref' ? (pb.ref_error ? 'failed' : 'hasRef') : 'noGtBag'
+  }
   if (!r.evaluable) return 'noGt'
   if (r.eval_error) return 'failed'
   return r.ape_rmse != null ? 'evaluated' : 'notEvaluated'
 }
+/** Playback with reference odometry but no ground truth: evo runs against the reference instead */
+const refOnly = (r: RunEntry | null | undefined) => !!r?.playback && r.playback.gt_kind === 'ref'
 
 // ---------------- Details (cached per run) ----------------
 const details = ref<Record<string, RunDetail>>({})
@@ -105,20 +148,23 @@ function absorb(d: RunDetail) {
   details.value = { ...details.value, [d.id]: d }
   const i = runs.value.findIndex((r) => r.id === d.id)
   if (i >= 0) {
-    const { info: _info, eval: _eval, amcl: _amcl, ...entry } = d
+    const { info: _info, eval: _eval, ref_eval: _refEval, amcl: _amcl, ...entry } = d
     runs.value.splice(i, 1, entry)
   }
 }
 
-/** Load a run's details; evaluates automatically when that is cheap and meaningful (finished, has GT, not failed) */
+/** Load a run's details; evaluates automatically when that is cheap and meaningful (finished, has GT or a
+ *  playback reference, not failed) */
 async function ensure(id: string, mode: 'auto' | 'evaluate' | 'force' = 'auto') {
   if (!id || busy.value.has(id)) return
   const entry = runs.value.find((r) => r.id === id)
   const loaded = details.value[id]
-  if (mode === 'auto' && loaded && (loaded.eval || !entry?.evaluable || (loaded.type === 'navigation' && !entry?.recording))) return
+  const withRef = refOnly(entry) && !entry?.playback?.ref_error
+  if (mode === 'auto' && loaded && (loaded.eval || (withRef ? loaded.ref_eval : !entry?.evaluable)
+    || (loaded.type === 'navigation' && !entry?.recording))) return
   setBusy(id, true)
   try {
-    const auto = entry?.evaluable && !entry.recording && !entry.eval_error
+    const auto = (entry?.evaluable || withRef) && !entry?.recording && !entry?.eval_error
     const d = mode === 'force' ? await evalApi.evaluate(id, true)
       : mode === 'evaluate' || auto ? await evalApi.evaluate(id) : await evalApi.detail(id)
     absorb(d)
@@ -150,8 +196,10 @@ function evaluateCurrent() {
   const r = currentEntry.value
   if (!r) return
   if (r.type === 'navigation') ensure(r.id, 'evaluate')     // just reloads the record
+  else if (refOnly(r)) ensure(r.id, r.playback?.ref_ape_rmse != null || r.playback?.ref_error ? 'force' : 'evaluate')
   else ensure(r.id, r.ape_rmse != null || r.eval_error ? 'force' : 'evaluate')
 }
+const canEvaluate = (r: RunEntry) => r.evaluable || refOnly(r)
 
 // ---------------- Navigation runs ----------------
 const currentNav = computed(() => (currentEntry.value?.type === 'navigation' ? currentEntry.value.nav : null))
@@ -196,7 +244,11 @@ function pickRun(id: string, on: boolean) {
   if (row?.evaluable && selection.value.includes(id) !== on) runTable.value?.toggleRowSelection(row, on)
 }
 const batchItems = ref<BatchCompareItem[]>([])
-const compareCount = computed(() => compareRows.value.length + navCompareRows.value.length + batchItems.value.length)
+const compareCount = computed(() => compareRows.value.length + navCompareRows.value.length + batchItems.value.length
+  + playbackRows.value.filter((r) => r.ape_rmse == null).length)
+// Ticked playback runs (PlaybackCompare); ones with ground truth are also in the ATE comparison above it
+const playbackRows = computed(() => selection.value.map((id) => runs.value.find((r) => r.id === id))
+  .filter((r): r is RunEntry => !!r?.playback))
 
 const compareRows = computed(() => selection.value
   .map((id) => ({ id, entry: runs.value.find((r) => r.id === id), ev: details.value[id]?.eval ?? null }))
@@ -290,51 +342,35 @@ async function deleteSelected() {
 
 const trashOpen = ref(false)
 const trashEntries = ref<RunTrashEntry[]>([])
-const trashSize = ref(0)
 const trashLoading = ref(false)
 const trashBusy = ref('')          // entry being restored / deleted ('*' = emptying)
+// Batch records share <runs_dir>/.trash; they have their own recycle bin in the batch panel
+const trashItems = computed<TrashItem[]>(() => trashEntries.value.filter((e) => e.type !== 'batch').map((e) => ({
+  id: e.entry, name: e.run ?? e.entry, deleted: e.deleted, size: e.size, restorable: e.restorable,
+  detail: e.type === 'group' ? t('evalPage.trash.group', { n: e.runs }) : t(`evalPage.type.${e.type}`),
+})))
 async function loadTrash() {
   trashLoading.value = true
   try {
-    const r = await evalApi.trashList()
-    trashEntries.value = r.entries
-    trashSize.value = r.size
+    trashEntries.value = (await evalApi.trashList()).entries
   } catch (e) {
     ElMessage.error(errorText(e))
   } finally {
     trashLoading.value = false
   }
 }
-function openTrash() {
-  trashOpen.value = true
-  loadTrash()
-}
-const trashName = (e: RunTrashEntry) => e.run ?? e.entry
-async function trashAct(e: RunTrashEntry | null, action: 'restore' | 'purge' | 'empty') {
-  if (action !== 'restore') {
-    const msg = action === 'empty'
-      ? t('evalPage.trash.emptyConfirm', { n: trashEntries.value.length, size: fmtBytes(trashSize.value) })
-      : t('evalPage.trash.purgeConfirm', { name: e ? trashName(e) : '' })
-    try {
-      await ElMessageBox.confirm(msg, t('evalPage.trash.title'), {
-        type: 'warning', confirmButtonText: action === 'empty' ? t('evalPage.trash.emptyAll') : t('evalPage.trash.purge'),
-        cancelButtonText: t('evalPage.trash.cancel'), confirmButtonClass: 'el-button--danger',
-      })
-    } catch {
-      return
-    }
-  }
-  trashBusy.value = e?.entry ?? '*'
+async function trashAct(action: 'restore' | 'purge' | 'empty', entry = '') {
+  trashBusy.value = entry || '*'
   try {
-    if (action === 'restore' && e) {
-      const r = await evalApi.trashRestore(e.entry)
+    if (action === 'restore') {
+      const r = await evalApi.trashRestore(entry)
       ElMessage.success(t('evalPage.trash.restored', { id: r.restored }))
       await loadList()
-    } else if (action === 'purge' && e) {
-      await evalApi.trashPurge(e.entry)
+    } else if (action === 'purge') {
+      await evalApi.trashPurge(entry)
       ElMessage.success(t('evalPage.trash.purged'))
     } else {
-      await evalApi.trashEmpty()
+      await evalApi.trashEmpty('runs')
       ElMessage.success(t('evalPage.trash.emptied'))
     }
   } catch (err) {
@@ -499,9 +535,23 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
           <el-radio-button value="all">{{ t('evalPage.type.all') }}</el-radio-button>
           <el-radio-button value="mapping">{{ t('evalPage.type.mapping') }}</el-radio-button>
           <el-radio-button value="navigation">{{ t('evalPage.type.navigation') }}</el-radio-button>
+          <el-radio-button value="playback">{{ t('evalPage.type.playback') }}</el-radio-button>
         </el-radio-group>
-        <el-select v-model="sceneFilter" size="small" class="scene-select" :placeholder="t('evalPage.allScenes')" clearable>
-          <el-option v-for="s in scenes" :key="s" :value="s" :label="sceneLabel(s)" />
+        <el-select v-model="sceneFilter" size="small" class="scene-select" :placeholder="sourcePlaceholder" clearable>
+          <template v-if="showScenes && showBags && bags.length">
+            <el-option-group :label="t('evalPage.groupScenes')">
+              <el-option v-for="s in scenes" :key="s" :value="s" :label="sceneLabel(s)" />
+            </el-option-group>
+            <el-option-group :label="t('evalPage.groupBags')">
+              <el-option v-for="b in bags" :key="b.path" :value="`bag:${b.path}`" :label="b.name" :title="b.path" />
+            </el-option-group>
+          </template>
+          <template v-else-if="showBags">
+            <el-option v-for="b in bags" :key="b.path" :value="`bag:${b.path}`" :label="b.name" :title="b.path" />
+          </template>
+          <template v-else>
+            <el-option v-for="s in scenes" :key="s" :value="s" :label="sceneLabel(s)" />
+          </template>
         </el-select>
         <span class="count">{{ t('evalPage.count', { n: filtered.length }) }}</span>
         <el-button size="small" circle :title="t('openFolder.runs')" :aria-label="t('openFolder.runs')" @click="openFolder(store.paths.runs)">
@@ -524,10 +574,11 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
         @selection-change="onSelection"
       >
         <el-table-column type="selection" width="40" reserve-selection />
-        <el-table-column :label="t('evalPage.col.id')" min-width="170">
+        <el-table-column :label="t('evalPage.col.id')" min-width="150">
           <template #default="{ row }">
             <span class="swatch" :style="{ background: row.id in slots ? colorOf(row.id) : 'transparent' }" />
-            <span class="name mono">{{ row.id }}</span>
+            <span class="name mono" :title="row.id">{{ row.id }}</span>
+            <span v-if="row.algorithm" class="algo">{{ row.algorithm }}</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('evalPage.col.started')" width="152">
@@ -536,8 +587,8 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
         <el-table-column :label="t('evalPage.col.type')" width="84">
           <template #default="{ row }">{{ t(`evalPage.type.${row.type}`) }}</template>
         </el-table-column>
-        <el-table-column :label="t('evalPage.col.scene')" min-width="86" show-overflow-tooltip>
-          <template #default="{ row }">{{ sceneLabel(row.preset) }}</template>
+        <el-table-column :label="typeFilter === 'playback' ? t('evalPage.col.bag') : t('evalPage.col.scene')" min-width="86" show-overflow-tooltip>
+          <template #default="{ row }">{{ sourceLabel(row) }}</template>
         </el-table-column>
         <el-table-column :label="t('evalPage.col.duration')" width="82" align="right">
           <template #default="{ row }"><span class="num">{{ fmtDuration(row.duration) }}</span></template>
@@ -546,13 +597,16 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
           <template #default="{ row }"><span class="num">{{ row.length == null ? '—' : `${row.length.toFixed(1)} m` }}</span></template>
         </el-table-column>
         <!-- "All": one column with the main number of each type; the type filters show the full columns -->
-        <el-table-column v-if="typeFilter === 'all'" :label="t('evalPage.col.metric')" width="130" align="right">
+        <el-table-column v-if="typeFilter === 'all'" :label="t('evalPage.col.metric')" width="150" align="right">
           <template #default="{ row }">
             <span v-if="row.type === 'navigation' && row.nav" class="num">
               <b class="strong">{{ row.nav.succeeded }}/{{ row.nav.finished }}</b>
               <span class="dim"> · AMCL {{ m3(row.nav.amcl_rmse_m) }}</span>
             </span>
             <span v-else-if="row.ape_rmse != null" class="num"><span class="dim">ATE </span><b class="strong">{{ m3(row.ape_rmse) }}</b></span>
+            <span v-else-if="row.playback?.stats" class="num" :title="t('evalPage.col.startEnd')">
+              <span class="dim">{{ row.playback.loop ? t('evalPage.col.loopShort') : t('evalPage.col.startEndShort') }} </span><b class="strong">{{ m3(row.playback.stats.start_end) }}</b>
+            </span>
             <span v-else class="num">—</span>
           </template>
         </el-table-column>
@@ -561,6 +615,22 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
         </el-table-column>
         <el-table-column v-if="typeFilter === 'mapping'" :label="t('evalPage.col.rpe')" width="100" align="right">
           <template #default="{ row }"><span class="num">{{ m3(row.rpe_rmse) }}</span></template>
+        </el-table-column>
+        <!-- Playback: numbers that need no ground truth, plus ATE or the deviation from the bag's reference -->
+        <el-table-column v-if="typeFilter === 'playback'" :label="t('evalPage.col.startEnd')" width="100" align="right">
+          <template #default="{ row }">
+            <span class="num strong">{{ m3(row.playback?.stats?.start_end) }}</span><span v-if="row.playback?.loop" class="dim"> {{ t('evalPage.col.loopShort') }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="typeFilter === 'playback'" :label="t('evalPage.col.zEnd')" width="90" align="right">
+          <template #default="{ row }"><span class="num">{{ m3(row.playback?.stats?.z_end) }}</span></template>
+        </el-table-column>
+        <el-table-column v-if="typeFilter === 'playback'" :label="t('evalPage.col.versus')" width="118" align="right">
+          <template #default="{ row }">
+            <span v-if="row.ape_rmse != null" class="num"><span class="dim">ATE </span>{{ m3(row.ape_rmse) }}</span>
+            <span v-else-if="row.playback?.ref_ape_rmse != null" class="num"><span class="dim">{{ t('evalPage.pb.chart.ref') }} </span>{{ m3(row.playback.ref_ape_rmse) }}</span>
+            <span v-else class="num">—</span>
+          </template>
         </el-table-column>
         <el-table-column v-if="typeFilter === 'navigation'" :label="t('evalPage.nav.variant')" width="110">
           <template #default="{ row }"><span class="mono">{{ row.variant ?? '—' }}</span></template>
@@ -582,7 +652,13 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
         </el-table-column>
       </el-table>
       <div class="list-foot">
-        <el-button size="small" class="trash-open" @click="openTrash">{{ t('evalPage.trash.open') }}</el-button>
+        <span class="trash-open">
+          <TrashBin
+            v-model="trashOpen" :title="t('evalPage.trash.title')" :entries="trashItems" :loading="trashLoading"
+            :busy="trashBusy" :dirs="[`${store.paths.runs}/.trash`]" @open="loadTrash"
+            @restore="trashAct('restore', $event)" @purge="trashAct('purge', $event)" @empty="trashAct('empty')"
+          />
+        </span>
         <span class="count">{{ t('evalPage.selected', { n: selection.length }) }}</span>
         <el-button size="small" type="danger" plain :disabled="!selection.length" :loading="deleting"
           :title="t('evalPage.trash.deleteHint')" @click="deleteSelected">
@@ -618,8 +694,9 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
         <el-button v-if="currentEntry.type === 'navigation'" size="small" :loading="busy.has(currentEntry.id)" @click="evaluateCurrent">
           {{ t('evalPage.refresh') }}
         </el-button>
-        <el-button v-else-if="currentEntry.evaluable" size="small" :loading="busy.has(currentEntry.id)" @click="evaluateCurrent">
-          {{ currentEntry.ape_rmse != null || currentEntry.eval_error ? t('evalPage.reevaluate') : t('evalPage.evaluate') }}
+        <el-button v-else-if="canEvaluate(currentEntry)" size="small" :loading="busy.has(currentEntry.id)" @click="evaluateCurrent">
+          {{ currentEntry.ape_rmse != null || currentEntry.eval_error || currentEntry.playback?.ref_ape_rmse != null
+            ? t('evalPage.reevaluate') : t('evalPage.evaluate') }}
         </el-button>
       </template>
       <p v-if="!currentEntry" class="hint">{{ t('evalPage.pickHint') }}</p>
@@ -627,21 +704,27 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
         <div class="title-row">
           <h2 class="mono">{{ currentEntry.id }}</h2>
           <span class="chip" :class="STATE_CHIP[stateOf(currentEntry)]">{{ t(`evalPage.state.${stateOf(currentEntry)}`) }}</span>
-          <span class="chip primary">{{ t(`evalPage.type.${currentEntry.type}`) }} · {{ sceneLabel(currentEntry.preset) }}</span>
+          <span class="chip primary">{{ t(`evalPage.type.${currentEntry.type}`) }} · {{ sourceLabel(currentEntry) }}</span>
+          <span v-if="currentEntry.playback?.rate != null" class="chip info">{{ currentEntry.playback.rate }}x</span>
+          <span v-if="currentEntry.algorithm" class="chip info">{{ currentEntry.algorithm }}</span>
           <span v-if="currentEntry.maps.length" class="maps">
             {{ t('evalPage.col.maps') }}:
             <router-link v-for="m in currentEntry.maps" :key="m" class="mono" :to="{ path: '/maps', query: { map: m } }">{{ m }}</router-link>
           </span>
         </div>
-        <p v-if="currentEntry.recording && currentEntry.type === 'mapping'" class="note">{{ t('evalPage.recordingNote') }}</p>
+        <p v-if="currentEntry.recording && currentEntry.type !== 'navigation'" class="note">{{ t('evalPage.recordingNote') }}</p>
         <p v-if="currentEntry.type === 'navigation'">
           <span v-if="currentEntry.recording" class="note">{{ t('evalPage.navNote') }}</span>
           <span v-if="currentNav && !currentNav.has_gt" class="note warn">{{ t('evalPage.nav.noGt') }}</span>
         </p>
-        <p v-else-if="!currentEntry.evaluable" class="note warn">{{ t('evalPage.noGtNote') }}</p>
+        <p v-else-if="!currentEntry.evaluable && currentEntry.type === 'mapping'" class="note warn">{{ t('evalPage.noGtNote') }}</p>
         <p v-if="currentEntry.eval_error" class="note bad">{{ t('evalPage.failedNote', { reason: currentEntry.eval_error }) }}</p>
         <p v-else-if="errors[currentEntry.id]" class="note bad">{{ errors[currentEntry.id] }}</p>
-        <p v-if="busy.has(currentEntry.id) && !currentEval && currentEntry.type === 'mapping'" class="hint">{{ t('evalPage.evaluating') }}</p>
+        <p v-if="busy.has(currentEntry.id) && !currentEval && canEvaluate(currentEntry)" class="hint">{{ t('evalPage.evaluating') }}</p>
+
+        <!-- Playback run: source, numbers without ground truth, links to the Playback page -->
+        <PlaybackDetail v-if="currentEntry.playback" :entry="currentEntry" :detail="current"
+          @filter-bag="showBag" @changed="absorb" />
 
         <!-- Navigation run -->
         <template v-if="currentNav">
@@ -750,7 +833,7 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
 
     <!-- Comparison of the ticked runs and batches -->
     <GlassPanel :title="compareCount ? `${t('evalPage.compare')} · ${compareCount}` : t('evalPage.compare')">
-      <p v-if="compareRows.length < 2 && navCompareRows.length < 2 && batchItems.length < 2" class="hint">{{ t('evalPage.compareHint') }}</p>
+      <p v-if="compareRows.length < 2 && navCompareRows.length < 2 && batchItems.length < 2 && !playbackRows.length" class="hint">{{ t('evalPage.compareHint') }}</p>
       <BatchCompare v-if="batchItems.length >= 2" :items="batchItems" />
       <template v-if="compareRows.length >= 2">
         <h4 v-if="batchItems.length >= 2" class="sub-title">{{ t('evalPage.compareMapRuns') }}</h4>
@@ -758,7 +841,7 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
           <el-table-column :label="t('evalPage.col.id')" min-width="190">
             <template #default="{ row }">
               <span class="swatch" :style="{ background: colorOf(row.id) }" />
-              <span class="name mono">{{ row.id }}</span>
+              <span class="name mono" :title="row.id">{{ row.id }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('evalPage.col.scene')" min-width="110" show-overflow-tooltip>
@@ -800,7 +883,7 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
           <el-table-column :label="t('evalPage.col.id')" min-width="190">
             <template #default="{ row }">
               <span class="swatch" :style="{ background: colorOf(row.id) }" />
-              <span class="name mono">{{ row.id }}</span>
+              <span class="name mono" :title="row.id">{{ row.id }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('evalPage.nav.variant')" width="110">
@@ -874,46 +957,10 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
           <p v-if="navCompareRows.length > SERIES.length" class="hint">{{ t('evalPage.compareCap') }}</p>
         </figure>
       </template>
+
+      <PlaybackCompare v-if="playbackRows.length" :entries="playbackRows" :color-of="colorOf" />
     </GlassPanel>
 
-    <!-- Trash of run records (<runs_dir>/.trash) -->
-    <el-dialog v-model="trashOpen" :title="t('evalPage.trash.title')" width="min(820px, 94vw)" append-to-body>
-      <el-table v-loading="trashLoading" :data="trashEntries" size="small" max-height="420"
-        :empty-text="t('evalPage.trash.empty')" :row-key="(e: RunTrashEntry) => e.entry">
-        <el-table-column :label="t('evalPage.trash.col.run')" min-width="200" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span class="name mono">{{ trashName(row) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('evalPage.trash.col.type')" min-width="120" show-overflow-tooltip>
-          <template #default="{ row }">
-            {{ row.type === 'group' ? t('evalPage.trash.group', { n: row.runs }) : t(`evalPage.type.${row.type}`) }}
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('evalPage.trash.col.deleted')" width="152">
-          <template #default="{ row }"><span class="num">{{ row.deleted }}</span></template>
-        </el-table-column>
-        <el-table-column :label="t('evalPage.trash.col.size')" width="84" align="right">
-          <template #default="{ row }"><span class="num">{{ fmtBytes(row.size) }}</span></template>
-        </el-table-column>
-        <el-table-column width="190" align="right">
-          <template #default="{ row }">
-            <el-button v-if="row.restorable" size="small" link type="primary" :disabled="!!trashBusy"
-              :loading="trashBusy === row.entry" @click="trashAct(row, 'restore')">{{ t('evalPage.trash.restore') }}</el-button>
-            <el-button size="small" link type="danger" :disabled="!!trashBusy" @click="trashAct(row, 'purge')">
-              {{ t('evalPage.trash.purge') }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <template #footer>
-        <div class="trash-foot">
-          <span class="count">{{ t('evalPage.trash.total', { n: trashEntries.length, size: fmtBytes(trashSize) }) }}</span>
-          <el-button size="small" type="danger" plain :disabled="!trashEntries.length || !!trashBusy"
-            :loading="trashBusy === '*'" @click="trashAct(null, 'empty')">{{ t('evalPage.trash.emptyAll') }}</el-button>
-        </div>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -925,7 +972,7 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
   min-height: 100%;
 }
 .scene-select {
-  width: 130px;
+  width: 150px;
 }
 .count {
   margin: 0 4px;
@@ -939,6 +986,25 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
 .name {
   font-weight: 600;
   color: var(--ink);
+}
+/* Run ids (map_<time>_<hash>) stay on one line; the full id is in the title */
+td .name {
+  display: inline-block;
+  max-width: calc(100% - 16px);
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.algo {
+  display: block;
+  margin-left: 16px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .num {
   font-family: var(--font-mono);
@@ -971,12 +1037,6 @@ const navCompareOption = computed<EChartsCoreOption | null>(() => {
 }
 .list-foot .trash-open {
   margin-right: auto;
-}
-.trash-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 .list-foot .el-icon {
   margin-right: 6px;

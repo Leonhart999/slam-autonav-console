@@ -10,12 +10,29 @@ e.g. {points: /points_fastlio, imu: /imu}) plus the ground truth topic if the ba
 input's name and message type is used as is; otherwise the bag topic of that type with the most messages is
 remapped onto the input name. A SLAM whose inputs the bag cannot provide (e.g. no IMU) is not offered.
 
+Real robots (sensor profiles, config/sensor_profiles.yaml): a bag that has all `match` topics of a profile
+is played through the sensor adapter (robot_console/sensor_adapter.py, stack `sensor_adapter`): the player
+remaps the robot's cloud and IMU onto /playback/raw/*, the adapter converts them (extrinsics, units, point time)
+and publishes the SLAM's inputs. The SLAM itself must then run the profile's configuration (slam_args), so it
+is started from the Playback page with the bag (`bag=` on /api/stacks/{name}/start); its stack remembers the
+profile as preset `sensor:<name>`, and a playback refuses a SLAM started for another sensor set-up.
+
 Clock: bags recorded from the simulation contain /clock (simulation time, the stamps in their messages);
 it is played as is. Other bags get `--clock`, so /clock follows the recording time.
 
 Part of the bag: the start is `--start-offset`; Humble's player has no end option, so a monitor thread stops
 the player when the position reaches the end. There is no seeking during a playback: a jump inside one SLAM
 run breaks the SLAM (backwards it mixes two passes, forwards it sees a gap).
+
+QoS: the player offers each topic the QoS it was recorded with. Bags written by other recorders (e.g. the
+group's robot, libmcap) can carry `avoid_ros_namespace_conventions: true`; the player then publishes under the raw
+DDS name and no ROS node ever sees the topic (the SLAM gets nothing, the player still runs to the end). For such
+topics the recorded profile is passed back through `--qos-profile-overrides-path` with that flag off.
+
+Run records: a SLAM run fed from a bag is recorded as type 'playback' (runs.py, session_info() below). Ground
+truth is recorded only when the bag has the ground-truth topic; a sensor profile may name a `reference` odometry
+(e.g. HEU61 wheel odometry), which is played onto REF_TOPIC and recorded as ref.tum (compared on the Evaluation
+page as "deviation from reference", never as ATE). The monitor thread samples the SLAM lag about once a second.
 
 Progress: with our own clock it is /clock - bag start (exact). With a recorded /clock (simulation time, other
 offset) the first /clock is anchored to a wall-time estimate and the position follows /clock afterwards.
@@ -38,6 +55,18 @@ READY_CACHE = 1.0           # s, subscriber counts for the status are refreshed 
 LAG_DONE = 1.0              # s, after the playback the SLAM counts as caught up when its odometry is this close
 MONITOR_PERIOD = 0.02       # s, how often the monitor thread checks the end of the chosen part (8x: 0.16 s of bag)
 MIN_PART = 1.0              # s, shortest part of a bag that can be played
+ADAPTER_IN = {'points': '/playback/raw/points', 'points2': '/playback/raw/points2',   # player -> sensor adapter
+              'imu': '/playback/raw/imu'}
+ADAPTER_READY = 20.0        # s to wait for the sensor adapter to subscribe before the player starts
+REF_TOPIC = '/playback/ref_odom'   # a bag's reference odometry is remapped here and recorded as ref.tum (runs.py)
+LAG_PERIOD = 1.0            # s between lag samples written into the run record (lag.csv)
+SENSOR_PRESET = 'sensor:'   # stack preset of a SLAM started for a sensor profile
+QOS_NAMES = {   # rmw enum numbers in metadata.yaml -> names accepted by --qos-profile-overrides-path
+    'history': {0: 'system_default', 1: 'keep_last', 2: 'keep_all'},
+    'reliability': {0: 'system_default', 1: 'reliable', 2: 'best_effort'},
+    'durability': {0: 'system_default', 1: 'transient_local', 2: 'volatile'},
+}
+QOS_FILE = '/tmp/robot_console_playback_qos_{pid}.yaml'   # QoS overrides for the current playback
 
 
 class PlaybackError(Exception):
@@ -58,13 +87,41 @@ def storage_available(storage):
         return False
 
 
+def raw_name_qos(topic_metadata):
+    """The recorded QoS profile of a topic with the ROS name conventions switched back on, or None when the
+    recording already uses them (the normal case)."""
+    try:
+        profiles = yaml.safe_load(topic_metadata.get('offered_qos_profiles') or '') or []
+    except yaml.YAMLError:
+        return None
+    if not isinstance(profiles, list) or not profiles or not isinstance(profiles[0], dict):
+        return None
+    if not any(isinstance(q, dict) and q.get('avoid_ros_namespace_conventions') for q in profiles):
+        return None
+    # `ros2 bag play` reads the override file with rclpy short names, not the enum numbers of metadata.yaml;
+    # deadline / lifespan / liveliness stay at the defaults (the recorded "infinite" values overflow there)
+    q = profiles[0]
+    out = {'history': QOS_NAMES['history'].get(q.get('history'), 'keep_last'),
+           'depth': max(int(q.get('depth') or 0), 10),
+           'reliability': QOS_NAMES['reliability'].get(q.get('reliability'), 'reliable'),
+           'durability': QOS_NAMES['durability'].get(q.get('durability'), 'volatile'),
+           'avoid_ros_namespace_conventions': False}
+    return out
+
+
 def read_bag(path):
     """Summary of a rosbag2 folder from its metadata.yaml, or None when it is not a readable bag."""
     try:
         with open(os.path.join(path, 'metadata.yaml'), encoding='utf-8') as f:
             info = (yaml.safe_load(f) or {})['rosbag2_bagfile_information']
+        entries = info.get('topics_with_message_count') or []
         topics = [{'name': t['topic_metadata']['name'], 'type': t['topic_metadata']['type'],
-                   'count': int(t.get('message_count', 0))} for t in info.get('topics_with_message_count') or []]
+                   'count': int(t.get('message_count', 0))} for t in entries]
+        qos_fix = {}
+        for t in entries:
+            q = raw_name_qos(t['topic_metadata'])
+            if q is not None:
+                qos_fix[t['topic_metadata']['name']] = q
         size = 0
         for name in info.get('relative_file_paths') or []:
             try:
@@ -79,6 +136,7 @@ def read_bag(path):
             'messages': int(info.get('message_count', 0)),
             'size': size,
             'topics': sorted(topics, key=lambda t: t['name']),
+            'qos_fix': qos_fix,
         }
     except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError):
         return None
@@ -123,21 +181,57 @@ def match_inputs(topics, inputs):
     return plan, missing
 
 
-def play_args(bag, plan, rate, gt_topic=None):
-    """Arguments appended to `ros2 bag play` (the stack command) for one playback."""
+def sensor_profile_of(bag, profiles):
+    """Name of the first sensor profile whose `match` topics the bag has (with the right types), else None."""
+    types = {t['name']: t['type'] for t in bag['topics']}
+    for name, p in (profiles or {}).items():
+        need = p.get('match') or [p.get('points')]
+        if all(t in types for t in need) and types.get(p.get('points')) == INPUT_TYPES['points'] and \
+                (not p.get('imu') or types.get(p['imu']) == INPUT_TYPES['imu']):
+            return name
+    return None
+
+
+def profile_plan(profile, inputs):
+    """Like match_inputs for a bag with a sensor profile: bag topic -> adapter input (via) -> SLAM input (to)."""
+    plan, missing = {}, []
+    for kind, target in (inputs or {}).items():
+        src = profile.get(kind)
+        if kind not in ADAPTER_IN or not src:
+            missing.append(kind)
+        else:
+            plan[kind] = {'from': src, 'to': target, 'via': ADAPTER_IN[kind]}
+    if profile.get('points2') and 'points' in plan:     # second lidar, merged into the same SLAM input
+        plan['points2'] = {'from': profile['points2'], 'to': plan['points']['to'], 'via': ADAPTER_IN['points2']}
+    return plan, missing
+
+
+def play_args(bag, plan, rate, gt_topic=None, qos_path=None, ref=None):
+    """Arguments appended to `ros2 bag play` (the stack command) for one playback. When a played topic needs a
+    QoS override (see the module doc) and qos_path is given, the overrides are written there.
+    ref: the bag's reference odometry topic, played onto REF_TOPIC."""
     names = {t['name'] for t in bag['topics']}
     own_clock = '/clock' not in names
     topics = sorted({p['from'] for p in plan.values()})
     if gt_topic and gt_topic in names:
         topics.append(gt_topic)
+    if ref and ref in names:
+        topics.append(ref)
     if not own_clock:
         topics.append('/clock')
     args = [bag['path'], '--rate', f'{rate:g}', '--disable-keyboard-controls', '--topics', *topics]
-    remaps = [f"{p['from']}:={p['to']}" for p in plan.values() if p['from'] != p['to']]
+    remaps = [f"{p['from']}:={p.get('via') or p['to']}" for p in plan.values() if p['from'] != (p.get('via') or p['to'])]
+    if ref and ref in names:
+        remaps.append(f'{ref}:={REF_TOPIC}')
     if remaps:
         args += ['--remap', *remaps]
     if own_clock:
         args += ['--clock', str(CLOCK_HZ)]
+    fix = {t: q for t, q in (bag.get('qos_fix') or {}).items() if t in topics}
+    if fix and qos_path:
+        with open(qos_path, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(fix, f, sort_keys=False)
+        args += ['--qos-profile-overrides-path', qos_path]
     return args, own_clock
 
 
@@ -149,7 +243,11 @@ class Playback:
         self.roots = [os.path.expanduser(d) for d in (p.get('bag_dirs') or [])]
         self.rates = sorted({float(r) for r in (p.get('rates') or [0.5, 1, 2, 4, 8]) if float(r) > 0} | {1.0})
         self.gt_topic = cfg['mapping'].get('gt_topic') or None
+        self._qos_path = QOS_FILE.format(pid=os.getpid())
         self.sim_stacks = [n for n in (mapping.stacks.get('sim'), 'sim_gui') if n]
+        self.adapter_stack = p.get('adapter_stack', 'sensor_adapter')
+        self.profiles = p.get('sensor_profiles') or {}
+        self.profiles_file = p.get('sensor_profiles_file') or ''
         self._node, self._procs, self._mapping = node, procs, mapping
         self._lock = threading.Lock()
         self._cur = None            # the current / last playback, see start()
@@ -163,11 +261,12 @@ class Playback:
         out = []
         for b in find_bags(self.roots):
             names = {t['name'] for t in b['topics']}
+            sensor = sensor_profile_of(b, self.profiles)
             slams = {}
             for name, prof in self._mapping.profiles.items():
                 if 'bag' not in prof['sources'] or not prof['inputs']:
                     continue
-                plan, missing = match_inputs(b['topics'], prof['inputs'])
+                plan, missing = self._plan(b, sensor, name, prof['inputs'])
                 slams[name] = {'ok': not missing, 'missing': missing, 'plan': plan,
                                'remapped': any(p['from'] != p['to'] for p in plan.values())}
             supported = storage_available(b['storage'])
@@ -178,9 +277,41 @@ class Playback:
                 'points': [t['name'] for t in b['topics'] if t['type'] == INPUT_TYPES['points']],
                 'imu': [t['name'] for t in b['topics'] if t['type'] == INPUT_TYPES['imu']],
                 'has_clock': '/clock' in names, 'has_gt': bool(self.gt_topic and self.gt_topic in names),
+                'reference': self._reference(sensor, names),
                 'slams': slams,
+                'sensor': {'name': sensor, 'label': self.profiles[sensor]['label']} if sensor else None,
             })
         return out
+
+    def _reference(self, sensor, names):
+        """{topic, label} of the sensor profile's reference odometry when the bag has it, else None."""
+        ref = (self.profiles[sensor].get('reference') or {}) if sensor else {}
+        topic = ref.get('topic')
+        if not topic or topic not in names:
+            return None
+        return {'topic': topic, 'label': ref.get('label') or topic}
+
+    def _plan(self, bag, sensor, slam, inputs):
+        """(plan, missing) for feeding `slam` from `bag`; with a sensor profile, a SLAM the profile has no
+        configuration for is missing 'sensor'."""
+        if sensor is None:
+            return match_inputs(bag['topics'], inputs)
+        prof = self.profiles[sensor]
+        if slam not in (prof.get('slam_args') or {}):
+            return {}, ['sensor']
+        return profile_plan(prof, inputs)
+
+    def slam_start_args(self, slam, path):
+        """(preset, extra args) for starting `slam` on the Playback page for the bag at `path`: the sensor
+        profile's SLAM configuration, or (None, []) for a bag without a profile."""
+        bag = self._find(path)
+        sensor = sensor_profile_of(bag, self.profiles)
+        if sensor is None:
+            return None, []
+        args = (self.profiles[sensor].get('slam_args') or {}).get(slam)
+        if args is None:
+            raise PlaybackError('playback_sensor_unsupported', name=slam, sensor=sensor)
+        return SENSOR_PRESET + sensor, list(args)
 
     def _find(self, path):
         real = os.path.realpath(path or '')
@@ -258,6 +389,12 @@ class Playback:
                        duration=cur['duration'], position=round(pos, 2), plan=cur['plan'], finished=finished,
                        range=[round(cur['begin'], 2), round(cur['end'], 2)],
                        exit_code=s.exit_code if state == 'exited' else None)
+            # run record of this playback (Evaluation page link); kept after the SLAM stopped. None until the
+            # estimate moved 0.5 m (runs.py)
+            rid = getattr(getattr(self._mapping, 'recorder', None), 'run_id', None)
+            if rid and slam == cur['slam'] and self._cur is not None and self._cur.get('path') == cur['path']:
+                self._cur['run'] = rid
+            out['run'] = (self._cur or {}).get('run')
             # How far the SLAM's odometry is behind the playback clock: a heavy SLAM at 2x falls behind and
             # keeps working on queued scans after the bag has ended (saving then would cut the map short)
             stamp = self._mapping.last_stamp()
@@ -289,8 +426,16 @@ class Playback:
             cur = self._cur
             if cur is None or s is None or self._played != (slam, s.started_at):
                 return {}
-            return {'source': 'bag', 'bag': cur['path'], 'bag_rate': cur['rate'],
-                    'bag_range': [round(cur['begin'], 2), round(cur['end'], 2)]}
+            out = {'type': 'playback', 'source': 'bag', 'bag': cur['path'], 'bag_name': cur['name'],
+                   'bag_rate': cur['rate'], 'sensor': cur.get('sensor'),
+                   'bag_range': [round(cur['begin'], 2), round(cur['end'], 2)],
+                   'gt_source': 'bag' if cur.get('has_gt') else 'none'}
+            if cur.get('sensor'):
+                out['sensor_label'] = self.profiles[cur['sensor']].get('label')
+            if cur.get('ref'):
+                out['ref_source'] = cur['ref']['topic']
+                out['ref_label'] = cur['ref']['label']
+            return out
 
     # ---------------- commands ----------------
 
@@ -320,38 +465,95 @@ class Playback:
         prof = self._mapping.profiles[slam]
         if 'bag' not in prof['sources'] or not prof['inputs']:
             raise PlaybackError('playback_slam_unsupported', name=slam)
-        plan, missing = match_inputs(bag['topics'], prof['inputs'])
+        sensor = sensor_profile_of(bag, self.profiles)
+        plan, missing = self._plan(bag, sensor, slam, prof['inputs'])
+        if 'sensor' in missing:
+            raise PlaybackError('playback_sensor_unsupported', name=slam, sensor=sensor)
         if missing:
             labels = {'points': 'PointCloud2', 'imu': 'IMU'}
             raise PlaybackError('bag_missing_inputs', name=slam, inputs=', '.join(labels.get(k, k) for k in missing))
         if self._played == (slam, ss.started_at):
             raise PlaybackError('playback_restart_slam', name=slam)
+        preset = getattr(ss, 'preset', None) or ''
+        slam_sensor = preset[len(SENSOR_PRESET):] if preset.startswith(SENSOR_PRESET) else None
+        if slam_sensor != sensor:
+            # the SLAM runs the configuration of another sensor set-up (or the simulation's)
+            raise PlaybackError('playback_sensor_restart', name=slam, sensor=sensor or '-')
         if self._node.count_subscribers(plan['points']['to']) == 0:
             raise PlaybackError('playback_slam_not_ready', name=slam, topic=plan['points']['to'])
-        args, own_clock = play_args(bag, plan, float(rate), self.gt_topic)
+        names = {t['name'] for t in bag['topics']}
+        ref = self._reference(sensor, names)
+        args, own_clock = play_args(bag, plan, float(rate), self.gt_topic, self._qos_path,
+                                    ref['topic'] if ref else None)
         if begin > 0:
             args += ['--start-offset', f'{begin:g}']
-        info = self._procs.start(self.stack, args, None, 'playback')
+        if sensor:
+            self._start_adapter(sensor, plan)
+        try:
+            info = self._procs.start(self.stack, args, None, 'playback')
+        except Exception:
+            self._stop_adapter()
+            raise
         with self._lock:
             self._played = (slam, ss.started_at)
             self._cur = {'path': bag['path'], 'name': os.path.relpath(bag['path'], bag['root'])
                          if bag['path'] != bag['root'] else os.path.basename(bag['path']),
                          'rate': float(rate), 'paused': False, 'duration': bag['duration'], 'start': bag['start'],
                          'begin': begin, 'end': end, 'own_clock': own_clock,
-                         'pos0': begin, 'wall0': time.monotonic(), 'last_pos': begin, 'plan': plan, 'slam': slam}
+                         'pos0': begin, 'wall0': time.monotonic(), 'last_pos': begin, 'plan': plan, 'slam': slam,
+                         'sensor': sensor, 'has_gt': bool(self.gt_topic and self.gt_topic in names), 'ref': ref}
             cur = self._cur
         threading.Thread(target=self._monitor, args=(cur,), daemon=True).start()
         return info
 
+    def _start_adapter(self, sensor, plan):
+        """Start the sensor adapter and wait until it listens, so the first scans of the bag are not lost."""
+        a = self._procs.get(self.adapter_stack)
+        if a is None:
+            raise PlaybackError('stack_not_found', 404, name=self.adapter_stack)
+        if a.state() in ('running', 'stopping'):
+            self._procs.stop(self.adapter_stack)
+        params = {'profiles_file': self.profiles_file, 'profile': sensor}
+        for kind, p in plan.items():
+            params[f'{kind}_in'] = p['via']
+            if kind != 'points2':           # the second lidar goes into the same output as the first
+                params[f'{kind}_out'] = p['to']
+        args = ['--ros-args', *[x for k, v in params.items() for x in ('-p', f'{k}:={v}')]]
+        self._procs.start(self.adapter_stack, args, None, 'playback')
+        deadline = time.monotonic() + ADAPTER_READY
+        while self._node.count_subscribers(plan['points']['via']) == 0:
+            if a.state() != 'running' or time.monotonic() > deadline:
+                self._stop_adapter()
+                raise PlaybackError('playback_adapter_failed', 500, name=self.adapter_stack)
+            time.sleep(0.2)
+
+    def _stop_adapter(self):
+        a = self._procs.get(self.adapter_stack)
+        if a is not None and a.state() == 'running':
+            self._procs.stop(self.adapter_stack)
+
     def _monitor(self, cur):
         """While the player runs: keep the last /clock (for the SLAM lag) and stop the player at the end of the
-        chosen part. Runs whether or not a page polls the status."""
+        chosen part. Runs whether or not a page polls the status. Stops the sensor adapter when the player ends."""
+        try:
+            self._watch(cur)
+        finally:
+            if self._cur is cur:
+                self._stop_adapter()
+
+    def _watch(self, cur):
         stop_at_end = cur['end'] < cur['duration'] - 0.05
+        next_lag = 0.0
         while True:
             s = self._player()
             if s is None or s.state() != 'running' or self._cur is not cur:
                 return
             clock = self._node.sim_now()
+            now = time.monotonic()
+            record_lag = getattr(self._mapping, 'record_lag', None)
+            if clock is not None and record_lag and now >= next_lag and self._mapping.stacks.get('slam') == cur['slam']:
+                next_lag = now + LAG_PERIOD
+                record_lag(clock)
             with self._lock:
                 if clock is not None:
                     cur['clock_last'] = clock

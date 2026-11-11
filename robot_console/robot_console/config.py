@@ -194,6 +194,18 @@ def load(path=None):
     if playback.get('upload_dir'):
         playback['upload_dir'] = expand(playback['upload_dir'])
     playback['space_check'] = [expand(d) for d in (playback.get('space_check') or [])]
+    # Sensor profiles of real robots (bags played through robot_console/sensor_adapter.py)
+    profiles = {}
+    sfile = playback.get('sensor_profiles_file')
+    if sfile:
+        playback['sensor_profiles_file'] = os.path.join(os.path.dirname(path), sfile)
+        with open(playback['sensor_profiles_file'], encoding='utf-8') as f:
+            profiles = yaml.safe_load(f) or {}
+    for name, p in profiles.items():
+        p['label'] = bilingual(p.get('label'), name)
+        p['slam_args'] = {stack: [expand(a) for a in (args or [])]
+                          for stack, args in (p.get('slam_args') or {}).items()}
+    playback['sensor_profiles'] = profiles
     ev = cfg['evaluation'] = cfg.get('evaluation') or {}
     ev.setdefault('results_dir', '${data_root}/results')
     ev.setdefault('evo_python', '~/venvs/evo/bin/python')

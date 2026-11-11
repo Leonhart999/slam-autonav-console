@@ -1,4 +1,4 @@
-"""bag_files.py: bag upload (begin / stream files / finish / cancel), delete to trash, empty trash.
+"""bag_files.py: bag upload (begin / stream files / finish / cancel), delete to trash, list / restore / purge / empty.
 
 Pure Python: a fake Playback object, a fake request whose body is streamed in chunks.
 """
@@ -108,6 +108,82 @@ class BagFilesTests(unittest.TestCase):
             self.assertEqual(self.code(self.files.begin, 'big', 2 * 1024 ** 3, 1), 'bag_no_space')
             self.files.begin('small', 512 * 1024 ** 2, 1)
 
+    def test_finish_refuses_an_open_file_even_when_its_path_exists(self):
+        async def scenario():
+            tok = self.files.begin('partial', len(META.encode()) + 100, 2)['token']
+            await self.files.receive(tok, 'metadata.yaml', Body(META.encode()))
+            started, resume = asyncio.Event(), asyncio.Event()
+            class SlowBody:
+                async def stream(self):
+                    yield b'x' * 20
+                    started.set()
+                    await resume.wait()
+                    yield b'x' * 80
+            task = asyncio.create_task(self.files.receive(tok, 't10_0.db3', SlowBody()))
+            await started.wait()
+            try:
+                self.assertEqual(self.code(self.files.finish, tok), 'bag_upload_invalid')
+                self.assertFalse(Path(self.root, 'uploads', 'partial').exists())
+            finally:
+                resume.set()
+                await task
+            out = self.files.finish(tok)
+            self.assertEqual(Path(out['path'], 't10_0.db3').stat().st_size, 100)
+        asyncio.run(scenario())
+
+    def test_finish_checks_announced_size_and_file_count(self):
+        for name, size, count in [('short', len(META.encode()) + 101, 2),
+                                  ('missing_file', len(META.encode()) + 100, 3)]:
+            tok = self.files.begin(name, size, count)['token']
+            self.put(tok, 'metadata.yaml', META.encode())
+            self.put(tok, 't10_0.db3', b'x' * 100)
+            self.assertEqual(self.code(self.files.finish, tok), 'bag_upload_invalid')
+            self.files.cancel(tok)
+
+    def test_concurrent_files_share_the_total_byte_limit(self):
+        async def scenario():
+            tok = self.files.begin('concurrent', 100, 2)['token']
+            started, resume = asyncio.Event(), asyncio.Event()
+            class SlowBody:
+                async def stream(self):
+                    yield b'x' * 70
+                    started.set()
+                    await resume.wait()
+            task = asyncio.create_task(self.files.receive(tok, 'one.db3', SlowBody()))
+            await started.wait()
+            try:
+                with self.assertRaises(BagFileError):
+                    await self.files.receive(tok, 'two.db3', Body(b'x' * 70))
+            finally:
+                resume.set()
+                await task
+            self.files.cancel(tok)
+        asyncio.run(scenario())
+
+    def test_cancel_during_upload_does_not_damage_the_next_session(self):
+        async def scenario():
+            tok = self.files.begin('old', 100, 1)['token']
+            started, resume = asyncio.Event(), asyncio.Event()
+            class SlowBody:
+                async def stream(self):
+                    yield b'x'
+                    started.set()
+                    await resume.wait()
+                    yield b'y'
+            task = asyncio.create_task(self.files.receive(tok, 'old.db3', SlowBody()))
+            await started.wait()
+            self.files._session['touched'] = 0
+            self.assertEqual(self.code(self.files.begin, 'new', 100, 1), 'bag_upload_busy')
+            self.files.cancel(tok)
+            new = self.files.begin('new', 100, 1)['token']
+            resume.set()
+            with self.assertRaises(BagFileError):
+                await task
+            self.assertFalse(Path(self.files.staging, tok).exists())
+            self.assertEqual(self.files._session['token'], new)
+            self.files.cancel(new)
+        asyncio.run(scenario())
+
     def test_delete_moves_to_trash_and_empty_frees_it(self):
         self.files.finish(self.upload())
         bag = f'{self.root}/uploads/t10'
@@ -123,6 +199,47 @@ class BagFilesTests(unittest.TestCase):
         self.assertGreater(t['size'], 100)
         self.assertGreater(self.files.empty_trash()['freed'], 100)
         self.assertEqual(self.files.trash(), [])
+
+    def test_trash_lists_restores_and_purges(self):
+        self.files.finish(self.upload())
+        bag = f'{self.root}/uploads/t10'
+        self.files.delete(bag)
+        out = self.files.trash_entries()
+        self.assertEqual(out['dirs'], [f'{self.root}/.trash'])
+        [e] = out['entries']
+        self.assertEqual((e['name'], e['restorable']), ('uploads/t10', True))
+        self.assertGreater(e['size'], 100)
+        self.files.restore(e['id'])
+        self.assertTrue(Path(bag, 'metadata.yaml').is_file())
+        self.assertEqual(self.files.trash_entries()['entries'], [])
+        self.assertEqual(list(Path(self.root, '.trash').iterdir()), [])          # the .json record went too
+        # restore refuses to overwrite a bag that took the old place
+        self.files.delete(bag)
+        [e] = self.files.trash_entries()['entries']
+        self.files.finish(self.upload())
+        self.assertEqual(self.code(self.files.restore, e['id']), 'bag_exists')
+        self.assertGreater(self.files.purge(e['id'])['freed'], 100)
+        self.assertEqual(list(Path(self.root, '.trash').iterdir()), [])
+        self.assertTrue(Path(bag).is_dir())                                      # the new bag is untouched
+
+    def test_trash_ids_must_be_trash_entries(self):
+        self.files.finish(self.upload())
+        bag = f'{self.root}/uploads/t10'
+        for bad in (bag, f'{self.root}/uploads', f'{self.root}/.trash', f'{self.root}/.trash/../uploads/t10', '/tmp', ''):
+            self.assertEqual(self.code(self.files.purge, bad), 'bag_trash_not_found', bad)
+        self.assertTrue(Path(bag).is_dir())
+
+    def test_old_entries_without_a_record_can_only_be_purged(self):
+        Path(self.root, '.trash', 'old_bag_20261101_120000').mkdir(parents=True)
+        Path(self.root, '.trash', 'old_bag_20261101_120000', 'x.db3').write_bytes(b'x' * 10)
+        [e] = self.files.trash_entries()['entries']
+        self.assertEqual((e['name'], e['restorable']), ('old_bag_20261101_120000', False))
+        self.assertEqual(self.code(self.files.restore, e['id']), 'bag_trash_not_restorable')
+        # a forged record cannot send the folder outside the bag folder
+        Path(e['id'] + '.json').write_text('{"origin": "../outside"}')
+        self.assertEqual(self.code(self.files.restore, e['id']), 'bag_trash_not_restorable')
+        self.files.purge(e['id'])
+        self.assertEqual(self.files.trash_entries()['entries'], [])
 
     def test_a_root_that_is_a_bag_is_not_deleted(self):
         Path(self.root, 'metadata.yaml').write_text(META)

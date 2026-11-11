@@ -153,6 +153,8 @@ class MapCatalog:
 
         return {
             'name': name, 'kind': kind, 'created': stamp, 'source': meta.get('source', 'mapping' if meta else None),
+            # built from a bag playback: the bag's name (shown as "Playback · <bag>" where the scene would be)
+            'bag': (meta.get('bag_name') or os.path.basename(str(meta['bag']).rstrip('/'))) if meta.get('bag') else None,
             'algorithm': meta.get('algorithm'), 'preset': preset, 'points': points,
             'voxels': meta.get('voxels'), 'has_grid': grid is not None, 'has_cloud': cloud is not None,
             'has_solid': bool(self.solids and grid and kind == 'folder' and self.solids.get(preset)),

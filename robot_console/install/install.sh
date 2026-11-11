@@ -203,7 +203,9 @@ else
     info "  bash $SIM_DIR/tools/make_hkust_models.sh /path/to/SLABIM   (or run this installer with SLABIM_DIR set)"
 fi
 
-for f in "$SIM_DIR/config/fastlio_sim_vlp16.yaml" "$SRC/FAST_LIO/config/m3dgr_mid360.yaml"; do
+for f in "$SIM_DIR/config/fastlio_sim_vlp16.yaml" "$SIM_DIR/config/fastlio_lidar_only.yaml" \
+         "$SIM_DIR/config/fastlio_bag.yaml" "$SIM_DIR/config/fastlio_bag_lidar_only.yaml" \
+         "$SRC/FAST_LIO/config/m3dgr_mid360.yaml"; do
     if [ -f "$f" ] && grep -q 'map_file_path: "/home/[^/"]*/results/' "$f" && ! grep -q "map_file_path: \"$HOME/results/" "$f"; then
         sed -i -E "s#map_file_path: \"/home/[^/\"]*/results/#map_file_path: \"$HOME/results/#" "$f"
         info "map_file_path in $(basename "$f") now points to $HOME/results/"

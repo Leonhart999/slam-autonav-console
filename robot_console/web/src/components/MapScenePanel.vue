@@ -98,7 +98,7 @@ const unbind = () => run(() => api.unbindMapScene(props.map.name), () => t('navi
           v-model="height" size="small" :min="0.5" :max="5" :step="0.5" :precision="1"
           :disabled="disabled || busy" controls-position="right" class="height"
         />
-        <el-button size="small" type="primary" plain :loading="busy" :disabled="disabled || busy" @click="generate">
+        <el-button size="small" type="primary" :loading="busy" :disabled="disabled || busy" @click="generate">
           {{ t('navigation.mapScene.generate') }}
         </el-button>
       </div>

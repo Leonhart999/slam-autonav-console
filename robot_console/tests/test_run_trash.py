@@ -78,6 +78,35 @@ class RunTrashTests(unittest.TestCase):
                 self.trash.purge(bad)
         self.assertTrue(self.runs.is_dir() and self.maps.is_dir())
 
+    def test_batch_records(self):
+        for bid, state in (('batch_20261105_1704', 'finished'), ('batch_20261105_1800', 'running')):
+            (self.runs / bid).mkdir()
+            (self.runs / bid / 'batch.json').write_text(json.dumps(
+                {'id': bid, 'state': state, 'preset': 'office', 'created': '2026-11-05 17:04:00'}))
+        (self.runs / 'batch_bad').mkdir()                       # no batch.json: not a batch record
+        r = self.trash.move(['batch_20261105_1704', 'batch_20261105_1800', 'batch_bad'])
+        self.assertEqual(r['moved'], ['batch_20261105_1704'])
+        self.assertEqual({x['id']: x['reason'] for x in r['refused']},
+                         {'batch_20261105_1800': 'recording', 'batch_bad': 'not_found'})
+        self.trash.move(['map_1'])
+        batch = next(e for e in self.trash.list()['entries'] if e['type'] == 'batch')
+        self.assertEqual((batch['run'], batch['preset'], batch['restorable']), ('batch_20261105_1704', 'office', True))
+        self.assertEqual(batch['started'], '2026-11-05 17:04:00')
+
+        # Emptying only the batch part leaves deleted runs (and the old group) alone, and the other way round
+        self.assertEqual(self.trash.empty('batch'), {'deleted': 1})
+        self.assertEqual({e['type'] for e in self.trash.list()['entries']}, {'mapping', 'group'})
+        (self.runs / 'batch_2').mkdir()
+        (self.runs / 'batch_2' / 'batch.json').write_text('{}')
+        self.trash.move(['batch_2'])
+        self.assertEqual(self.trash.empty('runs'), {'deleted': 2})
+        entries = self.trash.list()['entries']
+        self.assertEqual([e['type'] for e in entries], ['batch'])
+        self.assertEqual(self.trash.restore(entries[0]['entry']), {'restored': 'batch_2'})
+        self.assertTrue((self.runs / 'batch_2' / 'batch.json').is_file())
+        with self.assertRaises(RunTrashError):
+            self.trash.empty('maps')
+
 
 if __name__ == '__main__':
     unittest.main()

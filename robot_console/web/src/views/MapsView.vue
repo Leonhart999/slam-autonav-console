@@ -18,11 +18,11 @@ import NavScene3D from '@/components/NavScene3D.vue'
 import MapRegridDialog from '@/components/MapRegridDialog.vue'
 import MapEditDialog from '@/components/MapEditDialog.vue'
 import NavigationImportDialog, { type MapImportResult } from '@/components/NavigationImportDialog.vue'
-import type { TrashEntry } from '@/maps/api'
+import TrashBin, { type TrashItem } from '@/components/TrashBin.vue'
 
 const { t } = useI18n({ messages: {
-  'zh-CN': { management: { import: '导入地图', regrid: '重新生成 2D', edit: '编辑 2D 地图', remove: '删除地图', trash: '回收站', restore: '恢复', purge: '永久删除', empty: '清空回收站', close: '关闭', confirm: '确认', cancel: '取消', removeAsk: '将地图 {name} 移到回收站？原文件仍可恢复。', purgeAsk: '永久删除这些回收站文件？此操作不可恢复。', deleted: '地图已移到回收站', restored: '地图已恢复', purged: '回收站文件已永久删除', noTrash: '回收站为空', deletedAt: '删除时间', legacy: '旧平铺格式暂不支持删除（图像可能被其他地图共用）' } },
-  en: { management: { import: 'Import map', regrid: 'Regenerate 2D', edit: 'Edit 2D map', remove: 'Delete map', trash: 'Recycle bin', restore: 'Restore', purge: 'Delete permanently', empty: 'Empty recycle bin', close: 'Close', confirm: 'Confirm', cancel: 'Cancel', removeAsk: 'Move map {name} to the recycle bin? Its files remain recoverable.', purgeAsk: 'Permanently delete these recycled files? This cannot be undone.', deleted: 'Map moved to recycle bin', restored: 'Map restored', purged: 'Recycled files permanently deleted', noTrash: 'Recycle bin is empty', deletedAt: 'Deleted at', legacy: 'Legacy flat maps cannot be deleted here (images may be shared)' } },
+  'zh-CN': { management: { import: '导入地图', regrid: '重新生成 2D', edit: '编辑 2D 地图', remove: '删除地图', trashTitle: '地图回收站', confirm: '确认', cancel: '取消', removeAsk: '将地图 {name} 移到回收站？原文件仍可恢复。', deleted: '地图已移到回收站', restored: '地图已恢复', purged: '回收站文件已永久删除', legacy: '旧平铺格式暂不支持删除（图像可能被其他地图共用）' } },
+  en: { management: { import: 'Import map', regrid: 'Regenerate 2D', edit: 'Edit 2D map', remove: 'Delete map', trashTitle: 'Map recycle bin', confirm: 'Confirm', cancel: 'Cancel', removeAsk: 'Move map {name} to the recycle bin? Its files remain recoverable.', deleted: 'Map moved to recycle bin', restored: 'Map restored', purged: 'Recycled files permanently deleted', legacy: 'Legacy flat maps cannot be deleted here (images may be shared)' } },
 } })
 const store = useStatusStore()
 const route = useRoute()
@@ -80,6 +80,10 @@ function sceneLabel(preset: string | null) {
   if (!preset) return '—'
   const p = presets.value.find((x) => x.name === preset)
   return p ? pick(p.label) : preset
+}
+/** Scene of the map; a map built from a bag playback without a linked scene shows "Playback · <bag>" */
+function sourceOf(m: { preset: string | null; bag?: string | null }) {
+  return !m.preset && m.bag ? t('mapsPage.fromBag', { bag: m.bag }) : sceneLabel(m.preset)
 }
 const LEVEL_CHIP: Record<IssueLevel, string> = { error: 'danger', warn: 'warning', info: 'info' }
 function issueText(code: string, params: Record<string, string | number>) {
@@ -234,7 +238,9 @@ const importOpen = ref(false)
 const regridOpen = ref(false)
 const editOpen = ref(false)
 const trashOpen = ref(false)
-const trashEntries = ref<TrashEntry[]>([])
+const trashItems = ref<TrashItem[]>([])
+const trashLoading = ref(false)
+const trashBusy = ref('') // entry being restored / deleted ('*' = emptying)
 const mutationBusy = ref(false)
 async function confirm(text: string) {
   try { await ElMessageBox.confirm(text, t('management.confirm'), { type: 'warning', confirmButtonText: t('management.confirm'), cancelButtonText: t('management.cancel') }); return true }
@@ -247,19 +253,34 @@ async function removed() {
   catch (e) { ElMessage.error(errorText(e)) } finally { mutationBusy.value = false }
 }
 async function loadTrash() {
-  try { trashEntries.value = await mapsApi.trash() } catch (e) { ElMessage.error(errorText(e)) }
+  trashLoading.value = true
+  try {
+    trashItems.value = (await mapsApi.trash()).map((e) => ({ ...e, restorable: true }))
+  } catch (e) {
+    ElMessage.error(errorText(e))
+  } finally {
+    trashLoading.value = false
+  }
 }
-async function openTrash() { trashOpen.value = true; await loadTrash() }
-async function restore(id: string) {
+async function trashAct(action: 'restore' | 'purge' | 'empty', id = '') {
+  trashBusy.value = id || '*'
   mutationBusy.value = true
-  try { await mapsApi.restore(id); ElMessage.success(t('management.restored')); await loadTrash(); await loadList() }
-  catch (e) { ElMessage.error(errorText(e)) } finally { mutationBusy.value = false }
-}
-async function purge(id?: string) {
-  if (!await confirm(t('management.purgeAsk'))) return
-  mutationBusy.value = true
-  try { await mapsApi.purge(id); ElMessage.success(t('management.purged')); await loadTrash() }
-  catch (e) { ElMessage.error(errorText(e)) } finally { mutationBusy.value = false }
+  try {
+    if (action === 'restore') {
+      await mapsApi.restore(id)
+      ElMessage.success(t('management.restored'))
+      await loadList()
+    } else {
+      await mapsApi.purge(id || undefined)
+      ElMessage.success(t('management.purged'))
+    }
+  } catch (e) {
+    ElMessage.error(errorText(e))
+  } finally {
+    trashBusy.value = ''
+    mutationBusy.value = false
+    await loadTrash()
+  }
 }
 async function selectNew(name: string) {
   await loadList()
@@ -283,7 +304,11 @@ function fileRole(role: string | null) {
     <GlassPanel :title="t('mapsPage.list')" flush>
       <template #extra>
         <el-button size="small" @click="importOpen=true">{{ t('management.import') }}</el-button>
-        <el-button size="small" @click="openTrash">{{ t('management.trash') }}</el-button>
+        <TrashBin
+          v-model="trashOpen" :title="t('management.trashTitle')" :entries="trashItems" :loading="trashLoading"
+          :busy="trashBusy" :dirs="[`${store.paths.maps}/.trash`]" @open="loadTrash"
+          @restore="trashAct('restore', $event)" @purge="trashAct('purge', $event)" @empty="trashAct('empty')"
+        />
         <span class="count">{{ t('mapsPage.count', { n: maps.length }) }}</span>
         <el-button size="small" circle :title="t('openFolder.maps')" :aria-label="t('openFolder.maps')" @click="openFolder(store.paths.maps)">
           <el-icon><FolderOpened /></el-icon>
@@ -318,7 +343,7 @@ function fileRole(role: string | null) {
           <template #default="{ row }">{{ row.algorithm ?? (row.source === 'upload' ? t('mapsPage.imported') : '—') }}</template>
         </el-table-column>
         <el-table-column :label="t('mapsPage.col.scene')" min-width="110" show-overflow-tooltip>
-          <template #default="{ row }">{{ sceneLabel(row.preset) }}</template>
+          <template #default="{ row }">{{ sourceOf(row) }}</template>
         </el-table-column>
         <el-table-column :label="t('mapsPage.col.points')" width="95" align="right">
           <template #default="{ row }"><span class="num">{{ fmtPoints(row.points) }}</span></template>
@@ -350,18 +375,6 @@ function fileRole(role: string | null) {
     <NavigationImportDialog v-model="importOpen" :disabled="false" allow-cloud-only @completed="imported" />
     <MapRegridDialog v-model="regridOpen" :map="detail" :cloud="cloud" @saved="selectNew" />
     <MapEditDialog v-model="editOpen" :map="detail" @saved="selectNew" />
-    <el-dialog v-model="trashOpen" :title="t('management.trash')" width="min(850px, 95vw)">
-      <el-table :data="trashEntries" :empty-text="t('management.noTrash')">
-        <el-table-column prop="name" :label="t('mapsPage.col.name')" />
-        <el-table-column prop="deleted" :label="t('management.deletedAt')" />
-        <el-table-column :label="t('mapsPage.col.size')"><template #default="{row}">{{ fmtBytes(row.size) }}</template></el-table-column>
-        <el-table-column width="240"><template #default="{row}">
-          <el-button size="small" :disabled="mutationBusy" @click="restore(row.id)">{{ t('management.restore') }}</el-button>
-          <el-button size="small" type="danger" :disabled="mutationBusy" @click="purge(row.id)">{{ t('management.purge') }}</el-button>
-        </template></el-table-column>
-      </el-table>
-      <template #footer><el-button type="danger" :disabled="mutationBusy || !trashEntries.length" @click="purge()">{{ t('management.empty') }}</el-button><el-button @click="trashOpen=false">{{ t('management.close') }}</el-button></template>
-    </el-dialog>
     <p v-if="detailError" class="warn">{{ detailError }}</p>
 
     <template v-if="detail">
@@ -372,7 +385,7 @@ function fileRole(role: string | null) {
           <span class="chip" :class="detail.has_grid ? 'success' : 'danger'">2D</span>
           <span class="chip" :class="detail.has_cloud ? 'success' : 'warning'">3D</span>
           <span class="chip" :class="detail.preset ? 'primary' : 'warning'">
-            {{ t('mapsPage.col.scene') }}: {{ sceneLabel(detail.preset) }}
+            {{ t('mapsPage.col.scene') }}: {{ sourceOf(detail) }}
           </span>
           <div class="actions">
           <el-button :disabled="!detail.has_cloud" @click="regridOpen=true">{{ t('management.regrid') }}</el-button>
@@ -455,7 +468,7 @@ function fileRole(role: string | null) {
             <dt>{{ t('mapsPage.col.algorithm') }}</dt>
             <dd>{{ detail.algorithm ?? (detail.source === 'upload' ? t('mapsPage.imported') : '—') }}</dd>
             <dt>{{ t('mapsPage.col.scene') }}</dt>
-            <dd>{{ sceneLabel(detail.preset) }}</dd>
+            <dd>{{ sourceOf(detail) }}</dd>
             <dt>{{ t('mapsPage.f.points') }}</dt>
             <dd class="num">{{ fmtPoints(detail.points) }}</dd>
             <dt>{{ t('mapsPage.f.voxels') }}</dt>

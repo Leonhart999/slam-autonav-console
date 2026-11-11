@@ -32,6 +32,42 @@ mapping_fastlio:
         use_sim_time:=true, rviz:=false]
   before_stop: {service: /map_save, timeout: 15}
 
+mapping_fastlio_ground:
+  label: {zh: 建图 FAST-LIO2（地面约束）, en: Mapping (FAST-LIO2, ground)}
+  description:
+    zh: FAST-LIO2 加地面车辆约束（本文对 FAST-LIO 的补丁）：横滚、俯仰相对重力和高度保持在起点附近，作为软约束加入滤波更新
+    en: FAST-LIO2 with the ground-vehicle constraint (thesis patch of FAST-LIO) - roll and pitch relative to gravity and the height stay near their start values, as soft pseudo-measurements in the filter update
+  cmd: [ros2, launch, fast_lio, mapping.launch.py,
+        'config_path:=${pkg:sim_robot}/config',
+        config_file:=fastlio_sim_vlp16.yaml,
+        ground_constraint:=true,
+        use_sim_time:=true, rviz:=false]
+  before_stop: {service: /map_save, timeout: 15}
+
+mapping_fastlio_lidar:
+  label: {zh: 建图 FAST-LIO2（仅激光）, en: 'Mapping (FAST-LIO2, LiDAR only)'}
+  description:
+    zh: FAST-LIO2 不用 IMU（本文对 FAST-LIO 的补丁）：用前两帧估计的角速度和零加速度做匀速预测，其余不变。仿真和数据包回放都能用
+    en: FAST-LIO2 without the IMU (thesis patch of FAST-LIO) - constant-velocity prediction from the angular velocity of the last two scans and zero acceleration, otherwise unchanged. For the simulation and for bags
+  cmd: [ros2, launch, fast_lio, mapping.launch.py,
+        'config_path:=${pkg:sim_robot}/config',
+        config_file:=fastlio_lidar_only.yaml,
+        ground_constraint:=false,
+        use_sim_time:=true, rviz:=false]
+  before_stop: {service: /map_save, timeout: 15}
+
+mapping_fastlio_lidar_ground:
+  label: {zh: 建图 FAST-LIO2（仅激光，地面约束）, en: 'Mapping (FAST-LIO2, LiDAR only, ground)'}
+  description:
+    zh: FAST-LIO2 仅激光模式加地面车辆约束：横滚、俯仰和高度保持在起点附近（软约束），抑制没有重力参考时的姿态漂移
+    en: FAST-LIO2 LiDAR-only mode with the ground-vehicle constraint - roll, pitch and height stay near their start values (soft), against the attitude drift without a gravity reference
+  cmd: [ros2, launch, fast_lio, mapping.launch.py,
+        'config_path:=${pkg:sim_robot}/config',
+        config_file:=fastlio_lidar_only.yaml,
+        ground_constraint:=true,
+        use_sim_time:=true, rviz:=false]
+  before_stop: {service: /map_save, timeout: 15}
+
 mapping_glim:
   label: {zh: 建图 GLIM, en: Mapping (GLIM)}
   description:
@@ -60,6 +96,14 @@ playback:
     zh: ros2 bag play。数据包、倍速和话题由建图页选择，不能在这里直接启动
     en: ros2 bag play. The mapping page picks the bag, rate and topics; it cannot be started from here
   cmd: [ros2, bag, play]
+  page_only: true
+
+sensor_adapter:
+  label: {zh: 传感器适配, en: Sensor adapter}
+  description:
+    zh: 回放实车数据包时，把雷达和 IMU 按 sensor_profiles.yaml 换到 SLAM 要的坐标系和单位。由数据回放页随回放启停
+    en: For bags of real robots, converts lidar and IMU into the frame and units the SLAM expects (sensor_profiles.yaml). Started and stopped with the playback
+  cmd: [ros2, run, robot_console, sensor_adapter]
   page_only: true
 
 waypoints:

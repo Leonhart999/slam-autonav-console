@@ -62,6 +62,48 @@ mapping:
         service: /map_save
         pcd_path: ~/results/fastlio_map.pcd  # 必须和 FAST-LIO 配置里的 map_file_path 一致（FAST-LIO 不展开 ~，安装脚本会写成绝对路径）
         timeout: 60              # 存大地图较慢（s）
+    # Variants (thesis patch of FAST-LIO): LiDAR only (constant-velocity model instead of the IMU) and the
+    # ground-vehicle constraint. variant_of + options: the pages show one button for the base algorithm and a
+    # switch per option (lidar = LiDAR only, ground = ground-vehicle constraint); each combination is its own stack
+    mapping_fastlio_ground:
+      algorithm: FAST-LIO2 (ground)
+      variant_of: mapping_fastlio
+      options: [ground]
+      frame: camera_init
+      scan_topic: /cloud_registered
+      odom_topic: /Odometry
+      inputs: {points: /points_fastlio, imu: /imu}
+      sources: [sim, bag]
+      save:
+        service: /map_save
+        pcd_path: ~/results/fastlio_map.pcd
+        timeout: 60
+    mapping_fastlio_lidar:
+      algorithm: FAST-LIO2 (LiDAR only)
+      variant_of: mapping_fastlio
+      options: [lidar]
+      frame: camera_init
+      scan_topic: /cloud_registered
+      odom_topic: /Odometry
+      inputs: {points: /points_fastlio}   # no IMU
+      sources: [sim, bag]
+      save:
+        service: /map_save
+        pcd_path: ~/results/fastlio_map.pcd
+        timeout: 60
+    mapping_fastlio_lidar_ground:
+      algorithm: FAST-LIO2 (LiDAR only, ground)
+      variant_of: mapping_fastlio
+      options: [lidar, ground]
+      frame: camera_init
+      scan_topic: /cloud_registered
+      odom_topic: /Odometry
+      inputs: {points: /points_fastlio}
+      sources: [sim, bag]
+      save:
+        service: /map_save
+        pcd_path: ~/results/fastlio_map.pcd
+        timeout: 60
     mapping_glim:
       algorithm: GLIM
       frame: glim_odom           # GLIM 里程计坐标系（= 开始建图时的 IMU 位置，z 轴对齐重力）
@@ -73,6 +115,8 @@ mapping:
         dump_dir: ${data_root}/slam/glim_dump   # 和 stacks.yaml 里 mapping_glim 的 dump_path 一致
     mapping_glim_lidar:
       algorithm: GLIM (LiDAR only)
+      variant_of: mapping_glim
+      options: [lidar]
       frame: glim_odom
       scan_topic: /glim_ros/aligned_points
       odom_topic: /glim_ros/odom
@@ -108,6 +152,8 @@ playback:
   rates: [0.5, 1, 2, 4, 8]
   upload_dir: ''
   space_check: []
+  sensor_profiles_file: sensor_profiles.yaml   # real robots: bags played through the sensor adapter
+  adapter_stack: sensor_adapter
 
 # Evaluation page (step 5a): evo APE/RPE per run, cached as <run>/eval.json
 evaluation:
@@ -118,7 +164,7 @@ evaluation:
 
 # Batch mapping experiments (evaluation page): sim -> SLAM -> waypoints, repeated N times (robot_console/batch.py)
 batch:
-  slam_stacks: [mapping_fastlio, mapping_glim]   # stacks.yaml names offered as SLAM algorithms (labels come from stacks.yaml)
+  slam_stacks: [mapping_fastlio, mapping_fastlio_ground, mapping_fastlio_lidar, mapping_fastlio_lidar_ground, mapping_glim]   # stacks.yaml names offered as SLAM algorithms (labels come from stacks.yaml)
   run_timeout: 900             # s (wall clock) for one repetition; slower runs are recorded as failed
   ready_timeout: 120           # s to wait for the simulation clock / first SLAM odometry
   max_runs: 20

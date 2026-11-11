@@ -1,11 +1,13 @@
 <!-- Playback page, step ①: the rosbag2 folders found under playback.bag_dirs as radio cards.
      Shows what each bag holds (point cloud / IMU / ground truth) so the SLAM choice in step ② makes sense.
      Each card has a delete button (the bag moves to the trash of its folder); the dashed card at the end opens
-     the upload dialog; the bar shows how much the trash holds and empties it. The page does the API calls. -->
+     the upload dialog; the page puts its recycle bin (TrashBin) into the bar's "trash" slot. The page does the API calls. -->
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { fmtBytes, fmtDuration } from '@/format'
+import { pick } from '@/i18n'
 import type { BagInfo } from '@/mapping/stream'
 
 const props = defineProps<{
@@ -14,16 +16,19 @@ const props = defineProps<{
   loading: boolean
   locked: boolean // a playback is running: the bag cannot change
   compact?: boolean // only the chosen bag is listed (SLAM or playback running): no bar, upload or delete
-  trashSize?: number // bytes held by the bag folders' trash
   deleting?: string // path of the bag being deleted
   connected?: boolean
+  /** playback run records per bag path (Evaluation page), shown as "played n times" with a link */
+  runCounts?: Record<string, number>
 }>()
 const selected = defineModel<string>({ required: true })
-defineEmits<{ refresh: []; upload: []; delete: [bag: BagInfo]; emptyTrash: [] }>()
+defineEmits<{ refresh: []; upload: []; delete: [bag: BagInfo] }>()
 const { t } = useI18n()
 
 const scans = (b: BagInfo) => b.topics.filter((x) => b.points.includes(x.name)).reduce((n, x) => Math.max(n, x.count), 0)
 const editable = computed(() => !props.compact && props.connected !== false)
+const router = useRouter()
+const openRuns = (bag: string) => router.push({ path: '/evaluation', query: { bag } })
 </script>
 
 <template>
@@ -31,12 +36,7 @@ const editable = computed(() => !props.compact && props.connected !== false)
     <div v-if="!compact" class="bar">
       <span class="k">{{ t('playback.bag.found', { n: bags.length }) }}</span>
       <span class="actions">
-        <el-button
-          v-if="trashSize" size="small" text :title="t('playback.bag.emptyTrash')" :disabled="!editable"
-          @click="$emit('emptyTrash')"
-        >
-          <el-icon><Delete /></el-icon>{{ t('playback.bag.trash', { size: fmtBytes(trashSize) }) }}
-        </el-button>
+        <slot name="trash" :disabled="!editable" />
         <el-button size="small" text :loading="loading" @click="$emit('refresh')">
           <el-icon v-if="!loading"><Refresh /></el-icon>{{ t('playback.bag.refresh') }}
         </el-button>
@@ -57,7 +57,12 @@ const editable = computed(() => !props.compact && props.connected !== false)
               <span class="tag" :class="{ off: !b.points.length }">{{ b.points.length ? b.points[0] : t('playback.bag.noCloud') }}</span>
               <span class="tag" :class="{ off: !b.imu.length }">{{ b.imu.length ? 'IMU' : t('playback.bag.noImu') }}</span>
               <span v-if="b.has_gt" class="tag">{{ t('playback.bag.gt') }}</span>
+              <span v-if="b.reference" class="tag" :title="b.reference.topic">{{ t('playback.bag.reference', { name: pick(b.reference.label) }) }}</span>
               <span v-if="!b.supported" class="tag bad">{{ t('playback.bag.storage', { storage: b.storage }) }}</span>
+            </span>
+            <!-- not a router-link: links are not allowed inside the card's <button> -->
+            <span v-if="runCounts?.[b.path]" class="runs" :title="t('playback.bag.runsHint')" @click.stop="openRuns(b.path)">
+              {{ t('playback.bag.runs', { n: runCounts[b.path] }) }}
             </span>
           </span>
         </button>
@@ -169,6 +174,15 @@ const editable = computed(() => !props.compact && props.connected !== false)
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+.runs {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.runs:hover {
+  text-decoration: underline;
 }
 .tag {
   padding: 0 6px;

@@ -52,6 +52,8 @@ body,
 body {
   font-family: var(--font-ui);
   color: var(--ink);
+  /* Long unbroken strings (map/scene/run names with underscores, paths) wrap instead of overflowing their box */
+  overflow-wrap: break-word;
   background: #eef2f8;
   -webkit-font-smoothing: antialiased;
 }
@@ -161,7 +163,13 @@ body::after {
 .el-button {
   font-weight: 500;
 }
+/* Every enabled primary button sits on the gradient, so its text is always white.
+   Plain variants would otherwise keep the blue primary text on the blue gradient. */
 .el-button--primary:not(.is-disabled):not(.is-link):not(.is-text) {
+  --el-button-text-color: #fff;
+  --el-button-hover-text-color: #fff;
+  --el-button-active-text-color: #fff;
+  color: #fff;
   background-image: var(--accent-grad);
   border-color: transparent;
   box-shadow: 0 6px 16px -8px rgba(37, 99, 235, 0.75);

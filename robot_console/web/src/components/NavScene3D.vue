@@ -1,5 +1,7 @@
 <!-- 3D navigation view: saved point cloud model (height-colored), 2D grid as a floor texture,
-     robot pose, live laser points and Nav2 paths. All data is in the map frame (z up, meters). -->
+     robot pose, live laser points and Nav2 paths. All data is in the map frame (z up, meters).
+     Camera modes as on the mapping page (PointCloudView): follow (orbit, the target trails the robot),
+     free (orbit) and top (orthographic, pan and zoom only). -->
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
@@ -10,8 +12,9 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js'
 import type { NavMap, NavSolid, NavStatus } from '@/types'
+import type { ViewMode } from '@/mapping/stream'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   map: NavMap | null
   image: ImageBitmap | null
   cloud: Float32Array | null
@@ -20,7 +23,8 @@ const props = defineProps<{
   status: NavStatus | null
   showCloud: boolean
   showGrid: boolean
-}>()
+  mode?: ViewMode
+}>(), { mode: 'free' })
 
 // 3D solid model (box/cylinder primitives and STL shells), already in the map frame
 const solidGroup = new THREE.Group()
@@ -99,6 +103,11 @@ let renderer: THREE.WebGLRenderer
 let scene: THREE.Scene
 let camera: THREE.PerspectiveCamera
 let controls: OrbitControls
+let ortho: THREE.OrthographicCamera // top mode
+let pan: OrbitControls
+const ORTHO_HALF = 15 // half height of the top view at zoom 1 (m)
+const CLOUD_SIZE = 0.07 // point sizes in m
+const SCAN_SIZE = 0.09
 let cloudObj: THREE.Points
 let scanObj: THREE.Points
 let floor: THREE.Mesh | null = null
@@ -243,6 +252,8 @@ function setScan(pts: number[][]) {
   scanObj.geometry = geo
 }
 
+/** Default view of the current mode: top shows the whole map, follow sits behind and above the robot,
+    free looks at the whole map at an angle */
 function resetView() {
   const m = props.map
   if (!m) return
@@ -253,9 +264,31 @@ function resetView() {
   const cx = ox + w / 2
   const cy = oy + h / 2
   const span = Math.max(w, h, 6)
-  controls.target.set(cx, cy, floorZ)
-  camera.position.set(cx - span * 0.45, cy - span * 0.75, floorZ + span * 0.7)
+  if (props.mode === 'top') {
+    pan.target.set(cx, cy, floorZ)
+    ortho.position.set(cx, cy, floorZ + 500)
+    // Fit width and height: the 3D panel is often taller than wide
+    const aspect = (ortho.right - ortho.left) / (ortho.top - ortho.bottom)
+    ortho.zoom = Math.min((2 * ORTHO_HALF) / (Math.max(h, 6) * 1.1), (2 * ORTHO_HALF * aspect) / (Math.max(w, 6) * 1.1))
+    ortho.updateProjectionMatrix()
+    pan.update()
+    return
+  }
+  const pose = props.status?.pose
+  if (props.mode === 'follow' && pose) {
+    controls.target.set(pose.x, pose.y, pose.z)
+    camera.position.set(pose.x - Math.cos(pose.yaw) * 7, pose.y - Math.sin(pose.yaw) * 7, pose.z + 5.5)
+  } else {
+    controls.target.set(cx, cy, floorZ)
+    camera.position.set(cx - span * 0.45, cy - span * 0.75, floorZ + span * 0.7)
+  }
   controls.update()
+}
+
+function applyMode() {
+  controls.enabled = props.mode !== 'top'
+  pan.enabled = props.mode === 'top'
+  resetView()
 }
 
 function applyStatus() {
@@ -310,6 +343,11 @@ function resize() {
   renderer.setSize(w, h)
   camera.aspect = w / h
   camera.updateProjectionMatrix()
+  ortho.left = -ORTHO_HALF * (w / h)
+  ortho.right = ORTHO_HALF * (w / h)
+  ortho.top = ORTHO_HALF
+  ortho.bottom = -ORTHO_HALF
+  ortho.updateProjectionMatrix()
   for (const l of [globalLine, localLine]) (l.material as LineMaterial).resolution.set(w, h)
 }
 
@@ -320,8 +358,21 @@ function tick() {
   cloudObj.visible = props.showCloud && !solidMode
   solidGroup.visible = solidMode
   if (floor) floor.visible = props.showGrid
-  controls.update()
-  renderer.render(scene, camera)
+  const top = props.mode === 'top'
+  // Follow: the orbit target glides to the robot and the camera moves with it, keeping the user's angle
+  const pose = props.status?.pose
+  if (props.mode === 'follow' && pose) {
+    const d = new THREE.Vector3(pose.x, pose.y, pose.z).sub(controls.target).multiplyScalar(0.12)
+    controls.target.add(d)
+    camera.position.add(d)
+  }
+  // An orthographic camera draws points at a fixed pixel size: convert the metric size at the current zoom
+  const pxPerM = top ? (renderer.domElement.clientHeight * ortho.zoom) / (ortho.top - ortho.bottom) : 0
+  ;(cloudObj.material as THREE.PointsMaterial).size = top ? Math.max(1.5, CLOUD_SIZE * pxPerM) : CLOUD_SIZE
+  ;(scanObj.material as THREE.PointsMaterial).size = top ? Math.max(2, SCAN_SIZE * pxPerM) : SCAN_SIZE
+  if (top) pan.update()
+  else controls.update()
+  renderer.render(scene, top ? ortho : camera)
 }
 
 onMounted(() => {
@@ -337,15 +388,22 @@ onMounted(() => {
   controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.maxPolarAngle = Math.PI * 0.49
+  ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 3000)
+  ortho.position.set(0, 0, 500)
+  pan = new OrbitControls(ortho, renderer.domElement)
+  pan.enableRotate = false
+  pan.screenSpacePanning = true
+  pan.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
+  pan.enabled = false
 
   cloudObj = new THREE.Points(
     new THREE.BufferGeometry(),
-    new THREE.PointsMaterial({ size: 0.07, vertexColors: true, sizeAttenuation: true }),
+    new THREE.PointsMaterial({ size: CLOUD_SIZE, vertexColors: true, sizeAttenuation: true }),
   )
   cloudObj.frustumCulled = false
   scanObj = new THREE.Points(
     new THREE.BufferGeometry(),
-    new THREE.PointsMaterial({ size: 0.09, color: 0xe11d48, sizeAttenuation: true }),
+    new THREE.PointsMaterial({ size: SCAN_SIZE, color: 0xe11d48, sizeAttenuation: true }),
   )
   scanObj.frustumCulled = false
   scanObj.renderOrder = 3
@@ -367,8 +425,11 @@ onMounted(() => {
   setFloor(props.map, props.image)
   setSolid(props.solid)
   applyStatus()
+  applyMode()
   raf = requestAnimationFrame(tick)
 })
+
+watch(() => props.mode, applyMode)
 
 watch(() => props.solid, (s) => setSolid(s))
 
@@ -396,6 +457,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(raf)
   resizeObs?.disconnect()
   controls.dispose()
+  pan.dispose()
   solidSeq++
   clearSolid()
   setFloor(null, null)

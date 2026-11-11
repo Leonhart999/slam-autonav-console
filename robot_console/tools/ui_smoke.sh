@@ -37,7 +37,7 @@ echo "building web/ into $D/dist ..."
 sed -e "s/^  port: .*/  port: $PORT/" -e "s#^  web_dist: .*#  web_dist: $D/dist#" -e "s#^  log_dir: .*#  log_dir: $D/logs#" \
     -e "s#^  results_dir: .*#  results_dir: $D/exports#" -e "s#^  maps_dir: .*#  maps_dir: $MAPS#" \
     -e "s#^  runs_dir: .*#  runs_dir: $RUNS#" "$HERE/config/console.yaml" > $CFG
-cp "$HERE/config/stacks.yaml" "$HERE/config/mapping_presets.yaml" $D/
+cp "$HERE/config/stacks.yaml" "$HERE/config/mapping_presets.yaml" "$HERE/config/sensor_profiles.yaml" $D/
 setsid ros2 run robot_console console --config $CFG < /dev/null > $D/console.log 2>&1 &
 stop() { pkill -INT -f "console --config $CFG"; sleep 2; pkill -KILL -f "console --config $CFG" 2>/dev/null; }
 trap stop EXIT

@@ -110,7 +110,7 @@ under `~/robot_console_data` by default.
 
 | Component | Licence | How it gets onto your machine |
 |---|---|---|
-| [FAST_LIO](https://github.com/hku-mars/FAST_LIO), ikd-Tree | GPL-2.0 | downloaded by the installer; `robot_console/install/patches/fast_lio-thesis.patch` switches the cloud subscription to reliable QoS |
+| [FAST_LIO](https://github.com/hku-mars/FAST_LIO), ikd-Tree | GPL-2.0 | downloaded by the installer; `robot_console/install/patches/fast_lio-thesis.patch` switches the cloud subscription to reliable QoS and adds a LiDAR-only mode and the ground-vehicle constraint |
 | Livox-SDK2, livox_ros_driver2 | MIT | downloaded by the installer |
 | Warehouse, shelf, pallet and cart models (Gazebo Fuel; OpenRobotics, MovAi) | CC BY-NC 4.0 / CC BY-NC-ND 4.0 | downloaded by `sim_robot/tools/fetch_fuel_models.sh`; non-commercial use only |
 | HKUST 4F building model (SLABIM, Huang et al., ICRA 2025) | not stated by the dataset | built from your own SLABIM download; not included |

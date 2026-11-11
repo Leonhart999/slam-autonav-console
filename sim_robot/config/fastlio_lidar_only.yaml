@@ -1,0 +1,70 @@
+/**:
+    ros__parameters:
+        # FAST-LIO2 LiDAR-only configuration (thesis patch of FAST_LIO: common.imu_en false). Without an IMU the
+        # filter uses a constant-velocity model: the angular velocity estimated between the last two scans and zero
+        # acceleration. Same as fastlio_sim_vlp16.yaml otherwise; the extrinsic only places the body frame (the
+        # simulated robot: base centre, like its IMU), so bags of other robots work too (the body is then offset).
+        feature_extract_enable: false
+        point_filter_num: 4
+        max_iteration: 3
+        filter_size_surf: 0.5
+        filter_size_map: 0.5
+        cube_side_length: 1000.0
+        runtime_pos_log_enable: false
+        map_file_path: "/home/USER/results/fastlio_map.pcd"   # 改：地图保存位置
+
+        common:
+            lid_topic:  "/points_fastlio"   # 改：cloud_adapter 整理后的点云
+            imu_topic:  "/imu"              # not subscribed when imu_en is false
+            imu_en: false                   # LiDAR only
+            time_sync_en: false
+            time_offset_lidar_to_imu: 0.0
+
+        preprocess:
+            lidar_type: 2                # 2 = Velodyne 格式（x y z intensity time ring）
+            scan_line: 256               # ring numbers up to 255 (16 for the sim lidar, 192 for two merged 96-line lidars)
+            scan_rate: 10
+            timestamp_unit: 0            # 改：cloud_adapter 写的 time 单位是秒
+            blind: 0.4                   # 改：丢弃 0.4 m 以内的点（Gazebo 在 0.30 m 处有假点，见 cloud_adapter.py）
+
+        mapping:
+            # process noise of the constant-velocity model (the virtual IMU): how much the acceleration and the
+            # angular velocity may change between scans
+            acc_cov: 1.0
+            gyr_cov: 0.5
+            b_acc_cov: 0.00000001        # no biases to estimate
+            b_gyr_cov: 0.00000001
+            # search the map neighbours in every filter iteration (thesis patch): without it a turn that starts
+            # between two scans can lock onto wrong planes (warehouse bag wh_loop_02: ATE 3.5 m -> 0.04 m)
+            nn_every_iter: true
+            fov_degree:    360.0
+            det_range:     100.0
+            extrinsic_est_en:  false
+            # 雷达在 IMU 坐标系下的位置，和 models/sim_robot/model.sdf 中 lidar_link 的安装位置一致
+            extrinsic_T: [ 0.1, 0.0, 0.3 ]
+            extrinsic_R: [ 1., 0., 0.,
+                           0., 1., 0.,
+                           0., 0., 1.]
+
+        publish:
+            path_en:  true               # 改：发布轨迹，方便在 rviz2 里看
+            map_en: true                 # 改：累积地图点云，/map_save 存图要用（velodyne.yaml 没写这项，默认 false）
+            scan_publish_en:  true
+            dense_publish_en: true
+            scan_bodyframe_pub_en: true
+
+        pcd_save:
+            pcd_save_en: true
+            interval: -1
+
+        # Ground-vehicle constraint (thesis patch): roll / pitch relative to gravity and the height stay as at the
+        # first scan, as soft pseudo-measurements. The console starts the "+ ground" variants with
+        # ground_constraint:=true; this value is used otherwise.
+        ground_constraint:
+            enable: false
+            # FAST-LIO treats every LiDAR point as an independent measurement, so the scan match is far more
+            # confident than any realistic prior: the rows only hold against slow drift when they are this tight
+            # (sweep 2026-11-08: 2 deg / 0.05 m had no visible effect, 0.02 deg / 0.002 m removed the drift of
+            # HEU61 and did not change the ATE in the simulation). Turn the constraint off on ramps and steps.
+            rp_std_deg: 0.02
+            z_std: 0.002                 # m, 0 = no height row

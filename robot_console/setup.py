@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'console = robot_console.main:main',
+            'sensor_adapter = robot_console.sensor_adapter:main',
         ],
     },
 )

@@ -26,6 +26,7 @@ from nav_msgs.msg import Odometry
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2
 
+from .playback import REF_TOPIC   # bag reference odometry (sensor profile 'reference')
 from .runs import RunRecorder
 
 KEY_OFF = 1 << 20          # 体素坐标加上这个偏移后都是正数，每个轴占 21 位，拼成一个 int64
@@ -59,14 +60,19 @@ class PointBuffer:
 def cloud_xyz(msg):
     """PointCloud2 → (N, 3) float32 数组，去掉 NaN/inf。不依赖点类型，按字段偏移读 x、y、z。"""
     off = {f.name: f.offset for f in msg.fields if f.datatype == 7}   # 7 = FLOAT32
-    if not all(k in off for k in 'xyz') or msg.is_bigendian:
+    if not all(k in off for k in 'xyz'):
         return None
     n = msg.width * msg.height
-    dt = np.dtype({'names': ['x', 'y', 'z'], 'formats': ['<f4'] * 3,
+    if n == 0:
+        return np.empty((0, 3), np.float32)
+    dt = np.dtype({'names': ['x', 'y', 'z'], 'formats': ['>f4' if msg.is_bigendian else '<f4'] * 3,
                    'offsets': [off['x'], off['y'], off['z']], 'itemsize': msg.point_step})
-    arr = np.frombuffer(msg.data, dtype=dt, count=n)
+    if msg.row_step < msg.width * msg.point_step:
+        raise ValueError('PointCloud2 row_step is smaller than a row of points')
+    arr = np.ndarray((msg.height, msg.width), dtype=dt, buffer=msg.data,
+                     strides=(msg.row_step, msg.point_step))
     xyz = np.empty((n, 3), np.float32)
-    xyz[:, 0], xyz[:, 1], xyz[:, 2] = arr['x'], arr['y'], arr['z']
+    xyz[:, 0], xyz[:, 1], xyz[:, 2] = arr['x'].ravel(), arr['y'].ravel(), arr['z'].ravel()
     return xyz[np.isfinite(xyz).all(axis=1)]
 
 
@@ -94,6 +100,12 @@ def yaw_of(q):
 
 def stamp_of(msg):
     return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+
+
+def _variant_options(p):
+    """options of a variant profile: a list, or a single name in the older 'option' key"""
+    opts = p.get('options', p.get('option')) or []
+    return sorted({str(o) for o in ([opts] if isinstance(opts, str) else opts)})
 
 
 def slam_profiles(cfg):
@@ -130,6 +142,10 @@ def slam_profiles(cfg):
             'inputs': dict(p.get('inputs') or {}),
             # Where its data can come from: 'sim' (the Gazebo simulation) and / or 'bag' (rosbag playback)
             'sources': list(p.get('sources') or ['sim', 'bag']),
+            # A variant of another profile with some options switched on (e.g. [lidar, ground]): the pages show
+            # one algorithm button for the base profile and a switch per option
+            'variant_of': p.get('variant_of') if p.get('variant_of') in raw else None,
+            'options': _variant_options(p) if p.get('variant_of') in raw else [],
         }
     return out
 
@@ -154,7 +170,7 @@ class MappingData:
         self._lock = threading.Lock()
         self.epoch = 0
         # 运行记录：每次建图（每个 epoch）一条，见 runs.py。run_info 由 main 设置，返回场景、命令等信息
-        self.recorder = RunRecorder(cfg.get('runs_dir', '~/runs'), self._log)
+        self.recorder = RunRecorder(cfg.get('runs_dir', '~/runs'), self._log, background=True)
         self.run_info = lambda: {}
         self._run_slam = {}                 # run id -> (SLAM stack name, wall time first seen)
         self._clear()
@@ -175,11 +191,15 @@ class MappingData:
             node.create_subscription(Odometry, topic, lambda m, t=topic: self._on_odom(m, t), small_qos)
         if self.topics['gt']:
             node.create_subscription(Odometry, self.topics['gt'], self._on_gt, small_qos)
+        # Reference odometry of a bag (e.g. wheel odometry), remapped here by the player (playback.py REF_TOPIC)
+        node.create_subscription(Odometry, REF_TOPIC, self._on_ref, small_qos)
 
         self._slot = None                   # 最新一帧点云，等工作线程处理
         self._wake = threading.Event()
         self._last_warn = 0.0
-        threading.Thread(target=self._worker, daemon=True).start()
+        self._closed = False
+        self._thread = threading.Thread(target=self._worker, name='mapping-cloud', daemon=True)
+        self._thread.start()
 
         # 发布者数量：同一话题有两个发布者（例如上次没退出的 FAST-LIO 和新启动的同时在跑），
         # 两边的数据会交替到达。网页据此显示警告；这时也不再按"时间戳倒退"重置地图，否则会来回清空
@@ -223,11 +243,14 @@ class MappingData:
         """Run ids recorded from `slam` since the wall-clock time `since` (process start)."""
         with self._lock:
             self._note_run()
-            return [r for r, (s, t) in self._run_slam.items() if s == slam and t >= since - 5.0]
+            runs = [r for r, (s, t) in self._run_slam.items() if s == slam and t >= since - 5.0]
+        self.recorder.flush()  # GLIM's stop hook reads the trajectory files immediately afterwards
+        return runs
 
     def replace_estimate(self, run_id, lines, source, extra=None):
         with self._lock:
-            return self.recorder.replace_est(run_id, lines, source, extra)
+            result = self.recorder.replace_est(run_id, lines, source, extra)
+        return result.result() if hasattr(result, 'result') else result
 
     # ======================= 状态 =======================
 
@@ -239,7 +262,7 @@ class MappingData:
         self._keys = set()                  # 已有体素的编号
         self._map = PointBuffer(65536)      # 体素中心，顺序 = 出现顺序，网页按偏移量增量接收
         self._lo = self._hi = None          # 地图包围盒
-        self._scan = None                   # (序号, 点数组)
+        self._scan = None                   # (序号, 编码后的帧)，所有网页连接共用同一帧
         self._scan_seq = 0
         self._est = PointBuffer()           # 估计轨迹
         self._gt = PointBuffer()            # 真值轨迹（已对齐到 camera_init）
@@ -261,8 +284,12 @@ class MappingData:
     def close(self):
         """控制台退出时：结束当前运行记录。"""
         with self._lock:
+            self._closed = True
             if self.recorder.run_id:
                 self.recorder.end(**self._summary())
+        self._wake.set()
+        self._thread.join()
+        self.recorder.shutdown()
 
     def _summary(self):
         """运行记录里的概况（调用者持有锁）。"""
@@ -285,20 +312,16 @@ class MappingData:
             return self._t_last
 
     def export_run(self, directory):
-        """在同一把锁内刷新并复制当前运行记录，避免复制到半行轨迹。"""
-        import os
-        import shutil
+        """Queue a consistent snapshot, then wait outside the mapping lock."""
         with self._lock:
             run = self.recorder.commit()   # a saved map keeps its run even if the robot barely moved
             if run is None:
                 return None
             self._note_run()
             self.recorder.update(force=True, **self._summary())
-            os.makedirs(directory, exist_ok=True)
-            for filename in ('est.tum', 'gt.tum', 'run.json'):
-                shutil.copy2(os.path.join(self.recorder.runs_dir, run, filename),
-                             os.path.join(directory, filename))
-            return run
+            copied = self.recorder.export(directory)
+        copied.result()
+        return run
 
     def add_map_to_run(self, name):
         """保存地图后，在当前运行记录里登记（运行记录的文件也被 ROS 回调写，所以要持有锁）。"""
@@ -319,6 +342,8 @@ class MappingData:
             self._wake.wait()
             self._wake.clear()
             with self._lock:
+                if self._closed:
+                    return
                 msg, self._slot = self._slot, None
                 epoch, keys = self.epoch, self._keys
             if msg is None:
@@ -353,12 +378,13 @@ class MappingData:
         ul = uniq.tolist()
         new = np.fromiter((u not in keys for u in ul), dtype=bool, count=len(ul))
         centers = ((idx[first[new]] + 0.5) * self.voxel).astype(np.float32)
+        scan_frame = encode({'type': 'scan', 'epoch': epoch, 'count': len(scan)}, scan)
 
         with self._lock:
             if epoch != self.epoch:         # 处理期间已经开始了新一次建图，丢掉
                 return
             self._scan_seq += 1
-            self._scan = (self._scan_seq, scan)
+            self._scan = (self._scan_seq, scan_frame)
             if len(centers):
                 self._keys.update(u for u, n in zip(ul, new) if n)
                 self._map.append(centers)
@@ -390,6 +416,8 @@ class MappingData:
                 p_ = self.profile
                 self.recorder.begin({**self.run_info(), 'slam': self.stacks['slam'],
                                      'algorithm': p_['algorithm'], 'frame': p_['frame']})
+                if not self.recorder.accepts_gt:
+                    self._gt_buf.clear()    # a playback without ground truth: ignore a simulation's /ground_truth
             self.recorder.est(t, msg.pose.pose)
             self._note_run()
 
@@ -425,6 +453,8 @@ class MappingData:
         p = msg.pose.pose.position
         xyz = np.array([p.x, p.y, p.z])
         with self._lock:
+            if self._t0 is not None and not self.recorder.accepts_gt:
+                return              # playback run whose bag has no ground truth (a simulation may still publish one)
             self.recorder.gt(t, msg.pose.pose)
             if self._gt_buf and t < self._gt_buf[-1][0] - 1.0:
                 self._gt_buf.clear()
@@ -434,6 +464,17 @@ class MappingData:
                 last = self._gt.last()
                 if last is None or np.linalg.norm(cam - last) >= TRAJ_STEP:
                     self._gt.append(cam[None, :])
+
+    def _on_ref(self, msg):
+        with self._lock:
+            if self._t0 is not None:
+                self.recorder.ref(stamp_of(msg), msg.pose.pose)
+
+    def record_lag(self, clock):
+        """Playback monitor (about 1 Hz): how far the SLAM odometry is behind the playback clock, into lag.csv."""
+        with self._lock:
+            if self._t_last is not None:
+                self.recorder.lag(clock, max(0.0, clock - self._t_last))
 
     def _nearest_gt(self, t):
         if not self._gt_buf:
@@ -469,7 +510,8 @@ class MappingData:
                 'slam': self.stacks['slam'], 'algorithm': self.profile['algorithm'],
                 'save_mode': self.profile['save_mode'],
                 'slam_options': [{'name': n, 'algorithm': p['algorithm'], 'save_mode': p['save_mode'],
-                                  'sources': p['sources'], 'needs_imu': 'imu' in p['inputs']}
+                                  'sources': p['sources'], 'needs_imu': 'imu' in p['inputs'],
+                                  'variant_of': p['variant_of'], 'options': p['options']}
                                  for n, p in self.profiles.items()],
             }
 
@@ -480,6 +522,8 @@ class MappingData:
         客户端第一次来、或开始了新一次建图时，先发一条 mapping_reset 让网页清空画面。
         """
         frames = []
+        pending = []
+        scan_frame = None
         with self._lock:
             if cur.get('epoch') != self.epoch:
                 cur.clear()
@@ -490,11 +534,15 @@ class MappingData:
                 a = cur[kind]
                 b = buf.n if limit is None else min(buf.n, a + limit)
                 if b > a:
-                    frames.append(encode({'type': kind, 'epoch': self.epoch, 'offset': a, 'count': b - a},
-                                         buf.data[a:b]))
+                    # Append-only buffers keep existing rows immutable, including when they grow
+                    # or an epoch is reset. Keep a view alive and encode after releasing the lock.
+                    pending.append(({'type': kind, 'epoch': self.epoch, 'offset': a, 'count': b - a},
+                                    buf.data[a:b]))
                     cur[kind] = b
             if self._scan is not None and self._scan[0] != cur['scan']:
-                seq, pts = self._scan
-                frames.append(encode({'type': 'scan', 'epoch': self.epoch, 'count': len(pts)}, pts))
+                seq, scan_frame = self._scan
                 cur['scan'] = seq
+        frames.extend(encode(head, pts) for head, pts in pending)
+        if scan_frame is not None:
+            frames.append(scan_frame)
         return frames

@@ -36,6 +36,7 @@ class Teleop:
         self._owner = None          # 正在遥控的网页连接
         self._cmd = (0.0, 0.0)
         self._locked = False
+        self._generation = 0
         node.create_timer(0.1, self._watchdog)
 
     def _publish(self, v, w):
@@ -55,15 +56,21 @@ class Teleop:
         with self._lock:
             if self._locked:
                 return 'teleop_locked'
+            generation = self._generation
         if self._busy():
             return 'teleop_busy'
         v, w = _clamp(v, self.max_v), _clamp(w, self.max_w)
         with self._lock:
+            # The busy check may race with estop. Check again when committing the command,
+            # and serialize publication with lock/release/watchdog so an old command cannot
+            # overtake a stop (or an old stop overtake a new command).
+            if self._locked or generation != self._generation:
+                return 'teleop_locked'
             self._cmd = (v, w)
             self._active = (v, w) != (0.0, 0.0)
             self._last = time.monotonic()
             self._owner = owner
-        self._publish(v, w)
+            self._publish(v, w)
         return None
 
     def release(self, owner):
@@ -73,14 +80,16 @@ class Teleop:
                 return
             self._active = False
             self._cmd = (0.0, 0.0)
-        self._publish(0.0, 0.0)
+            self._publish(0.0, 0.0)
 
     def lock(self):
-        """急停时调用：停止遥控并锁定（零速度由急停自己连续发送）。"""
+        """急停时调用：锁定并立即发零速度；node.estop 继续发送零速度。"""
         with self._lock:
             self._locked = True
+            self._generation += 1
             self._active = False
             self._cmd = (0.0, 0.0)
+            self._publish(0.0, 0.0)
 
     def unlock(self):
         with self._lock:
@@ -92,8 +101,7 @@ class Teleop:
             if expired:
                 self._active = False
                 self._cmd = (0.0, 0.0)
-        if expired:
-            self._publish(0.0, 0.0)
+                self._publish(0.0, 0.0)
 
     def status(self):
         with self._lock:

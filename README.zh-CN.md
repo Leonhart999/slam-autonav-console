@@ -95,7 +95,7 @@ bash slam-autonav-console/robot_console/install/start_console.sh    # 启动控�
 
 | 组件 | 许可证 | 获取方式 |
 |---|---|---|
-| [FAST_LIO](https://github.com/hku-mars/FAST_LIO)、ikd-Tree | GPL-2.0 | 安装脚本下载；`robot_console/install/patches/fast_lio-thesis.patch` 把点云订阅改为 reliable QoS |
+| [FAST_LIO](https://github.com/hku-mars/FAST_LIO)、ikd-Tree | GPL-2.0 | 安装脚本下载；`robot_console/install/patches/fast_lio-thesis.patch` 把点云订阅改为 reliable QoS，并加入仅激光模式和地面车辆约束 |
 | Livox-SDK2、livox_ros_driver2 | MIT | 安装脚本下载 |
 | 仓库、货架、托盘和推车模型（Gazebo Fuel；OpenRobotics、MovAi） | CC BY-NC 4.0 / CC BY-NC-ND 4.0 | 由 `sim_robot/tools/fetch_fuel_models.sh` 下载；仅限非商业用途 |
 | 港科大 4 楼建筑模型（SLABIM，Huang 等，ICRA 2025） | 数据集未注明 | 用你自己下载的 SLABIM 生成，仓库里不包含 |

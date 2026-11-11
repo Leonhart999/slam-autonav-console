@@ -119,6 +119,10 @@ def main():
 
     app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback)
     node.get_logger().info(f'网页控制台：http://localhost:{port}（监听 {host}）')
+    # Uvicorn replays shutdown signals after restoring the original handlers. SIGTERM's
+    # default action terminates Python immediately, skipping this finally block. Convert
+    # that replay into SystemExit so process cleanup and the recording queue can finish.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         uvicorn.run(app, host=host, port=port, log_level='warning', timeout_graceful_shutdown=3)
     finally:
@@ -126,10 +130,11 @@ def main():
         # （存大地图可能要十几秒，之前就是在这时又按了一次 Ctrl+C，FAST-LIO 留在了后台）
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         node.get_logger().info('正在停止从网页启动的进程（存地图可能要十几秒，请不要关闭窗口）……')
         procs.stop_all()
-        mapping.close()               # 结束当前运行记录（写入结束时间和概况）
         executor.shutdown()
+        mapping.close()               # 回调停止后，排空轨迹写盘队列并结束当前运行记录
         node.destroy_node()
         rclpy.try_shutdown()
 

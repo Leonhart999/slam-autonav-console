@@ -8,6 +8,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from robot_console.process_manager import ProcessManager
@@ -53,6 +54,35 @@ class StopRecordTests(unittest.TestCase):
 
     def test_status_lists_last_stop_for_every_stack(self):
         self.assertTrue(all('last_stop' in s for s in self.procs.status()))
+
+    def test_log_tail_reads_only_the_end_of_a_large_log(self):
+        path = Path(self.tmp.name) / 'large.log'
+        path.write_bytes(b'old log line\n' * 100000 + '末尾一\n末尾二\n未结束'.encode())
+        self.procs.get('sleeper').log_path = str(path)
+        reads = []
+        real_open = open
+        class Reader:
+            def __enter__(self):
+                self.file = real_open(path, 'rb')
+                return self
+            def __exit__(self, *args):
+                self.file.close()
+            def seek(self, *args):
+                return self.file.seek(*args)
+            def read(self, size):
+                data = self.file.read(size)
+                reads.append(len(data))
+                return data
+        with patch('robot_console.process_manager.open', return_value=Reader()):
+            self.assertEqual(self.procs.log_tail('sleeper', 3), '末尾一\n末尾二\n未结束')
+        self.assertLess(sum(reads), 32768)
+
+    def test_log_tail_handles_empty_short_and_terminated_logs(self):
+        path = Path(self.tmp.name) / 'small.log'
+        self.procs.get('sleeper').log_path = str(path)
+        for raw, expected in [(b'', ''), (b'one', 'one'), (b'one\ntwo\n', 'two\n')]:
+            path.write_bytes(raw)
+            self.assertEqual(self.procs.log_tail('sleeper', 1), expected)
 
 
 if __name__ == '__main__':

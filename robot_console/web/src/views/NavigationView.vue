@@ -15,6 +15,7 @@ import type {
   MappingPreset,
   CostmapLayer, MapTool, NavGoalState, NavMap, NavMission, NavSolid, NavStatus, PickedPose, StackState, WaypointMark,
 } from '@/types'
+import type { ViewMode } from '@/mapping/stream'
 import NavGrid2D from '@/components/NavGrid2D.vue'
 import NavScene3D from '@/components/NavScene3D.vue'
 import NavigationImportDialog from '@/components/NavigationImportDialog.vue'
@@ -36,7 +37,7 @@ const saved = (() => {
     return {}
   }
 })()
-// ?map=<name> and ?model=cloud|solid in the address override the saved choice (like ?view= on the mapping page)
+// ?map=<name>, ?model=cloud|solid and ?view=follow|free|top in the address override the saved choice
 const route = useRoute()
 const qMap = typeof route.query.map === 'string' ? route.query.map : null
 const qModel = route.query.model === 'solid' || route.query.model === 'cloud' ? route.query.model : null
@@ -44,14 +45,17 @@ const chosen = ref<string>(qMap ?? (typeof saved.map === 'string' ? saved.map : 
 const showCloud = ref<boolean>(saved.cloud !== false)
 const showGrid = ref<boolean>(saved.grid !== false)
 const model3d = ref<'cloud' | 'solid'>(qModel ?? (saved.model === 'solid' ? 'solid' : 'cloud'))
+// 3D camera mode, the same three as on the mapping page
+const VIEW_MODES: ViewMode[] = ['follow', 'free', 'top']
+const view3d = ref<ViewMode>(VIEW_MODES.find((m) => m === route.query.view) ?? (VIEW_MODES.includes(saved.view) ? saved.view : 'free'))
 const showCost = reactive({ global: saved.costGlobal === true, local: saved.costLocal !== false })
 const variant = ref<string>(typeof saved.variant === 'string' ? saved.variant : '')
-watch([chosen, showCloud, showGrid, model3d, () => showCost.global, () => showCost.local, variant], () => {
+watch([chosen, showCloud, showGrid, model3d, view3d, () => showCost.global, () => showCost.local, variant], () => {
   try {
     localStorage.setItem(
       PREF_KEY,
       JSON.stringify({
-        map: chosen.value, cloud: showCloud.value, grid: showGrid.value, model: model3d.value,
+        map: chosen.value, cloud: showCloud.value, grid: showGrid.value, model: model3d.value, view: view3d.value,
         costGlobal: showCost.global, costLocal: showCost.local, variant: variant.value,
       }),
     )
@@ -573,17 +577,19 @@ onBeforeUnmount(() => {
           ref="grid2d" :map="effectiveMap" :image="image" :status="nav" :tool="tool" :waypoints="marks"
           :costmaps="costmaps" @pick="onPick"
         />
-        <div class="hud tl">
-          <span class="title">{{ t('navigation.view2d') }}</span>
-          <el-checkbox v-model="showCost.global" size="small">{{ t('navigation.layers.costGlobal') }}</el-checkbox>
-          <el-checkbox v-model="showCost.local" size="small">{{ t('navigation.layers.costLocal') }}</el-checkbox>
-          <InfoTip :content="t('navigation.tips.costmap')" placement="bottom" />
-          <span v-if="tool !== 'pan'" class="picking" :class="tool">{{ t(`navigation.goal.how.${tool}`) }}</span>
-        </div>
-        <div class="hud tr">
-          <el-button size="small" circle :title="t('navigation.fit')" @click="grid2d?.fit()">
-            <el-icon><Aim /></el-icon>
-          </el-button>
+        <div class="hud-top">
+          <div class="hud tl">
+            <span class="title">{{ t('navigation.view2d') }}</span>
+            <el-checkbox v-model="showCost.global" size="small">{{ t('navigation.layers.costGlobal') }}</el-checkbox>
+            <el-checkbox v-model="showCost.local" size="small">{{ t('navigation.layers.costLocal') }}</el-checkbox>
+            <InfoTip :content="t('navigation.tips.costmap')" placement="bottom" />
+            <span v-if="tool !== 'pan'" class="picking" :class="tool">{{ t(`navigation.goal.how.${tool}`) }}</span>
+          </div>
+          <div class="hud tr">
+            <el-button size="small" circle :title="t('navigation.fit')" @click="grid2d?.fit()">
+              <el-icon><Aim /></el-icon>
+            </el-button>
+          </div>
         </div>
         <div class="hud bl legend">
           <span><i class="sw robot" />{{ t('navigation.legend.robot') }}</span>
@@ -611,20 +617,30 @@ onBeforeUnmount(() => {
           :status="nav"
           :show-cloud="showCloud"
           :show-grid="showGrid"
+          :mode="view3d"
         />
-        <div class="hud tl">
-          <span class="title">{{ t('navigation.view3d') }}</span>
-          <el-radio-group v-if="canSwitchModel" v-model="model3d" size="small">
-            <el-radio-button value="cloud">{{ t('navigation.model.cloud') }}</el-radio-button>
-            <el-radio-button value="solid">{{ t('navigation.model.solid') }}</el-radio-button>
-          </el-radio-group>
-          <el-checkbox v-model="showCloud" size="small" :disabled="!cloud || shownModel === 'solid'">{{ t('navigation.layers.cloud') }}</el-checkbox>
-          <el-checkbox v-model="showGrid" size="small">{{ t('navigation.layers.grid') }}</el-checkbox>
-        </div>
-        <div class="hud tr">
-          <el-button size="small" circle :title="t('navigation.fit')" @click="scene3d?.resetView()">
-            <el-icon><Aim /></el-icon>
-          </el-button>
+        <div class="hud-top">
+          <div class="hud tl">
+            <span class="title">{{ t('navigation.view3d') }}</span>
+            <el-radio-group v-if="canSwitchModel" v-model="model3d" size="small">
+              <el-radio-button value="cloud">{{ t('navigation.model.cloud') }}</el-radio-button>
+              <el-radio-button value="solid">{{ t('navigation.model.solid') }}</el-radio-button>
+            </el-radio-group>
+            <el-checkbox v-model="showCloud" size="small" :disabled="!cloud || shownModel === 'solid'">{{ t('navigation.layers.cloud') }}</el-checkbox>
+            <el-checkbox v-model="showGrid" size="small">{{ t('navigation.layers.grid') }}</el-checkbox>
+          </div>
+          <div class="hud tr">
+            <div class="seg" role="radiogroup" :aria-label="t('navigation.viewMode')">
+              <button
+                v-for="m in VIEW_MODES" :key="m" type="button" role="radio" :aria-checked="view3d === m"
+                :class="{ on: view3d === m }" :title="m === 'follow' && !nav?.pose ? t('navigation.followNoPose') : undefined"
+                @click="view3d = m"
+              >{{ t(`mapping.views.${m}`) }}</button>
+            </div>
+            <el-button size="small" circle :title="t('navigation.fit')" @click="scene3d?.resetView()">
+              <el-icon><Aim /></el-icon>
+            </el-button>
+          </div>
         </div>
         <div v-if="effectiveMap && !effectiveMap.has_cloud" class="hud bl note">
           {{ t('navigation.noCloud') }}
@@ -912,9 +928,27 @@ onBeforeUnmount(() => {
   gap: 8px;
   font-size: 12.5px;
 }
-.tl {
+/* Top bar of a viewport: the left HUD (title + layers) and the right HUD (camera modes + fit) share one
+   flex row, so when the viewport is narrow the right group wraps below instead of covering the left one */
+.hud-top {
+  position: absolute;
+  z-index: 3;
   top: 12px;
   left: 14px;
+  right: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  /* the empty space between the two groups must still pass drags/clicks to the canvas */
+  pointer-events: none;
+}
+.hud-top > .hud {
+  position: static;
+  pointer-events: auto;
+}
+.tl {
+  min-width: 0;
   flex-wrap: wrap;
   padding: 4px 10px;
   border-radius: 10px;
@@ -927,8 +961,39 @@ onBeforeUnmount(() => {
   color: var(--ink);
 }
 .tr {
-  top: 12px;
-  right: 14px;
+  flex: none;
+  margin-left: auto;
+}
+/* Camera mode switch of the 3D view: same look as the mapping page (mapping/stage.css .seg) */
+.seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(12px);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.seg button {
+  height: 24px;
+  padding: 0 11px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.seg button.on {
+  color: var(--accent);
+  font-weight: 600;
+  background: #fff;
+  box-shadow: 0 2px 8px -3px rgba(20, 60, 120, 0.3);
+}
+.seg button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .bl {
   left: 14px;

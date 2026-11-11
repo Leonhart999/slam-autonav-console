@@ -93,6 +93,30 @@ class FindAndMatchTests(unittest.TestCase):
         self.assertEqual(args, ['/b/sim', '--rate', '1', '--disable-keyboard-controls', '--topics', '/imu',
                                 '/points_fastlio', '/ground_truth', '/clock'])
 
+    def test_play_args_qos_override_for_raw_dds_names(self):
+        # bags from other recorders may offer avoid_ros_namespace_conventions: true -> ROS nodes never see the
+        # topic; the recorded profile is passed back with the flag off, only for the played topics
+        import yaml
+        from robot_console.playback import raw_name_qos
+        raw = {'offered_qos_profiles': "- history: 1\n  depth: 100\n  reliability: 1\n  durability: 2\n"
+                                       "  avoid_ros_namespace_conventions: true"}
+        q = raw_name_qos(raw)
+        self.assertEqual(q, {'history': 'keep_last', 'depth': 100, 'reliability': 'reliable', 'durability': 'volatile',
+                             'avoid_ros_namespace_conventions': False})
+        self.assertIsNone(raw_name_qos({'offered_qos_profiles': "- history: 1\n  depth: 10"}))
+        self.assertIsNone(raw_name_qos({'offered_qos_profiles': ''}))
+        bag = {'path': '/b/heu', 'topics': [{'name': '/front_lidar', 'type': CLOUD, 'count': 1}],
+               'qos_fix': {'/front_lidar': q, '/rear_lidar': q}}
+        plan = {'points': {'from': '/front_lidar', 'to': '/points_fastlio'}}
+        with tempfile.TemporaryDirectory() as d:
+            path = str(Path(d) / "qos.yaml")
+            args, _ = play_args(bag, plan, 1.0, None, path)
+            self.assertEqual(args[-2:], ['--qos-profile-overrides-path', path])
+            with open(path, encoding='utf-8') as f:
+                self.assertEqual(list(yaml.safe_load(f)), ['/front_lidar'])
+        args, _ = play_args({**bag, 'qos_fix': {}}, plan, 1.0, None, '/nowhere.yaml')
+        self.assertNotIn('--qos-profile-overrides-path', args)
+
 
 class FakeStack:
     def __init__(self, state='idle'):

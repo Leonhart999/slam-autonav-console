@@ -16,7 +16,6 @@ import signal
 import subprocess
 import threading
 import time
-from collections import deque
 
 
 def _group_alive(pgid):
@@ -286,8 +285,21 @@ class ProcessManager:
         s = self._stacks[name]
         if not s.log_path or not os.path.exists(s.log_path):
             return ''
-        with open(s.log_path, encoding='utf-8', errors='replace') as f:
-            return ''.join(deque(f, maxlen=lines))
+        # Read backwards until enough complete lines are available. The UI may poll this
+        # endpoint repeatedly while SLAM writes a multi-GB log.
+        chunks = []
+        with open(s.log_path, 'rb') as f:
+            pos = f.seek(0, os.SEEK_END)
+            newlines = 0
+            while pos and newlines <= lines:
+                size = min(pos, 16384)
+                pos -= size
+                f.seek(pos)
+                chunk = f.read(size)
+                chunks.append(chunk)
+                newlines += chunk.count(b'\n')
+        text = b''.join(reversed(chunks)).decode('utf-8', errors='replace')
+        return ''.join(text.splitlines(keepends=True)[-lines:])
 
     def log_end(self, name, nbytes=16384):
         """日志最后 nbytes 字节（不读整个文件，适合每秒调用几次）。"""

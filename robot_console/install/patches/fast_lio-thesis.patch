@@ -1,20 +1,7 @@
-From f28c4f95facea35c09061d8117dfb0f71eb2d3da Mon Sep 17 00:00:00 2001
-From: Leonhart999 <1425109609@qq.com>
-Date: Thu, 5 Nov 2026 16:00:11 +0800
-Subject: [PATCH] Thesis patches: reliable cloud QoS and M3DGR Mid-360 config
-
-- laserMapping.cpp: subscribe to PointCloud2 with QoS(20).reliable()
-  instead of SensorDataQoS (best-effort, depth 5). A 16-line cloud is
-  about 0.7 MB and best-effort dropped many frames (637 of 900 in a sim
-  bag). rosbag2 play and ros_gz_bridge publish reliable, so both work.
-- config/m3dgr_mid360.yaml: parameters for the M3DGR dataset (Mid-360).
-- .gitignore: runtime outputs in Log/ and PCD/.
----
- .gitignore               |  4 ++++
- config/m3dgr_mid360.yaml | 51 ++++++++++++++++++++++++++++++++++++++++
- src/laserMapping.cpp     |  5 +++-
- 3 files changed, 59 insertions(+), 1 deletion(-)
- create mode 100644 config/m3dgr_mid360.yaml
+Thesis patch of FAST_LIO (ROS2 branch, cc3c9e8): reliable cloud QoS, M3DGR Mid-360 config,
+LiDAR-only mode (common.imu_en false), mapping.nn_every_iter, the ground-vehicle constraint and a ring bounds check
+in the Velodyne handler, IMU subscription depth 2000.
+Generated from the local FAST_LIO repo: git diff bfd892e 709ffb4
 
 diff --git a/.gitignore b/.gitignore
 index eb7be62..b5a4afe 100644
@@ -85,22 +72,348 @@ index 0000000..ee1e740
 +        pcd_save:
 +            pcd_save_en: true            # 结束时把整张地图存成 PCD
 +            interval: -1
+diff --git a/launch/mapping.launch.py b/launch/mapping.launch.py
+index b76313d..626c835 100644
+--- a/launch/mapping.launch.py
++++ b/launch/mapping.launch.py
+@@ -3,7 +3,7 @@ import os.path
+ from ament_index_python.packages import get_package_share_directory
+ 
+ from launch import LaunchDescription
+-from launch.actions import DeclareLaunchArgument
++from launch.actions import DeclareLaunchArgument, OpaqueFunction
+ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+ from launch.conditions import IfCondition
+ 
+@@ -43,13 +43,24 @@ def generate_launch_description():
+         description='RViz config file path'
+     )
+ 
+-    fast_lio_node = Node(
+-        package='fast_lio',
+-        executable='fastlio_mapping',
+-        parameters=[PathJoinSubstitution([config_path, config_file]),
+-                    {'use_sim_time': use_sim_time}],
+-        output='screen'
++    # Thesis patch: ground_constraint:=true / false overrides ground_constraint.enable of the config file
++    # (empty = keep the config), so one config serves the runs with and without the ground-vehicle constraint
++    declare_ground_cmd = DeclareLaunchArgument(
++        'ground_constraint', default_value='',
++        description='true / false: override ground_constraint.enable of the config file'
+     )
++
++    def fast_lio_node(context):
++        overrides = {'use_sim_time': use_sim_time}
++        ground = LaunchConfiguration('ground_constraint').perform(context).strip().lower()
++        if ground in ('true', 'false'):
++            overrides['ground_constraint.enable'] = ground == 'true'
++        return [Node(
++            package='fast_lio',
++            executable='fastlio_mapping',
++            parameters=[PathJoinSubstitution([config_path, config_file]), overrides],
++            output='screen'
++        )]
+     rviz_node = Node(
+         package='rviz2',
+         executable='rviz2',
+@@ -63,8 +74,9 @@ def generate_launch_description():
+     ld.add_action(decalre_config_file_cmd)
+     ld.add_action(declare_rviz_cmd)
+     ld.add_action(declare_rviz_config_path_cmd)
++    ld.add_action(declare_ground_cmd)
+ 
+-    ld.add_action(fast_lio_node)
++    ld.add_action(OpaqueFunction(function=fast_lio_node))
+     ld.add_action(rviz_node)
+ 
+     return ld
 diff --git a/src/laserMapping.cpp b/src/laserMapping.cpp
-index e5d9950..03ff6d0 100644
+index e5d9950..0f6d218 100644
 --- a/src/laserMapping.cpp
 +++ b/src/laserMapping.cpp
-@@ -924,7 +924,10 @@ public:
+@@ -132,6 +132,33 @@ M3D Lidar_R_wrt_IMU(Eye3d);
+ /*** EKF inputs and output ***/
+ MeasureGroup Measures;
+ esekfom::esekf<state_ikfom, 12, input_ikfom> kf;
++
++/*** Thesis extension 1: LiDAR-only mode (common.imu_en: false) ***
++ * Without an IMU the filter is driven by virtual IMU samples generated for every scan: the angular velocity is
++ * the one estimated between the last two scan updates and the specific force equals gravity (zero
++ * acceleration), i.e. a constant-velocity motion model. Prediction and point deskewing then run unchanged. */
++bool   imu_en = true;
++const double VIMU_DT = 0.01;            // s between virtual IMU samples
++V3D    vimu_gyr(Zero3d);                // body angular velocity used for the next scan (rad/s)
++M3D    vimu_R_prev(Eye3d);
++double vimu_t_prev = -1.0;              // time of the last updated state (lidar_end_time), < 0 = none yet
++double vimu_max_gyr = 3.0;              // rad/s, clamp for the estimate (a bad update must not spin the model)
++/* Upstream FAST-LIO searches the map neighbours again only after an iteration whose step was small. Without an IMU
++ * the prediction can be several degrees off (a turn starting between two scans); searching again in every iteration
++ * lets the plane associations follow the state (mapping.nn_every_iter). */
++bool   nn_every_iter = false;
++
++/*** Thesis extension 2: ground-vehicle constraint (ground_constraint.enable) ***
++ * Soft pseudo-measurements for a robot driving on flat floor: the world up direction seen in the body frame stays
++ * what it was at the first scan (roll and pitch relative to gravity unchanged), and optionally the height along up
++ * stays the same. Added as extra rows of the iterated EKF update, weighted by their standard deviations. */
++bool   ground_en = false;
++double ground_rp_std = 0.02 * M_PI / 180.0;  // rad
++double ground_z_std = 0.002;                 // m, <= 0 disables the height row
++bool   ground_ref_set = false;
++V3D    ground_up(0, 0, 1);                   // world up (unit), from the gravity state
++V3D    ground_v0(0, 0, 1);                   // up in the body frame at the first scan
++double ground_h0 = 0.0;                      // height of the body along up at the first scan
+ state_ikfom state_point;
+ vect3 pos_lid;
+ 
+@@ -296,8 +323,28 @@ void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
+         is_first_lidar = false;
+     }
+ 
++    if (!imu_en)
++    {
++        // Merged multi-lidar clouds (e.g. tools/pcd_frames_to_bag.py) name the per-point time field "t"
++        bool has_time = false;
++        for (auto &f : msg->fields) has_time |= (f.name == "time");
++        if (!has_time)
++            for (auto &f : msg->fields) if (f.name == "t") { f.name = "time"; break; }
++    }
+     PointCloudXYZI::Ptr  ptr(new PointCloudXYZI());
+     p_pre->process(msg, ptr);
++    if (!imu_en && !ptr->points.empty())
++    {
++        // Point times may start before the header stamp (second lidar merged in): start the scan at its first
++        // point, and keep the points in time order (lidar_end_time is taken from the last point)
++        std::sort(ptr->points.begin(), ptr->points.end(), time_list);
++        double t_min = ptr->points.front().curvature;   // ms
++        if (t_min < 0)
++        {
++            for (auto &pt : ptr->points) pt.curvature -= t_min;
++            cur_time += t_min / 1000.0;
++        }
++    }
+     lidar_buffer.push_back(ptr);
+     time_buffer.push_back(cur_time);
+     last_timestamp_lidar = cur_time;
+@@ -380,9 +427,44 @@ void imu_cbk(const sensor_msgs::msg::Imu::UniquePtr msg_in)
+ 
+ double lidar_mean_scantime = 0.0;
+ int    scan_num = 0;
++void virtual_imu(MeasureGroup &meas)
++{
++    /** Virtual IMU samples over [lidar_beg_time, lidar_end_time] for the LiDAR-only mode: constant angular
++     ** velocity vimu_gyr, specific force = -R(t)^T * g (no acceleration). The samples are made consistent with the
++     ** current filter state (its gravity and bias estimates), so that after the filter removes the biases and adds
++     ** gravity the net input is exactly (vimu_gyr, zero acceleration): gravity and biases are not observable without
++     ** an IMU and must not turn into a fake acceleration or rotation. **/
++    meas.imu.clear();
++    state_ikfom s = kf.get_x();
++    M3D R0 = s.rot.toRotationMatrix();
++    const bool started = vimu_t_prev >= 0;   // before the first update: IMU initialisation, gravity along -z
++    V3D grav = started ? V3D(s.grav[0], s.grav[1], s.grav[2]) : V3D(0, 0, -G_m_s2);
++    V3D ba = started ? V3D(s.ba) : V3D(Zero3d);
++    V3D gyr = vimu_gyr + (started ? V3D(s.bg) : V3D(Zero3d));
++    double t_ref = started ? vimu_t_prev : meas.lidar_beg_time;
++    double t0 = meas.lidar_beg_time, t1 = meas.lidar_end_time;
++    int n = std::max(2, int(std::ceil((t1 - t0) / VIMU_DT)));
++    for (int k = 0; k <= n; k++)
++    {
++        double t = t0 + (t1 - t0) * k / n;
++        M3D Rt = R0 * Exp(vimu_gyr, t - t_ref);
++        V3D acc = ba - Rt.transpose() * grav;
++        sensor_msgs::msg::Imu::SharedPtr m(new sensor_msgs::msg::Imu());
++        m->header.stamp = get_ros_time(t);
++        m->angular_velocity.x = gyr(0);
++        m->angular_velocity.y = gyr(1);
++        m->angular_velocity.z = gyr(2);
++        m->linear_acceleration.x = acc(0);
++        m->linear_acceleration.y = acc(1);
++        m->linear_acceleration.z = acc(2);
++        meas.imu.push_back(m);
++    }
++    last_timestamp_imu = t1;
++}
++
+ bool sync_packages(MeasureGroup &meas)
+ {
+-    if (lidar_buffer.empty() || imu_buffer.empty()) {
++    if (lidar_buffer.empty() || (imu_en && imu_buffer.empty())) {
+         return false;
+     }
+ 
+@@ -412,6 +494,15 @@ bool sync_packages(MeasureGroup &meas)
+         lidar_pushed = true;
+     }
+ 
++    if (!imu_en)
++    {
++        virtual_imu(meas);
++        lidar_buffer.pop_front();
++        time_buffer.pop_front();
++        lidar_pushed = false;
++        return true;
++    }
++
+     if (last_timestamp_imu < lidar_end_time)
+     {
+         return false;
+@@ -703,7 +794,7 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
+ 
+         auto &points_near = Nearest_Points[i];
+ 
+-        if (ekfom_data.converge)
++        if (ekfom_data.converge || nn_every_iter)
+         {
+             /** Find the closest surfaces in the map **/
+             ikdtree.Nearest_Search(point_world, NUM_MATCH_POINTS, points_near, pointSearchSqDis);
+@@ -757,8 +848,9 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
+     double solve_start_  = omp_get_wtime();
+     
+     /*** Computation of Measuremnt Jacobian matrix H and measurents vector ***/
+-    ekfom_data.h_x = MatrixXd::Zero(effct_feat_num, 12); //23
+-    ekfom_data.h.resize(effct_feat_num);
++    const int ground_rows = (ground_en && ground_ref_set) ? (ground_z_std > 0 ? 3 : 2) : 0;
++    ekfom_data.h_x = MatrixXd::Zero(effct_feat_num + ground_rows, 12); //23
++    ekfom_data.h.resize(effct_feat_num + ground_rows);
+ 
+     for (int i = 0; i < effct_feat_num; i++)
+     {
+@@ -790,6 +882,32 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
+         /*** Measuremnt: distance to the closest surface/corner ***/
+         ekfom_data.h(i) = -norm_p.intensity;
+     }
++
++    if (ground_rows > 0)
++    {
++        /* Ground-vehicle rows. Up in the body frame: v = R^T u; with R <- R Exp(d), dv/dd = [v]x. Residuals are the
++         * components of v along two axes perpendicular to v0 (zero at the first scan), and the height u.p - h0.
++         * Rows are scaled by sqrt(LASER_POINT_COV) / std because the update uses one noise value for all rows. */
++        V3D v = s.rot.conjugate() * ground_up;
++        M3D v_cross;
++        v_cross << SKEW_SYM_MATRX(v);
++        V3D b1 = ground_v0.unitOrthogonal();
++        V3D b2 = ground_v0.cross(b1);
++        double w_rp = sqrt(LASER_POINT_COV) / ground_rp_std;
++        int r = effct_feat_num;
++        for (const V3D &b : {b1, b2})
++        {
++            ekfom_data.h_x.block<1, 3>(r, 3) = w_rp * (b.transpose() * v_cross);
++            ekfom_data.h(r) = -w_rp * b.dot(v);
++            r++;
++        }
++        if (ground_z_std > 0)
++        {
++            double w_z = sqrt(LASER_POINT_COV) / ground_z_std;
++            ekfom_data.h_x.block<1, 3>(r, 0) = w_z * ground_up.transpose();
++            ekfom_data.h(r) = -w_z * (ground_up.dot(V3D(s.pos[0], s.pos[1], s.pos[2])) - ground_h0);
++        }
++    }
+     solve_time += omp_get_wtime() - solve_start_;
+ }
+ 
+@@ -833,6 +951,14 @@ public:
+         this->declare_parameter<int>("pcd_save.interval", -1);
+         this->declare_parameter<vector<double>>("mapping.extrinsic_T", vector<double>());
+         this->declare_parameter<vector<double>>("mapping.extrinsic_R", vector<double>());
++        this->declare_parameter<bool>("common.imu_en", true);
++        this->declare_parameter<bool>("mapping.nn_every_iter", false);
++        this->declare_parameter<bool>("ground_constraint.enable", false);
++        // numbers of the thesis patch accept integers too (z_std: 0 in a yaml file must not abort the node)
++        rcl_interfaces::msg::ParameterDescriptor any_number;
++        any_number.dynamic_typing = true;
++        this->declare_parameter("ground_constraint.rp_std_deg", rclcpp::ParameterValue(0.02), any_number);
++        this->declare_parameter("ground_constraint.z_std", rclcpp::ParameterValue(0.002), any_number);
+ 
+         this->get_parameter_or<bool>("publish.path_en", path_en, true);
+         this->get_parameter_or<bool>("publish.effect_map_en", effect_pub_en, false);
+@@ -869,6 +995,23 @@ public:
+         this->get_parameter_or<int>("pcd_save.interval", pcd_save_interval, -1);
+         this->get_parameter_or<vector<double>>("mapping.extrinsic_T", extrinT, vector<double>());
+         this->get_parameter_or<vector<double>>("mapping.extrinsic_R", extrinR, vector<double>());
++        this->get_parameter_or<bool>("common.imu_en", imu_en, true);
++        this->get_parameter_or<bool>("mapping.nn_every_iter", nn_every_iter, false);
++        this->get_parameter_or<bool>("ground_constraint.enable", ground_en, false);
++        auto number = [this](const std::string &name, double fallback) {
++            rclcpp::Parameter p;
++            if (!this->get_parameter(name, p)) return fallback;
++            if (p.get_type() == rclcpp::ParameterType::PARAMETER_DOUBLE) return p.as_double();
++            if (p.get_type() == rclcpp::ParameterType::PARAMETER_INTEGER) return double(p.as_int());
++            RCLCPP_WARN(this->get_logger(), "%s is not a number, using %g", name.c_str(), fallback);
++            return fallback;
++        };
++        double rp_std_deg = number("ground_constraint.rp_std_deg", 0.02);
++        ground_rp_std = std::max(rp_std_deg, 1e-3) * M_PI / 180.0;
++        ground_z_std = number("ground_constraint.z_std", 0.002);
++        RCLCPP_INFO(this->get_logger(), "IMU %s; ground-vehicle constraint %s (roll/pitch std %.2f deg, height std %.3f m)",
++                    imu_en ? "on" : "off (LiDAR-only, constant-velocity model)", ground_en ? "on" : "off",
++                    rp_std_deg, ground_z_std);
+ 
+         RCLCPP_INFO(this->get_logger(), "p_pre->lidar_type %d", p_pre->lidar_type);
+ 
+@@ -924,9 +1067,15 @@ public:
          }
          else
          {
 -            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::SensorDataQoS(), standard_pcl_cbk);
-+            // 改（论文）：原来是 rclcpp::SensorDataQoS()（best-effort，深度 5）。
++            // 改：原来是 rclcpp::SensorDataQoS()（best-effort，深度 5）。
 +            // 一帧 16 线点云约 0.7 MB，best-effort 下大量丢帧（仿真数据 900 帧只处理了 637 帧），
 +            // 改为 reliable、深度 20。bag play 和 ros_gz_bridge 默认都是 reliable 发布，兼容。
 +            sub_pcl_pc_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(lid_topic, rclcpp::QoS(20).reliable(), standard_pcl_cbk);
          }
-         sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
+-        sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, 10, imu_cbk);
++        // Thesis patch: was depth 10. Scans are processed by a timer on the same executor, so while one scan is
++        // processed (tens of ms) the IMU queue fills up: at 200 Hz (and more during a faster bag playback)
++        // samples were dropped and the propagation degraded. Keep about 10 s of a 200 Hz IMU.
++        if (imu_en) sub_imu_ = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, rclcpp::QoS(2000), imu_cbk);
          pubLaserCloudFull_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered", 20);
--- 
-2.34.1
-
+         pubLaserCloudFull_body_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_registered_body", 20);
+         pubLaserCloudEffect_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("/cloud_effected", 20);
+@@ -1009,6 +1158,14 @@ private:
+                         pointBodyToWorld(&(feats_down_body->points[i]), &(feats_down_world->points[i]));
+                     }
+                     ikdtree.Build(feats_down_world->points);
++                    // reference attitude / height for the ground-vehicle rows
++                    V3D g(state_point.grav[0], state_point.grav[1], state_point.grav[2]);
++                    ground_up = g.norm() > 1e-6 ? V3D(-g / g.norm()) : V3D(0, 0, 1);
++                    ground_v0 = state_point.rot.conjugate() * ground_up;
++                    ground_h0 = ground_up.dot(state_point.pos);
++                    ground_ref_set = true;
++                    vimu_R_prev = state_point.rot.toRotationMatrix();
++                    vimu_t_prev = lidar_end_time;
+                 }
+                 return;
+             }
+@@ -1051,6 +1208,19 @@ private:
+             double solve_H_time = 0;
+             kf.update_iterated_dyn_share_modified(LASER_POINT_COV, solve_H_time);
+             state_point = kf.get_x();
++            if (!imu_en)
++            {
++                M3D R_cur = state_point.rot.toRotationMatrix();
++                double dt = lidar_end_time - vimu_t_prev;
++                if (vimu_t_prev >= 0 && dt > 1e-3 && dt < 1.0)
++                {
++                    V3D w = Log(M3D(vimu_R_prev.transpose() * R_cur)) / dt;
++                    if (w.norm() > vimu_max_gyr) w *= vimu_max_gyr / w.norm();
++                    vimu_gyr = w;
++                }
++                vimu_R_prev = R_cur;
++                vimu_t_prev = lidar_end_time;
++            }
+             euler_cur = SO3ToEuler(state_point.rot);
+             pos_lid = state_point.pos + state_point.rot * state_point.offset_T_L_I;
+             geoQuat.x = state_point.rot.coeffs()[0];
+diff --git a/src/preprocess.cpp b/src/preprocess.cpp
+index 5f171a3..d18db30 100644
+--- a/src/preprocess.cpp
++++ b/src/preprocess.cpp
+@@ -442,6 +442,10 @@ void Preprocess::velodyne_handler(const sensor_msgs::msg::PointCloud2::UniquePtr
+       if (!given_offset_time)
+       {
+         int layer = pl_orig.points[i].ring;
++        // The per-ring arrays have scan_line entries; a lidar with more rings than configured would write
++        // past them (heap corruption, abort in malloc) - skip those points like the feature branch does.
++        if (layer < 0 || layer >= N_SCANS)
++          continue;
+         double yaw_angle = atan2(added_pt.y, added_pt.x) * 57.2957;
+ 
+         if (is_first[layer])

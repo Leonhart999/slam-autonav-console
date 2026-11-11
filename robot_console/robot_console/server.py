@@ -18,6 +18,7 @@ from .map_library import NAME_RE, SaveError
 from .nav_speed import write_console_params
 from .navigation import NavigationError
 from .nav_mission import MAX_GOALS, NavMission, map_origin
+from .playback import PlaybackError
 from .solid_models import asset_path as solid_asset_path
 from .process_manager import StackRunning
 from .scene_import import SceneLibrary
@@ -31,6 +32,7 @@ from .playback import register_playback_routes
 from .bag_files import register_bag_file_routes
 from .open_folder import register_open_folder_routes
 from .map_scene import register_map_scene_routes
+from .stream_cache import SharedSnapshot
 
 STREAMS = {'mapping'}       # 网页可以订阅的数据流；不订阅就不发（监控页不需要点云）
 STREAM_PERIOD = 0.2         # 订阅的数据流多久推送一次（s）
@@ -151,7 +153,7 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         return procs.status()
 
     @app.post('/api/stacks/{name}/start')
-    def start_stack(name: str, preset: str | None = None, origin: str | None = None):
+    def start_stack(name: str, preset: str | None = None, origin: str | None = None, bag: str | None = None):
         s = stack_or_404(name)
         if s.page_only:
             raise error(409, 'stack_page_only', name=name)
@@ -159,6 +161,12 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         if name in playback.sim_stacks and playback.player_active():
             raise error(409, 'playback_running', name=playback.stack)
         preset, extra = preset_args(name, preset)
+        if bag and name in mapping.profiles:
+            # Playback page: a bag of a real robot (sensor profile) needs the SLAM configuration of that robot
+            try:
+                preset, extra = playback.slam_start_args(name, bag)
+            except PlaybackError as e:
+                raise HTTPException(e.status, detail={'code': e.code, 'params': e.params})
         if name == nav_name:
             extra = [*extra, *prepare_nav_params()]   # same speed-multiplier setup as the navigation page
         if origin not in ('mapping', 'navigation', 'playback'):
@@ -200,8 +208,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
     @app.post('/api/estop')
     def estop():
         batch.abort('estop')          # a running batch stops starting new processes and cleans up
-        cancelled = node.estop()
         teleop.lock()                 # 急停后遥控锁定，网页上解除后才能再遥控
+        cancelled = node.estop()
         stopped = procs.estop_names()
         for n in stopped:
             threading.Thread(target=procs.stop, args=(n,), daemon=True).start()
@@ -685,6 +693,17 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
     #     （网页发现数据对不上时也用它来重新同步）
     #   {"type": "teleop", "v": 0.3, "w": 0.0}：遥控速度，网页按住摇杆时 10 Hz 发送；连接断开时立即停车
 
+    def mapping_snapshot():
+        ms = mapping.status()
+        ms['waypoints'] = waypoint_progress()
+        ms['teleop'] = teleop.status()
+        ms['save'] = library.status()
+        ms['playback'] = playback.status()
+        return ms
+
+    shared_status = SharedSnapshot(status, period)
+    shared_mapping = SharedSnapshot(mapping_snapshot, STREAM_PERIOD)
+
     async def send_loop(sock, client):
         next_status = 0.0
         try:
@@ -692,14 +711,9 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
                 if time.monotonic() >= next_status:
                     next_status = time.monotonic() + period
                     # snapshot 里有 ROS 图查询和加锁，放到线程池里做，不卡住事件循环
-                    await sock.send_json(await asyncio.to_thread(status))
+                    await sock.send_json(await shared_status.get())
                 if 'mapping' in client['streams']:
-                    ms = mapping.status()
-                    ms['waypoints'] = await asyncio.to_thread(waypoint_progress)
-                    ms['teleop'] = teleop.status()
-                    ms['save'] = library.status()
-                    ms['playback'] = await asyncio.to_thread(playback.status)
-                    await sock.send_json(ms)
+                    await sock.send_json(await shared_mapping.get())
                     for f in await asyncio.to_thread(mapping.pull, client['cursor']):
                         if isinstance(f, bytes):
                             await sock.send_bytes(f)
@@ -732,6 +746,10 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         finally:
             teleop.release(id(client))
             sender.cancel()
+            try:
+                await sender
+            except asyncio.CancelledError:
+                pass
 
     # ---------------- 前端页面 ----------------
     # 开发时用 npm run dev（端口 5173）；打包后（npm run build）由这里直接提供页面

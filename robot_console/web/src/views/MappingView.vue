@@ -12,6 +12,7 @@ import { errorText } from '@/messages'
 import { useStatusStore } from '@/stores/status'
 import { createMappingStream } from '@/mapping/stream'
 import { loadPrefs, savePrefs } from '@/mapping/prefs'
+import { baseOf, savedOptions, useSlamChoice } from '@/mapping/slamChoice'
 import type { MappingPreset, StackInfo, StackState } from '@/types'
 import TeleopPad from '@/components/TeleopPad.vue'
 import MappingImportDialog from '@/components/MappingImportDialog.vue'
@@ -40,8 +41,9 @@ const chosenSlam = ref<string>(typeof saved.slam === 'string' ? saved.slam : '')
 const moveMode = ref<MoveMode>(
   MOVES.find((m) => m === route.query.move) ?? (MOVES.includes(saved.move) ? saved.move : 'waypoints'),
 )
-watch([chosen, chosenSlam, moveMode], () =>
-  savePrefs({ preset: chosen.value, slam: chosenSlam.value, move: moveMode.value }),
+const chosenOpts = ref<string[]>(savedOptions(saved.slamOpts, saved.ground)) // 步骤 ② 算法开关（仅激光、地面约束）
+watch([chosen, chosenSlam, moveMode, chosenOpts], () =>
+  savePrefs({ preset: chosen.value, slam: chosenSlam.value, move: moveMode.value, slamOpts: chosenOpts.value }),
 )
 
 // ---------------- 进程（步骤 ①②③） ----------------
@@ -54,15 +56,17 @@ const sim = computed(() => stackOf(names.value.sim))
 // SLAM 算法（console.yaml mapping.slam_profiles）：有一个在运行时锁定为它，否则用页面上选中的。
 // 只列出能用于仿真的（sources 含 sim）；只用于数据包的算法（GLIM 仅激光）在数据回放页
 const allSlamOptions = computed(() => (ms.value?.slam_options ?? []).filter((o) => stackOf(o.name)))
-const slamOptions = computed(() => allSlamOptions.value.filter((o) => (o.sources ?? ['sim', 'bag']).includes('sim')))
 const activeSlam = computed(() =>
   allSlamOptions.value.find((o) => ['running', 'stopping'].includes(stackOf(o.name)?.state ?? '')),
 )
-const selectedSlam = computed(() => {
-  if (activeSlam.value) return activeSlam.value
-  const opts = slamOptions.value
-  return opts.find((o) => o.name === chosenSlam.value) ?? opts.find((o) => o.name === names.value.slam) ?? opts[0]
+// 算法按钮只列基础算法（FAST-LIO2、GLIM）；变体（仅激光、地面约束）用开关切换，见 mapping/slamChoice.ts
+const choice = useSlamChoice({
+  all: allSlamOptions, source: 'sim', active: activeSlam, chosen: chosenSlam, chosenOpts,
+  fallback: computed(() => names.value.slam),
 })
+const slamOptions = choice.bases
+const selectedBase = choice.selectedBase
+const selectedSlam = choice.selectedSlam
 const slam = computed(() => stackOf(selectedSlam.value?.name ?? names.value.slam))
 const waypoints = computed(() => stackOf(names.value.waypoints))
 const running = (s: StackInfo | null) => s?.state === 'running'
@@ -389,10 +393,17 @@ const imuState = computed<[string, TagType]>(() => {
           <div class="algos" role="radiogroup" :aria-label="t('mapping.steps.algorithm')">
             <button
               v-for="o in slamOptions" :key="o.name" type="button" class="algo"
-              :class="{ on: selectedSlam?.name === o.name }" role="radio" :aria-checked="selectedSlam?.name === o.name"
-              :disabled="!!activeSlam && activeSlam.name !== o.name" @click="chosenSlam = o.name"
+              :class="{ on: selectedBase?.name === o.name }" role="radio" :aria-checked="selectedBase?.name === o.name"
+              :disabled="!!activeSlam && baseOf(activeSlam) !== o.name" @click="chosenSlam = o.name"
             >{{ o.algorithm }}</button>
           </div>
+        </div>
+        <div v-for="k in choice.switches.value" :key="k" class="field">
+          <span class="k">{{ t(`mapping.steps.opt.${k}`) }}<InfoTip :content="t(`mapping.tips.opt.${k}`)" /></span>
+          <el-switch
+            :model-value="choice.optionOn(k)" size="small" :disabled="choice.optionDisabled(k)"
+            @update:model-value="(v: string | number | boolean) => choice.setOption(k, !!v)"
+          />
         </div>
         <p v-if="selectedSlam?.save_mode === 'dump'" class="note">{{ t('mapping.steps.dumpNote') }}</p>
         <p v-if="!running(sim) && !running(slam)" class="note">{{ t('mapping.steps.needSim') }}</p>

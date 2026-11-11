@@ -1,7 +1,7 @@
 // REST 接口封装。后端出错时返回 {code, params}，这里包装成 ApiError；
 // 显示给用户的文字用 messages.ts 里的 errorText() 按当前语言生成
 import type { CodedMsg, MapSceneInfo, MappingPreset, NavMap, NavMission, NavSolid, NavStatus, PickedPose, StackInfo } from './types'
-import type { BagInfo, PlaybackStatus, PlaybackStorage } from './mapping/stream'
+import type { BagInfo, PlaybackStatus, BagTrash, PlaybackStorage } from './mapping/stream'
 
 export class ApiError extends Error {
   readonly coded: CodedMsg
@@ -77,10 +77,12 @@ function upload<T>(
 export const api = {
   /** preset：建图场景预设名；不给时后端按默认预设或正在运行的仿真决定 */
   /** origin: which page started it (the navigation page warns when the simulation came from elsewhere) */
-  startStack: (name: string, preset?: string, origin?: 'mapping' | 'navigation' | 'playback') => {
+  /** bag (Playback page, SLAM only): a bag of a real robot starts the SLAM with that robot's configuration */
+  startStack: (name: string, preset?: string, origin?: 'mapping' | 'navigation' | 'playback', bag?: string) => {
     const q = new URLSearchParams()
     if (preset) q.set('preset', preset)
     if (origin) q.set('origin', origin)
+    if (bag) q.set('bag', bag)
     const qs = q.toString()
     return request<StackInfo>('POST', `/api/stacks/${encodeURIComponent(name)}/start${qs ? `?${qs}` : ''}`)
   },
@@ -155,6 +157,10 @@ export const api = {
     request<{ name: string; path: string; size: number }>('POST', `/api/playback/uploads/${encodeURIComponent(token)}/finish`),
   cancelBagUpload: (token: string) => request<unknown>('DELETE', `/api/playback/uploads/${encodeURIComponent(token)}`),
   deleteBag: (path: string) => request<{ name: string; trash: string }>('DELETE', `/api/playback/bags?path=${encodeURIComponent(path)}`),
+  bagTrash: () => request<BagTrash>('GET', '/api/playback/trash'),
+  restoreBag: (id: string) =>
+    request<{ restored: string; name: string }>('POST', `/api/playback/trash/restore?id=${encodeURIComponent(id)}`),
+  purgeBag: (id: string) => request<{ freed: number }>('DELETE', `/api/playback/trash/item?id=${encodeURIComponent(id)}`),
   emptyBagTrash: () => request<{ freed: number }>('DELETE', '/api/playback/trash'),
   /** Open a data folder in the desktop file manager of the machine running the console (open_folder.py) */
   openFolder: (path: string) =>

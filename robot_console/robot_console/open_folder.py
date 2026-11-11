@@ -6,6 +6,8 @@ the Linux file system open as \\\\wsl.localhost\\<distro>\\...), on a Linux desk
 
 Only folders inside the console's own data folders can be opened (maps, run records, evaluation exports,
 bag folders); the path must exist and be a directory. `~` is expanded, so the page can pass the paths it shows.
+The recycle bin dialogs open <data folder>/.trash, which only exists after the first delete: that one folder is
+created when it is missing.
 """
 import os
 import shutil
@@ -62,6 +64,9 @@ def register_open_folder_routes(app, cfg):
         real = os.path.realpath(os.path.expanduser(path or ''))
         if not any(real == r or real.startswith(r.rstrip('/') + '/') for r in roots):
             raise error(403, 'open_folder_outside', path=path)
+        if (not os.path.lexists(real) and os.path.basename(real) == '.trash'
+                and os.path.dirname(real) in roots and os.path.isdir(os.path.dirname(real))):
+            os.makedirs(real, mode=0o700, exist_ok=True)
         if not os.path.isdir(real):
             raise error(404, 'open_folder_missing', path=path)
         cmd, shown = opener(real)
