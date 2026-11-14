@@ -27,7 +27,9 @@ done
 
 # owner | kind | Fuel name | version | SHA-256 of the zip | target in models/fuel
 ITEMS=(
-    "OpenRobotics|models|Warehouse|1|74b3008d5a4a6c8797da10b21a86779b2638182307d5c9e6a27a04ff6eddd024|Warehouse"
+    # Warehouse: Fuel re-packaged the zip after v0.1.0 (checked 2026-11-14). Only model.config differs from the pinned zip
+    # (<sdf version> 1.7 -> 1.9); model.sdf, meshes and thumbnails are identical, so the pin is updated to the new zip.
+    "OpenRobotics|models|Warehouse|1|b7c00445cd0945ca7d3268aa4f25f80c96c80e0c9472e67b96a82a24012b193f|Warehouse"
     "MovAi|models|shelf|1|a33a204af036b5f389af11a1c514aa76fc368750c6dd73868bd0500a9813e679|shelf"
     "MovAi|models|shelf_big|1|d27d7fe1cc7a2886e44cf3d2bbe4190a619153f3263ca04969fe60ddf7a5ff92|shelf_big"
     "MovAi|models|pallet_box_mobile|1|eb70aee8c7c286c7328df5fb4593f1063690cfdc96d35ad077b1170eb45b1854|pallet_box_mobile"
