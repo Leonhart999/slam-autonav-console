@@ -1,0 +1,8 @@
+# Override file for the console inside the container (selected with ROBOT_CONSOLE_USER_CONFIG in the Dockerfile).
+# It is merged key by key onto robot_console/config/console.yaml.
+#
+# Inside the container the console has to listen on all interfaces, otherwise Docker cannot forward the port.
+# docker-compose.yml publishes the port on 127.0.0.1 of the host only, so the console stays reachable from this
+# computer only, as in a native install.
+server:
+  host: 0.0.0.0

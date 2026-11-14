@@ -59,6 +59,9 @@ bash slam-autonav-console/robot_console/install/start_console.sh    # 启动控�
 环境（控制台和 evo）以及网页前端，最后做一次自检。已经完成的步骤会跳过，所以中途失败后直接重新运行即可。
 安装选项、离线安装和配置说明见 [robot_console/README.md](robot_console/README.md)（英文）。
 
+也可以用 Docker 在一个容器里运行整套系统：先 `docker compose build`，再 `docker compose up -d`（在中国大陆构建时加 `CN=1`）。
+详见 [docker/README.md](docker/README.md)（英文）。目前只在 WSL2 加 Docker Engine 上测试过，导航页还没有在容器里测试。
+
 第一次使用：在**建图**页选办公室场景，启动仿真，启动 FAST-LIO2，在“移动小车”里选“自动航点”并点*启动*，跑完一圈后保存地图。
 然后在**导航**页选这张地图，在那里启动仿真和导航，在 2D 栅格上点一个目标点。
 

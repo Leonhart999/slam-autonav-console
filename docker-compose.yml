@@ -1,0 +1,30 @@
+# Run the console in Docker:
+#   docker compose up -d        then open http://localhost:8000
+#   docker compose build --build-arg CN=1      (mirrors for mainland China)
+# See docker/README.md.
+services:
+  console:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      additional_contexts:
+        prefetch: ${PREFETCH_DIR:-./docker/prefetch}   # archives install.sh would download from GitHub (docker/README.md)
+      args:
+        CN: ${CN:-0}
+        APT_MIRROR: ${APT_MIRROR:-mirrors.ustc.edu.cn}   # Ubuntu mirror used when CN=1
+        JOBS: ${JOBS:-4}          # parallel compile jobs; use 2 with 8 GB RAM
+    image: slam-autonav-console:local
+    init: true                    # reaps the many child processes the console starts (Gazebo, SLAM, Nav2)
+    shm_size: 2gb                 # DDS shared memory carries the 0.7 MB point clouds; the 64 MB default is too small
+    stop_grace_period: 30s        # on SIGTERM the console saves a running FAST-LIO map and stops its processes
+    ports:
+      - "127.0.0.1:${CONSOLE_PORT:-8000}:8000"   # host loopback only, like the native install
+    volumes:
+      - console_data:/home/robot/robot_console_data   # maps, runs, logs, scenes, bags, exports
+      - console_results:/home/robot/results           # FAST-LIO writes its raw map here
+      # Recorded bags that live on the host (read-only):
+      # - /path/to/bags:/home/robot/robot_console_data/bags:ro
+
+volumes:
+  console_data:
+  console_results:

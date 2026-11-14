@@ -68,6 +68,10 @@ small patch), two Python environments (console and evo) and the web frontend, th
 skips steps that are already done, so it can simply be run again after a failure. Options, offline
 installation and configuration are described in [robot_console/README.md](robot_console/README.md).
 
+Alternatively, the whole system runs in one Docker container: `docker compose build` and then `docker compose up -d`
+(add `CN=1` in mainland China). See [docker/README.md](docker/README.md). It has been tested on WSL2 with Docker
+Engine; the Navigation page has not been tested in the container yet.
+
 First run: on the **Mapping** page pick the office world, start the simulation, start FAST-LIO2, press
 *Start* under waypoints and save the map when the loop is done. Then pick the map on the **Navigation**
 page, start the simulation and navigation there, and click a goal on the 2D grid.

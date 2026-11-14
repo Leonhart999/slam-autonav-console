@@ -6,3 +6,5 @@ robot_console/web/dist/
 sim_robot/models/fuel/*
 !sim_robot/models/fuel/README.md
 sim_robot/models/bim_*/
+docker/prefetch/*
+!docker/prefetch/README.md

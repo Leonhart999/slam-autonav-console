@@ -1,0 +1,15 @@
+.git
+**/__pycache__
+**/*.pyc
+**/node_modules
+
+# Rebuilt inside the image, so the image never depends on a stale local build
+robot_console/web/dist
+
+# Offline archives are passed as the separate prefetch build context, not through this one
+docker/prefetch
+
+# Downloaded during the build (licences do not allow shipping them in the repository)
+sim_robot/models/fuel/*
+!sim_robot/models/fuel/README.md
+sim_robot/models/bim_*/
