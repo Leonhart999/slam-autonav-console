@@ -73,8 +73,66 @@ export interface BagInfo {
   reference?: { topic: string; label: Bilingual } | null
   /** Per SLAM (stacks.yaml name): can it run on this bag, and which bag topic feeds which input */
   slams: Record<string, { ok: boolean; missing: string[]; remapped: boolean; plan: PlaybackPlan }>
-  /** Sensor profile of a real robot (config/sensor_profiles.yaml): played through the sensor adapter */
-  sensor: { name: string; label: Bilingual } | null
+  /** Sensor profile of a real robot (config/sensor_profiles.yaml): played through the sensor adapter;
+   *  start_offset = s at the start that the page skips by default */
+  sensor: { name: string; label: Bilingual; user?: boolean; start_offset?: number } | null
+}
+
+type Matrix4 = number[][]
+/** A sensor profile as the sensor setup form (robot_console/sensor_profiles.py to_form / guess) */
+export interface SensorProfileForm {
+  name: string
+  user?: boolean // made on the page (editable); built-in profiles come from config/sensor_profiles.yaml
+  label: string
+  points: string | null
+  points2: string | null
+  lidar2_to_lidar: Matrix4
+  imu: string | null
+  time_field: string // '' = the cloud has no per-point time
+  time_unit: 's' | 'ms' | 'us' | 'ns'
+  time_absolute: boolean
+  ring_field: string
+  intensity_field: string
+  imu_acc_unit: 'g' | 'm/s2'
+  lidar_to_imu: Matrix4
+  imu_to_base: Matrix4
+  reference: string | null
+  source_bag?: string | null
+  updated?: string | null
+}
+export interface ProbedCloud {
+  frame_id: string
+  stamp: number
+  width: number
+  height: number
+  points: number
+  finite: number
+  fields: { name: string; datatype: number; offset: number; count: number }[]
+  stats: Record<string, { min: number; max: number; median: number }>
+}
+export interface ProbedImu {
+  frame_id: string
+  samples: number
+  rate: number | null
+  acc_mean: number[]
+  acc_norm: number
+  acc_norm_std: number
+  gyro_norm: number
+}
+/** POST /api/playback/sensor_profiles/probe: the bag's first scans / IMU samples and the proposed profile */
+export interface SensorProbe {
+  bag: { path: string; name: string }
+  topics: { name: string; type: string; count: number }[]
+  probe: { clouds: Record<string, ProbedCloud>; imus: Record<string, ProbedImu>; odoms: string[] }
+  guess: SensorProfileForm
+  /** guesses per topic, applied when the form switches to another cloud / IMU topic */
+  per_topic: {
+    clouds: Record<string, Pick<SensorProfileForm, 'time_field' | 'time_unit' | 'time_absolute' | 'ring_field' | 'intensity_field'>
+      & { time_negative: boolean }>
+    imus: Record<string, SensorProfileForm['imu_acc_unit']>
+  }
+  warnings: { code: string; params: Record<string, string | number> }[]
+  matched: SensorProfileForm | null // the profile the bag matches now
 }
 /** via: the sensor adapter's input, when the bag has a sensor profile */
 export type PlaybackPlan = Record<string, { from: string; to: string; via?: string }>
@@ -105,6 +163,10 @@ export interface PlaybackStatus {
   slam_lag?: number | null
   /** the bag has ended but the SLAM is still working on queued scans */
   catching_up?: boolean
+  /** SLAM stacks whose raw scans can be recorded during a playback ("Save raw scans") */
+  scan_slams?: string[]
+  /** the current / last playback records raw scans */
+  scans?: boolean
   // the current / last playback
   bag?: string
   name?: string
@@ -134,6 +196,8 @@ export interface SlamOption {
   /** set on a variant of another profile with some options on (lidar, ground), shown as switches on that profile */
   variant_of?: string | null
   options?: string[]
+  /** the console builds this SLAM's parameter file: the pages offer the "Parameters" dialog */
+  config?: boolean
 }
 
 export interface SaveJob {

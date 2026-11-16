@@ -1,0 +1,26 @@
+export const taskMessages = {
+  'zh-CN': { tasks: {
+    title: '后台任务', active: '{n} 项运行中', empty: '暂无后台任务', open: '查看结果', retry: '重新提交',
+    refresh: '刷新', id: '任务编号', target: '对象', state: '状态', phase: '阶段', close: '关闭',
+    background: '关闭页面后任务会继续，可从“后台任务”找回。', recovered: '已恢复任务',
+    retrySent: '已重新提交', expired: '预览已过期或已保存，请重新生成。',
+    baseline: '基准轨迹', mean: '平均偏差 (m)', max: '最大偏差 (m)', error: '失败原因',
+    kind: { regrid: '重投影', evaluate: '运行评估', eval_export: '导出评估', eval_relative: '相对比较' },
+    states: { queued: '排队中', running: '执行中', succeeded: '已完成', failed: '失败', interrupted: '已中断' },
+    phases: { queued: '等待执行', reading: '读取数据', projecting: '生成栅格', writing: '写入结果',
+      evaluating: '计算轨迹误差', reference: '计算参考轨迹偏差', exporting: '导出报告', comparing: '比较轨迹',
+      done: '结果已保存', failed: '执行失败', interrupted: '服务重启，等待重新提交' },
+  } },
+  en: { tasks: {
+    title: 'Background tasks', active: '{n} active', empty: 'No background tasks', open: 'View result', retry: 'Retry',
+    refresh: 'Refresh', id: 'Task ID', target: 'Target', state: 'State', phase: 'Stage', close: 'Close',
+    background: 'The task continues when you leave. Find it again in Background tasks.', recovered: 'Task recovered',
+    retrySent: 'Task resubmitted', expired: 'The preview expired or was saved. Generate a new preview.',
+    baseline: 'Baseline', mean: 'Mean (m)', max: 'Maximum (m)', error: 'Failure reason',
+    kind: { regrid: 'Projection', evaluate: 'Evaluation', eval_export: 'Export', eval_relative: 'Relative comparison' },
+    states: { queued: 'Queued', running: 'Running', succeeded: 'Completed', failed: 'Failed', interrupted: 'Interrupted' },
+    phases: { queued: 'Waiting', reading: 'Reading data', projecting: 'Building grid', writing: 'Writing results',
+      evaluating: 'Computing trajectory error', reference: 'Comparing reference odometry', exporting: 'Exporting report',
+      comparing: 'Comparing trajectories', done: 'Result saved', failed: 'Failed', interrupted: 'Service restarted; retry available' },
+  } },
+}

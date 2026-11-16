@@ -18,6 +18,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), files('launch/*.launch.py')),
         (os.path.join('share', package_name, 'config'), files('config/*.yaml')),
+        (os.path.join('share', package_name, 'config', 'slam'), files('config/slam/*.yaml')),
         (os.path.join('share', package_name, 'config', 'glim_lidar_only'), files('config/glim_lidar_only/*.json')),
     ],
     install_requires=['setuptools'],
@@ -30,6 +31,9 @@ setup(
         'console_scripts': [
             'console = robot_console.main:main',
             'sensor_adapter = robot_console.sensor_adapter:main',
+            'fastlio_loop = robot_console.fastlio_loop_backend:main',
+            'fastlio_loop_record = robot_console.fastlio_loop_record:main',
+            'fastlio_loop_export = robot_console.fastlio_loop_export:main',
         ],
     },
 )

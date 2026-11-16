@@ -14,11 +14,54 @@ from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from PIL import Image
 
+from .map_catalog import scan_source
 from .map_library import NAME_RE
+
+
+DEFAULT_PARAMS = {'res': 0.05, 'obs_min': 0.1, 'obs_max': 0.7, 'ground_tol': 0.05,
+                  'ground_mode': 'plane', 'min_points': 2, 'tile': 5.0, 'voxel': 0.0,
+                  'inflate': 0.0, 'closing_iters': 2, 'max_cells': 4000000}
+AUTO_RESOLUTIONS = (0.05, 0.1, 0.2, 0.5)   # m, an imported cloud gets the finest one that fits max_cells
+WORKER_TIMEOUT = 120                        # s
+SCAN_TIMEOUT = 600                          # s, the scan method reads the whole recording
+# Method 'scans': per-cell evidence from the recorded scans (fastlio_loop_grid.py); key -> (default, min, max)
+SCAN_LIMITS = {'res': (0.05, 0.02, 1), 'obs_min': (0.1, -5, 5), 'obs_max': (0.7, -5, 5),
+               'ground_tol': (0.05, 0.001, 1), 'map_range': (20.0, 2, 100), 'min_span': (1.0, 0, 20),
+               'occ_ratio': (0.1, 0, 1), 'robot_radius': (0.3, 0, 2)}
+SCAN_INT_LIMITS = {'min_hits': (4, 1, 100), 'closing_iters': (2, 0, 5)}
 
 
 def fail(reason, status=400):
     return HTTPException(status, detail={'code': 'map_operation_failed', 'params': {'reason': str(reason)}})
+
+
+def run_worker(python, cloud, out_dir, params, timeout=WORKER_TIMEOUT, **job):
+    """Run regrid_worker.py (pcd2grid, or the scan method when job has method='scans') in its own process;
+    writes map.pgm / map.yaml / result.json into out_dir and returns result.json. Raises RuntimeError with
+    the worker's last error line."""
+    out_dir = Path(out_dir)
+    (out_dir / 'job.json').write_text(json.dumps({'cloud': str(cloud), 'out_dir': str(out_dir), 'params': params,
+                                                  **job}), encoding='utf-8')
+    worker = Path(__file__).with_name('regrid_worker.py')
+    env = dict(os.environ, OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
+    try:
+        process = subprocess.run([str(python), '-I', str(worker), str(out_dir / 'job.json')],
+                                 cwd='/tmp', env=env, stdin=subprocess.DEVNULL,
+                                 capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f'Projection took longer than {timeout} s')
+    if process.returncode:
+        raise RuntimeError((process.stderr.strip().splitlines() or ['Projection failed'])[-1])
+    return json.loads((out_dir / 'result.json').read_text())
+
+
+def auto_params(extent_xy):
+    """Default projection parameters for a cloud spanning extent_xy = (dx, dy) m: the finest resolution of
+    AUTO_RESOLUTIONS whose grid (plus pcd2grid's margin) stays under max_cells."""
+    p = dict(DEFAULT_PARAMS)
+    dx, dy = (max(float(v), 0.0) + 2.0 for v in extent_xy)
+    p['res'] = next((r for r in AUTO_RESOLUTIONS if (dx / r) * (dy / r) <= p['max_cells']), AUTO_RESOLUTIONS[-1])
+    return p
 
 
 class Regrid:
@@ -29,9 +72,32 @@ class Regrid:
         self.python = Path(cfg['server']['venv']).expanduser() / 'bin/python'
         self.lock = threading.Lock()
 
+    def scan_parameters(self, body):
+        """Parameters of the scan method, named as fastlio_loop_grid.py expects them."""
+        if set(body) - set(SCAN_LIMITS) - set(SCAN_INT_LIMITS) - {'method'}:
+            raise fail('Unsupported projection parameter')
+        p = {}
+        for key, (default, lo, hi) in SCAN_LIMITS.items():
+            v = body.get(key, default)
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not lo <= v <= hi:
+                raise fail(f'{key} must be between {lo} and {hi}')
+            p[key] = float(v)
+        for key, (default, lo, hi) in SCAN_INT_LIMITS.items():
+            v = body.get(key, default)
+            if type(v) is not int or not lo <= v <= hi:
+                raise fail(f'{key} must be an integer between {lo} and {hi}')
+            p[key] = v
+        if p['obs_min'] >= p['obs_max']:
+            raise fail('Obstacle minimum height must be less than maximum height')
+        p['closing'] = p.pop('closing_iters')
+        return p
+
     def parameters(self, body):
         if not isinstance(body, dict):
             raise fail('Projection parameters must be an object')
+        if body.get('method', 'cloud') not in ('cloud', 'scans'):
+            raise fail('Unsupported projection method')
+        body = {k: v for k, v in body.items() if k != 'method'}
         limits = {'res': (0.01, 1), 'obs_min': (-100, 100), 'obs_max': (-100, 100),
                   'ground_tol': (0.001, 1), 'tile': (0.5, 50), 'voxel': (0, 0.5),
                   'inflate': (0, 2), 'ground_cell': (0.1, 5), 'ground_smooth': (0, 5),
@@ -41,9 +107,7 @@ class Regrid:
         experimental = body.get('experimental', False)
         if not isinstance(experimental, bool):
             raise fail('experimental must be a boolean')
-        p = {'res': 0.05, 'obs_min': 0.1, 'obs_max': 0.7, 'ground_tol': 0.05,
-             'ground_mode': 'plane', 'min_points': 2, 'tile': 5.0, 'voxel': 0.0,
-             'inflate': 0.0, 'closing_iters': 2, 'max_cells': 4000000}
+        p = dict(DEFAULT_PARAMS)
         for key, (lo, hi) in limits.items():
             if key in body:
                 v = body[key]
@@ -68,18 +132,29 @@ class Regrid:
         # Never rotate the cloud here: all assets must retain their navigation frame.
         return p, experimental
 
-    def preview(self, name, body):
-        p, experimental = self.parameters(body)
+    def preview(self, name, body, progress=lambda phase: None):
+        scans = isinstance(body, dict) and body.get('method') == 'scans'
+        if scans:
+            p, experimental = self.scan_parameters(body), False
+        else:
+            p, experimental = self.parameters(body)
         if not self.lock.acquire(blocking=False):
             raise fail('Another projection/save is in progress', 409)
         out = None
         try:
+            progress('reading')
             kind, path = self.catalog._locate(name)
             if kind != 'folder':
                 raise fail('A folder map with a 3D point cloud is required')
             cloud = path / 'map.pcd'
             if not cloud.is_file() or cloud.is_symlink() or path.is_symlink():
                 raise fail('The original map.pcd is missing or is a symbolic link')
+            source = None
+            if scans:
+                meta_file = path / 'meta.json'
+                source = scan_source(path, json.loads(meta_file.read_text()) if meta_file.is_file() else {})
+                if source is None:
+                    raise fail('This map has no scan recording; use the point-cloud method')
             self.stage.mkdir(exist_ok=True)
             # Preview files are disposable, separate from saved maps.
             for child in self.stage.iterdir():
@@ -90,18 +165,18 @@ class Regrid:
             out = self.stage / uuid.uuid4().hex
             out.mkdir()
             signature = [cloud.stat().st_ino, cloud.stat().st_size, cloud.stat().st_mtime_ns]
-            job = {'cloud': str(cloud), 'out_dir': str(out), 'params': p}
-            (out / 'job.json').write_text(json.dumps(job), encoding='utf-8')
-            worker = Path(__file__).with_name('regrid_worker.py')
-            env = dict(os.environ, OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1')
-            process = subprocess.run([str(self.python), '-I', str(worker), str(out / 'job.json')],
-                                     cwd='/tmp', env=env, stdin=subprocess.DEVNULL,
-                                     capture_output=True, text=True, timeout=120)
-            if process.returncode:
-                raise fail((process.stderr.strip().splitlines() or ['pcd2grid failed'])[-1])
-            result = json.loads((out / 'result.json').read_text())
+            try:
+                progress('projecting')
+                if source:
+                    result = run_worker(self.python, cloud, out, p, SCAN_TIMEOUT, method='scans',
+                                        recording=str(source[0]), trajectory=str(source[1]))
+                else:
+                    result = run_worker(self.python, cloud, out, p)
+            except RuntimeError as exc:
+                raise fail(exc)
             record = {**result, 'token': out.name, 'parent': name, 'params': p,
                       'experimental': experimental, 'signature': signature}
+            progress('writing')
             (out / 'record.json').write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
             with Image.open(out / 'map.pgm') as im:
                 im.save(out / 'grid.png')
@@ -161,6 +236,11 @@ class Regrid:
                 shutil.copy2(out / 'grid.png', dest / 'map_preview.png')
                 original = source / 'meta.json'
                 meta = json.loads(original.read_text()) if original.is_file() else {}
+                # The per-scan trajectory travels with the version, so the scan method stays available.
+                scans = scan_source(source, meta)
+                if scans:
+                    (dest / 'data').mkdir()
+                    shutil.copy2(scans[1], dest / 'data' / scans[1].name)
                 meta.update(name=name, created=time.strftime('%Y-%m-%d %H:%M:%S'), source='regrid',
                             parent=record['parent'], grid=record['grid'], project_error=None,
                             figures_error=None, regrid=record,
@@ -178,11 +258,22 @@ class Regrid:
 
 
 def register_regrid_routes(app, catalog, cfg):
+    from .tasks import tasks_for
     service = Regrid(catalog, cfg)
+    tasks = tasks_for(app, cfg)
+    tasks.register('regrid', lambda target, params, progress: service.preview(target, params, progress))
 
     @app.post('/api/maps/{name}/regrid')
-    async def preview(name: str, body: dict):
+    async def preview(name: str, body: dict, background: bool = False):
         try:
+            if background:
+                # Reject malformed inputs immediately, before acknowledging a durable job.
+                if body.get('method') == 'scans':
+                    service.scan_parameters(body)
+                else:
+                    service.parameters(body)
+                catalog._locate(name)
+                return tasks.submit('regrid', name, body)
             return await asyncio.to_thread(service.preview, name, body)
         except HTTPException:
             raise
@@ -204,7 +295,14 @@ def register_regrid_routes(app, catalog, cfg):
     @app.post('/api/maps/regrid/{token}/save')
     def save(token: str, body: dict):
         try:
-            return service.save(token, body.get('name'))
+            detail = service.save(token, body.get('name'))
+            try:
+                tasks.mark_saved_preview(token, detail['name'])
+            except OSError:
+                # Publishing the map already succeeded; do not report it as a failed save.
+                import logging
+                logging.getLogger(__name__).exception('Cannot update saved projection task')
+            return detail
         except HTTPException:
             raise
         except Exception as exc:

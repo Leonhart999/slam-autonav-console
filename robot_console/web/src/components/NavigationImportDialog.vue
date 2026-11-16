@@ -3,6 +3,8 @@ import type { NavMap } from '@/types'
 
 export interface MapImportResult extends Omit<NavMap, 'grid'> {
   grid: NavMap['grid'] | null
+  /** cloud-only import with auto_grid=1: outcome of the pcd2grid projection (map_import.py) */
+  auto_grid?: { ok: boolean; error: string | null; warnings: string[]; resolution: number | null } | null
 }
 </script>
 
@@ -34,9 +36,17 @@ const { t } = useI18n({
         title: 'Import map',
         yaml: 'Map parameters (YAML, paired with image)', image: 'Grid image (PGM / PNG, paired with YAML)',
         cloud: 'Point cloud (PCD; sufficient on its own)',
-        cloudHint: 'ASCII or binary PCD. Cloud-only imports can generate a 2D grid in Maps; when supplied with a grid, both must use the same coordinate frame.',
-        desc: 'Import a YAML/image pair, a PCD cloud, or both. A cloud-only map can be viewed in Maps but needs a 2D grid for navigation.',
+        cloudHint: 'ASCII or binary PCD (binary_compressed is not supported). When supplied with a grid, both must use the same coordinate frame.',
+        desc: 'Import a YAML/image pair, a PCD cloud, or both. For a cloud on its own the 2D grid that navigation needs can be generated from the cloud.',
         required: 'Supply both YAML and image, or a PCD cloud. YAML and image must always be paired.',
+      },
+      autoGrid: {
+        label: 'Generate the 2D grid from the cloud',
+        hint: 'pcd2grid projects the cloud with the default parameters (ground plane fitted to the cloud, obstacles 0.1–0.7 m above it; resolution 0.05 m, coarser for large clouds). The map can be used for navigation right away; adjust the grid later with "Regenerate 2D" on the Maps page.',
+        needed: 'A cloud on its own needs "Generate the 2D grid from the cloud" for navigation.',
+        done: 'Map {name} imported; 2D grid generated from the cloud ({res} m)',
+        warnings: '2D grid generated with warnings: {text}',
+        failed: 'Map {name} imported without a 2D grid: projection failed ({reason}). Use "Regenerate 2D" on the Maps page.',
       },
     },
     'zh-CN': {
@@ -44,9 +54,17 @@ const { t } = useI18n({
         title: '导入地图',
         yaml: '地图参数（YAML，与图像配对）', image: '栅格图像（PGM / PNG，与 YAML 配对）',
         cloud: '点云（PCD，可单独导入）',
-        cloudHint: '支持 ASCII 或 binary PCD。纯点云导入后可生成 2D 栅格；同时提供 2D 和 3D 时，两者必须使用同一坐标系。',
-        desc: '可导入 YAML/图像配对文件、PCD 点云，或同时导入两者。纯点云可在地图库查看，导航仍需二维栅格。',
+        cloudHint: '支持 ASCII 或 binary PCD，不支持 binary_compressed。同时提供 2D 和 3D 时，两者必须使用同一坐标系。',
+        desc: '可导入 YAML/图像配对文件、PCD 点云，或同时导入两者。只有点云时，可从点云生成导航用的 2D 栅格。',
         required: '请选择 YAML 与图像配对文件，或 PCD 点云；YAML 和图像必须同时提供。',
+      },
+      autoGrid: {
+        label: '从点云自动生成 2D 栅格',
+        hint: '用 pcd2grid 的默认参数投影：按点云拟合地面平面，高出地面 0.1–0.7 m 的点算障碍；分辨率 0.05 m，点云很大时自动放粗。导入后可直接导航，之后可在地图库用“重新生成 2D”调整。',
+        needed: '只有点云时，要勾选“从点云自动生成 2D 栅格”才能用于导航。',
+        done: '地图 {name} 已导入，并从点云生成了 2D 栅格（{res} m）',
+        warnings: '2D 栅格已生成，但有提示：{text}',
+        failed: '地图 {name} 已导入，但没有 2D 栅格：投影失败（{reason}）。可在地图库用“重新生成 2D”重试。',
       },
     },
   },
@@ -69,8 +87,13 @@ const presetsLoading = ref(false)
 const presetsError = ref('')
 let presetsSeq = 0
 const nameInvalid = computed(() => !!name.value && !IMPORT_NAME_RE.test(name.value))
+// A cloud on its own is projected into a 2D grid (auto_grid=1) unless the user turns that off; the navigation
+// page only accepts it with the grid, the Maps page also takes a bare cloud (regrid there afterwards)
+const autoGrid = ref(true)
+const cloudOnly = computed(() => !!cloud.value && !yaml.value && !image.value)
+const cloudOnlyOk = computed(() => props.allowCloudOnly || autoGrid.value)
 const filesValid = computed(() => !!yaml.value === !!image.value
-  && (!!yaml.value || (props.allowCloudOnly && !!cloud.value)))
+  && (!!yaml.value || (!!cloud.value && cloudOnlyOk.value)))
 const canSubmit = computed(() => !props.disabled && !busy.value && IMPORT_NAME_RE.test(name.value) && filesValid.value)
 
 async function loadPresets() {
@@ -92,6 +115,7 @@ watch(() => props.modelValue, (value) => {
   name.value = ''
   yaml.value = image.value = cloud.value = null
   preset.value = ''
+  autoGrid.value = true
   presets.value = []
   error.value = ''
   for (const input of [yamlInput, imageInput, cloudInput]) {
@@ -124,8 +148,8 @@ async function submit() {
     const yamlFile = yaml.value
     const imageFile = image.value
     const cloudFile = cloud.value
-    if (!!yamlFile !== !!imageFile || (!yamlFile && !(props.allowCloudOnly && cloudFile))) {
-      throw new Error(t(props.allowCloudOnly ? 'cloudImport.required' : 'uploads.requiredFiles'))
+    if (!!yamlFile !== !!imageFile || (!yamlFile && !(cloudOnlyOk.value && cloudFile))) {
+      throw new Error(t(props.allowCloudOnly ? 'cloudImport.required' : (cloudFile ? 'autoGrid.needed' : 'uploads.requiredFiles')))
     }
     if (yamlFile) validateImportFile(yamlFile, ['.yaml', '.yml'], IMPORT_LIMITS.yaml)
     if (imageFile) validateImportFile(imageFile, ['.pgm', '.png'], IMPORT_LIMITS.image)
@@ -142,6 +166,7 @@ async function submit() {
       data.append('image_file', imageFile)
     }
     if (cloudFile) data.append('cloud_file', cloudFile)
+    if (cloudFile && !yamlFile) data.append('auto_grid', autoGrid.value ? '1' : '0')
     if (preset.value) data.append('preset', preset.value)
     return api.importNavigation(data, progress)
   })
@@ -149,7 +174,15 @@ async function submit() {
   emit('completed', result)
   // Keep the existing navigation event strictly compatible with NavMap.
   if (result.grid !== null) emit('imported', { ...result, grid: result.grid })
-  ElMessage.success(t('navigation.import.success', { name: result.name }))
+  const auto = result.auto_grid
+  if (auto?.ok) {
+    ElMessage.success(t('autoGrid.done', { name: result.name, res: auto.resolution }))
+    if (auto.warnings.length) ElMessage.warning(t('autoGrid.warnings', { text: auto.warnings.join('; ') }))
+  } else if (auto) {
+    ElMessage.warning({ message: t('autoGrid.failed', { name: result.name, reason: auto.error }), duration: 8000 })
+  } else {
+    ElMessage.success(t('navigation.import.success', { name: result.name }))
+  }
   open.value = false
 }
 </script>
@@ -160,39 +193,43 @@ async function submit() {
     width="min(620px, calc(100vw - 32px))" append-to-body destroy-on-close
     :close-on-click-modal="!busy" :close-on-press-escape="!busy" :show-close="!busy"
   >
-    <p class="import-note">{{ t(allowCloudOnly ? 'cloudImport.desc' : 'navigation.import.desc') }}</p>
+    <p class="import-note">{{ t('cloudImport.desc') }}</p>
     <el-alert :title="t('navigation.import.sceneHint')" type="info" :closable="false" show-icon />
     <el-form label-position="top" :disabled="busy" class="import-form" @submit.prevent="submit">
       <el-form-item :label="t('uploads.name')" :error="nameInvalid ? t('uploads.nameRule') : undefined" required>
         <el-input v-model="name" maxlength="48" :placeholder="t('uploads.namePlaceholder')" :aria-label="t('uploads.name')" />
       </el-form-item>
       <p class="import-note">{{ t('uploads.nameRule') }}</p>
-      <el-form-item :label="t(allowCloudOnly ? 'cloudImport.yaml' : 'navigation.import.yaml')" :required="!allowCloudOnly || !!image">
+      <el-form-item :label="t('cloudImport.yaml')" :required="!!image || !cloud">
         <div class="import-file">
-          <input ref="yamlInput" type="file" accept=".yaml,.yml" hidden :disabled="busy" :aria-label="t('navigation.import.yaml')" @change="chooseFile('yaml', $event)" />
+          <input ref="yamlInput" type="file" accept=".yaml,.yml" hidden :disabled="busy" :aria-label="t('cloudImport.yaml')" @change="chooseFile('yaml', $event)" />
           <el-button @click="yamlInput?.click()">{{ t('uploads.browse') }}</el-button>
           <span class="import-filename" :title="yaml?.name">{{ yaml?.name ?? t('uploads.noFile') }}</span>
           <el-button v-if="yaml" text :aria-label="t('uploads.remove')" @click="clearFile('yaml')">{{ t('uploads.remove') }}</el-button>
         </div>
       </el-form-item>
-      <el-form-item :label="t(allowCloudOnly ? 'cloudImport.image' : 'navigation.import.image')" :required="!allowCloudOnly || !!yaml">
+      <el-form-item :label="t('cloudImport.image')" :required="!!yaml || !cloud">
         <div class="import-file">
-          <input ref="imageInput" type="file" accept=".pgm,.png" hidden :disabled="busy" :aria-label="t('navigation.import.image')" @change="chooseFile('image', $event)" />
+          <input ref="imageInput" type="file" accept=".pgm,.png" hidden :disabled="busy" :aria-label="t('cloudImport.image')" @change="chooseFile('image', $event)" />
           <el-button @click="imageInput?.click()">{{ t('uploads.browse') }}</el-button>
           <span class="import-filename" :title="image?.name">{{ image?.name ?? t('uploads.noFile') }}</span>
           <el-button v-if="image" text :aria-label="t('uploads.remove')" @click="clearFile('image')">{{ t('uploads.remove') }}</el-button>
         </div>
       </el-form-item>
       <p class="import-note">{{ t('navigation.import.imageHint') }}</p>
-      <el-form-item :label="t(allowCloudOnly ? 'cloudImport.cloud' : 'navigation.import.cloud')">
+      <el-form-item :label="t('cloudImport.cloud')">
         <div class="import-file">
-          <input ref="cloudInput" type="file" accept=".pcd" hidden :disabled="busy" :aria-label="t('navigation.import.cloud')" @change="chooseFile('cloud', $event)" />
+          <input ref="cloudInput" type="file" accept=".pcd" hidden :disabled="busy" :aria-label="t('cloudImport.cloud')" @change="chooseFile('cloud', $event)" />
           <el-button @click="cloudInput?.click()">{{ t('uploads.browse') }}</el-button>
           <span class="import-filename" :title="cloud?.name">{{ cloud?.name ?? t('uploads.noFile') }}</span>
           <el-button v-if="cloud" text :aria-label="t('uploads.remove')" @click="clearFile('cloud')">{{ t('uploads.remove') }}</el-button>
         </div>
       </el-form-item>
-      <p class="import-note">{{ t(allowCloudOnly ? 'cloudImport.cloudHint' : 'navigation.import.cloudHint') }}</p>
+      <p class="import-note">{{ t('cloudImport.cloudHint') }}</p>
+      <template v-if="cloudOnly">
+        <el-checkbox v-model="autoGrid" :label="t('autoGrid.label')" />
+        <p class="import-note">{{ autoGrid ? t('autoGrid.hint') : (allowCloudOnly ? t('cloudImport.desc') : t('autoGrid.needed')) }}</p>
+      </template>
       <el-form-item :label="t('navigation.import.preset')">
         <el-select v-model="preset" clearable filterable :loading="presetsLoading" :placeholder="t('navigation.import.unbound')" :aria-label="t('navigation.import.preset')">
           <el-option v-for="p in presets" :key="p.name" :label="`${pick(p.label)} (${p.name})`" :value="p.name" />

@@ -1,0 +1,103 @@
+# GLIM without IMU (CT-GICP odometry) configuration of the console, in layers (see glim.yaml and fastlio.yaml).
+# The stack is offered for bag playback only and reads the cloud as it is in the bag (topic /playback/points),
+# not through the sensor adapter.
+
+algorithm: GLIM (LiDAR only)
+format: glim_json
+base_dir: ../glim_lidar_only
+
+console:
+  points: config_ros.glim_ros.points_topic
+
+validated:
+  - input: sim
+    options: [lidar]
+    data: {zh: 实车点云（两台 96 线雷达已合并，无 IMU），室内 120 s, en: 'real-robot clouds (two 96-line lidars merged, no IMU), 120 s indoors'}
+    result: {zh: 55 m 走廊，高度漂移约 0.9 m（无真值）, en: '55 m corridor, about 0.9 m height drift (no ground truth)'}
+
+# The cloud of the bag as it is: nothing depends on the data source yet
+inputs:
+  sim: {}
+  adapter: {}
+
+options:
+  lidar: {}
+
+tunable:
+  config_preprocess.preprocess.k_correspondences:
+    min: 5
+    max: 60
+    label: {zh: 协方差邻域点数, en: Neighbours for covariances}
+    help:
+      zh: 估计每个点的局部平面时用多少个邻近点。线数少的雷达要取大，否则邻近点都在同一条扫描线上，配准会漂。
+      en: Number of neighbours used to estimate the local plane of each point. Sparse lidars need more; otherwise the neighbours lie on one scan ring and the registration drifts.
+  config_preprocess.preprocess.distance_near_thresh:
+    min: 0.0
+    max: 10.0
+    label: {zh: 近距离盲区 (m), en: Near range cut (m)}
+    help:
+      zh: 丢弃比这个距离更近的点，用来去掉打在车体上的点。
+      en: Returns nearer than this are dropped, to remove points on the robot itself.
+  config_preprocess.preprocess.distance_far_thresh:
+    min: 5.0
+    max: 500.0
+    label: {zh: 最远距离 (m), en: Far range cut (m)}
+    help:
+      zh: 丢弃比这个距离更远的点。
+      en: Returns farther than this are dropped.
+  config_preprocess.preprocess.random_downsample_target:
+    min: 1000
+    max: 100000
+    label: {zh: 每帧保留点数, en: Points kept per scan}
+    help:
+      zh: 每帧随机降采样后留下的点数。增大更准也更慢。
+      en: Points left of a scan after random downsampling. More points are more accurate and slower.
+  config_odometry_ct.odometry_estimation.ivox_resolution:
+    min: 0.1
+    max: 2.0
+    label: {zh: 里程计目标体素 (m), en: Odometry target voxel (m)}
+    help:
+      zh: 里程计局部地图的体素边长。室内 0.5 左右，室外 1.0 左右。
+      en: Voxel size of the odometry's local map. About 0.5 indoors, 1.0 outdoors.
+  config_odometry_ct.odometry_estimation.max_correspondence_distance:
+    min: 0.2
+    max: 10.0
+    label: {zh: 最大对应距离 (m), en: Maximum correspondence distance (m)}
+    help:
+      zh: 点和地图之间超过这个距离的对应不参与配准。车速快、帧间位移大时要增大。
+      en: Correspondences farther apart than this are not used. Increase it for fast motion between scans.
+  config_odometry_ct.odometry_estimation.smoother_lag:
+    min: 0.5
+    max: 30.0
+    label: {zh: 滑窗长度 (s), en: Smoother window (s)}
+    help:
+      zh: 里程计固定滞后平滑的时间窗。
+      en: Time window of the odometry's fixed-lag smoother.
+  config_sub_mapping_cpu.sub_mapping.keyframe_update_interval_trans:
+    min: 0.2
+    max: 20.0
+    label: {zh: 关键帧间距 (m), en: Keyframe spacing (m)}
+    help:
+      zh: 每移动这么远取一个关键帧。减小会得到更多子图，回环机会更多，也更慢。
+      en: A keyframe is taken after this much travel. A smaller value gives more submaps, more loop candidates and more work.
+  config_sub_mapping_cpu.sub_mapping.submap_downsample_resolution:
+    min: 0.02
+    max: 1.0
+    label: {zh: 子图点间距 (m), en: Submap point spacing (m)}
+    help:
+      zh: 子图点云降采样的体素边长，决定保存的地图有多密；不影响里程计。
+      en: Voxel size the submap clouds are downsampled to; sets how dense the saved map is and does not affect the odometry.
+  config_global_mapping_cpu.global_mapping.max_implicit_loop_distance:
+    min: 5.0
+    max: 500.0
+    label: {zh: 回环搜索距离 (m), en: Loop search distance (m)}
+    help:
+      zh: 两个子图相距在这个范围内才尝试建立回环约束。里程计漂移大时要增大。
+      en: Two submaps closer than this are tried for a loop constraint. Increase it when the odometry drifts a lot.
+  config_global_mapping_cpu.global_mapping.min_implicit_loop_overlap:
+    min: 0.05
+    max: 0.9
+    label: {zh: 回环最小重叠率, en: Minimum loop overlap}
+    help:
+      zh: 两个子图的重叠率超过这个值才建立约束。减小会多建约束，也更容易出错。
+      en: Two submaps overlapping more than this get a constraint. A smaller value creates more constraints and more wrong ones.

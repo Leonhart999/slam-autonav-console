@@ -1,6 +1,7 @@
 // Evaluation page API (backend: robot_console/evaluation.py). Errors are ApiError like the rest of api.ts.
-import { ApiError } from '@/api'
-import type { Bilingual, CodedMsg } from '@/types'
+import { request } from '@/http'
+import { taskResult } from '@/tasks'
+import type { Bilingual } from '@/types'
 
 export type RunType = 'mapping' | 'navigation' | 'playback'
 
@@ -111,6 +112,8 @@ export interface RunEntry {
   figures: string[]
   algorithm: string | null
   playback: PlaybackInfo | null
+  /** SLAM parameters the user changed for this run (key -> value); null: automatic configuration */
+  params_changed: Record<string, number | boolean> | null
 }
 
 export interface ErrorStats {
@@ -157,6 +160,11 @@ export interface ExportResult {
   skipped: string[]
 }
 
+export interface RelativeResult {
+  baseline: string
+  rows: { id: string; eval: RunEval | null; error: string | null }[]
+}
+
 /** Why a run was not moved to the trash (robot_console/run_trash.py) */
 export interface RunTrashRefusal {
   id: string
@@ -179,38 +187,23 @@ export interface RunTrashEntry {
   restorable: boolean
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const d = data.detail
-    if (d && typeof d === 'object' && 'code' in d) throw new ApiError(d as CodedMsg)
-    throw new ApiError({ code: 'unknown', params: { reason: String(d ?? `${res.status} ${res.statusText}`) } })
-  }
-  return data as T
-}
 
 const enc = encodeURIComponent
 
 export const evalApi = {
-  runs: () => request<{ runs: RunEntry[]; params: { max_diff: number; rpe_delta: number } }>('GET', '/api/evaluation/runs'),
-  detail: (id: string) => request<RunDetail>('GET', `/api/evaluation/runs/${enc(id)}`),
+  runs: (signal?: AbortSignal) => request<{ runs: RunEntry[]; params: { max_diff: number; rpe_delta: number } }>('GET', '/api/evaluation/runs', undefined, { signal }),
+  detail: (id: string, signal?: AbortSignal) => request<RunDetail>('GET', `/api/evaluation/runs/${enc(id)}`, undefined, { signal }),
   /** Runs evo when there is no valid cached result (force: always). About 0.2–1 s per run */
-  evaluate: (id: string, force = false) =>
-    request<RunDetail>('POST', `/api/evaluation/runs/${enc(id)}/evaluate${force ? '?force=true' : ''}`),
+  evaluate: (id: string, force = false, signal?: AbortSignal) =>
+    taskResult<RunDetail>( `/api/evaluation/runs/${enc(id)}/evaluate${force ? '?force=true' : ''}`, undefined, signal),
   figureUrl: (id: string, name: string) => `/api/evaluation/runs/${enc(id)}/files/${enc(name)}`,
-  trajectory: (id: string) => request<RunTrajectory>('GET', `/api/evaluation/runs/${enc(id)}/trajectory`),
+  trajectory: (id: string, signal?: AbortSignal) => request<RunTrajectory>('GET', `/api/evaluation/runs/${enc(id)}/trajectory`, undefined, { signal }),
   /** Marks the bag part of a playback run as a loop (applies to every run of that part) */
   setLoop: (id: string, loop: boolean) => request<RunDetail>('POST', `/api/evaluation/runs/${enc(id)}/loop`, { loop }),
   /** evo APE of each run's estimate against the baseline run's estimate (same bag part) */
-  relative: (ids: string[], baseline: string) =>
-    request<{ baseline: string; rows: { id: string; eval: RunEval | null; error: string | null }[] }>(
-      'POST', '/api/evaluation/relative', { ids, baseline }),
-  exportRuns: (ids: string[]) => request<ExportResult>('POST', '/api/evaluation/export', { ids }),
+  relative: (ids: string[], baseline: string, signal?: AbortSignal) =>
+    taskResult<RelativeResult>('/api/evaluation/relative', { ids, baseline }, signal),
+  exportRuns: (ids: string[], signal?: AbortSignal) => taskResult<ExportResult>('/api/evaluation/export', { ids }, signal),
   /** Moves runs or batch records (batch_*) to <runs_dir>/.trash (restorable); runs in use or referenced by a
    *  map, and a batch still running, are refused */
   trashRuns: (ids: string[]) =>

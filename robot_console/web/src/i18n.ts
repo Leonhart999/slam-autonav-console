@@ -3,6 +3,7 @@ import { createI18n } from 'vue-i18n'
 import zhCN from './locales/zh-CN'
 import en from './locales/en'
 import type { Bilingual } from './types'
+import { taskMessages } from './taskMessages'
 
 export type Lang = 'zh-CN' | 'en'
 export const LANGS: { value: Lang; label: string }[] = [
@@ -23,7 +24,7 @@ export const i18n = createI18n({
   legacy: false, // 用组合式 API（useI18n）
   locale: initialLang(),
   fallbackLocale: 'zh-CN',
-  messages: { 'zh-CN': zhCN, en },
+  messages: { 'zh-CN': { ...zhCN, ...taskMessages['zh-CN'] }, en: { ...en, ...taskMessages.en } },
 })
 
 /** 切换语言：更新界面、网页标题和 <html lang>，并记住选择 */

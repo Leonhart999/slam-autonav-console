@@ -50,7 +50,7 @@ const page = computed(() => t(String(route.meta.titleKey)))
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 1px dashed rgba(8, 145, 178, 0.35);
+  border: 1px dashed rgba(var(--accent-rgb), 0.35);
   animation: turn 40s linear infinite;
 }
 @keyframes turn {
@@ -65,7 +65,7 @@ const page = computed(() => t(String(route.meta.titleKey)))
   font-weight: 600;
   letter-spacing: 0.06em;
   color: var(--accent);
-  background: rgba(8, 145, 178, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 h2 {
   margin: 14px 0 8px;

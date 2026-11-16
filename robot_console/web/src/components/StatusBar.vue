@@ -95,8 +95,8 @@ async function estop() {
   transition: background 0.3s, border-color 0.3s;
 }
 .bar.offline {
-  background: rgba(254, 242, 242, 0.75);
-  border-color: rgba(252, 165, 165, 0.7);
+  background: var(--offline-bg);
+  border-color: var(--offline-edge);
 }
 .link {
   display: flex;

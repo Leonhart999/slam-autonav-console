@@ -125,7 +125,7 @@ const unbind = () => run(() => api.unbindMapScene(props.map.name), () => t('navi
 .map-scene.linked {
   padding: 6px 8px;
   border: 0;
-  background: rgba(8, 145, 178, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
 .linked-row {

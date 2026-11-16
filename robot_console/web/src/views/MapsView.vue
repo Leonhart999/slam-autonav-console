@@ -1,10 +1,12 @@
 <!-- Saved maps, projection previews, imports and recycle bin. -->
 <script setup lang="ts">
+import { FolderOpened, Refresh, Position, CircleCloseFilled, WarningFilled, InfoFilled, CircleCheckFilled, Aim, CopyDocument, Folder, Document } from '@element-plus/icons-vue'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '@/api'
+import { useQuery } from '@/composables/useQuery'
 import { fmtDuration } from '@/format'
 import { pick } from '@/i18n'
 import { errorText } from '@/messages'
@@ -38,27 +40,18 @@ const savedName = (() => {
   }
 })()
 const maps = ref<MapEntry[]>([])
-const listError = ref('')
-const loadingList = ref(false)
+const listQuery = useQuery()
+const listError = listQuery.error
+const loadingList = listQuery.loading
 const presets = ref<MappingPreset[]>([])
 const selected = ref<string>(typeof route.query.map === 'string' ? route.query.map : savedName)
 
 async function loadList() {
-  loadingList.value = true
-  try {
-    maps.value = await mapsApi.list()
-    listError.value = ''
-    if (!maps.value.some((m) => m.name === selected.value)) selected.value = maps.value[0]?.name ?? ''
-  } catch (e) {
-    listError.value = errorText(e)
-  } finally {
-    loadingList.value = false
-  }
-  try {
-    presets.value = await api.mappingPresets()
-  } catch {
-    // Scene labels fall back to the raw preset name
-  }
+  await listQuery.run(signal => mapsApi.list(signal), value => {
+    maps.value = value
+    if (!maps.value.some(m => m.name === selected.value)) selected.value = maps.value[0]?.name ?? ''
+  })
+  try { presets.value = await api.mappingPresets() } catch { /* Fall back to the preset name. */ }
 }
 onMounted(loadList)
 watch(
@@ -73,7 +66,7 @@ watch(selected, (name) => {
   } catch {
     // Storage disabled: the choice is just not remembered
   }
-  if (route.query.map !== name) router.replace({ query: { ...route.query, map: name || undefined } })
+  if (route.query.map !== name) router.replace({ query: { ...route.query, map: name || undefined, task: undefined } })
 })
 
 function sceneLabel(preset: string | null) {
@@ -130,7 +123,7 @@ async function loadDetail(name: string) {
   abort = ctrl
   let d: MapDetail
   try {
-    d = await mapsApi.detail(name)
+    d = await mapsApi.detail(name, ctrl.signal)
   } catch (e) {
     if (!ctrl.signal.aborted) detailError.value = errorText(e)
     return
@@ -236,6 +229,13 @@ async function copy(text: string) {
 
 const importOpen = ref(false)
 const regridOpen = ref(false)
+watch(regridOpen, visible => {
+  if (!visible && route.query.task) void router.replace({ query: { ...route.query, task: undefined } })
+})
+watch(() => route.query.map, name => { if (typeof name === 'string') selected.value = name })
+watch([() => route.query.task, () => detail.value?.name], ([task, name]) => {
+  if (typeof task === 'string' && name === route.query.map) regridOpen.value = true
+}, { immediate: true })
 const editOpen = ref(false)
 const trashOpen = ref(false)
 const trashItems = ref<TrashItem[]>([])
@@ -331,29 +331,37 @@ function fileRole(role: string | null) {
       >
         <!-- Long names (versions saved from regrid / edit get suffixes) end in an ellipsis with the full name as
              tooltip instead of wrapping; the full name is also in the detail panel -->
+        <!-- @vue-generic {MapEntry} -->
         <el-table-column :label="t('mapsPage.col.name')" min-width="178" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="name mono">{{ row.name }}</span>
           </template>
         </el-table-column>
+        <!-- @vue-generic {MapEntry} -->
         <el-table-column :label="t('mapsPage.col.created')" width="152">
           <template #default="{ row }"><span class="num">{{ row.created }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {MapEntry} -->
         <el-table-column :label="t('mapsPage.col.algorithm')" width="88">
           <template #default="{ row }">{{ row.algorithm ?? (row.source === 'upload' ? t('mapsPage.imported') : '—') }}</template>
         </el-table-column>
+        <!-- @vue-generic {MapEntry} -->
         <el-table-column :label="t('mapsPage.col.scene')" min-width="110" show-overflow-tooltip>
           <template #default="{ row }">{{ sourceOf(row) }}</template>
         </el-table-column>
+        <!-- @vue-generic {MapEntry} -->
         <el-table-column :label="t('mapsPage.col.points')" width="95" align="right">
           <template #default="{ row }"><span class="num">{{ fmtPoints(row.points) }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {MapEntry} -->
         <el-table-column :label="t('mapsPage.col.resolution')" width="90" align="right">
           <template #default="{ row }"><span class="num">{{ row.grid ? `${row.grid.resolution} m` : '—' }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {MapEntry} -->
         <el-table-column :label="t('mapsPage.col.extent')" width="140" align="right">
           <template #default="{ row }"><span class="num">{{ gridText(row) }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {MapEntry} -->
         <el-table-column :label="t('mapsPage.col.state')" min-width="112">
           <template #default="{ row }">
             <div class="chips">
@@ -373,7 +381,7 @@ function fileRole(role: string | null) {
     </GlassPanel>
 
     <NavigationImportDialog v-model="importOpen" :disabled="false" allow-cloud-only @completed="imported" />
-    <MapRegridDialog v-model="regridOpen" :map="detail" :cloud="cloud" @saved="selectNew" />
+    <MapRegridDialog v-model="regridOpen" :map="detail" :cloud="cloud" :task-id="typeof route.query.task === 'string' ? route.query.task : undefined" @saved="selectNew" />
     <MapEditDialog v-model="editOpen" :map="detail" @saved="selectNew" />
     <p v-if="detailError" class="warn">{{ detailError }}</p>
 
@@ -606,7 +614,7 @@ function fileRole(role: string | null) {
   cursor: pointer;
 }
 :deep(.el-table__row.is-selected > td) {
-  background: rgba(8, 145, 178, 0.08) !important;
+  background: rgba(var(--accent-rgb), 0.08) !important;
 }
 
 .head {
@@ -686,7 +694,7 @@ function fileRole(role: string | null) {
   border-radius: var(--radius);
   overflow: hidden;
   background:
-    radial-gradient(ellipse at 50% 35%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.55) 70%),
+    var(--stage-glow),
     var(--glass);
   box-shadow: var(--shadow);
 }
@@ -703,7 +711,7 @@ function fileRole(role: string | null) {
   left: 14px;
   padding: 4px 10px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(var(--paper-rgb), 0.72);
   backdrop-filter: blur(12px);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
@@ -720,7 +728,7 @@ function fileRole(role: string | null) {
   bottom: 12px;
   padding: 5px 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(var(--paper-rgb), 0.78);
   backdrop-filter: blur(12px);
   box-shadow: inset 0 0 0 1px var(--hairline);
   color: var(--ink-3);
@@ -771,7 +779,7 @@ function fileRole(role: string | null) {
   margin: 6px 0 0;
   padding: 6px 8px;
   border-radius: 8px;
-  background: rgba(15, 30, 60, 0.04);
+  background: rgba(var(--tint-rgb), 0.04);
   white-space: pre-wrap;
   word-break: break-all;
   font-size: 11.5px;

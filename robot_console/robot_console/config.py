@@ -143,6 +143,21 @@ def resolve_web_dist(value, config_path):
     return str(candidates[0])
 
 
+def resolve_packaged(name, config_path):
+    """A file shipped in the package's config folder, named relative to console.yaml: next to the console.yaml
+    in use, else in the package's own config folder (source tree or share/). The first candidate is returned
+    when none exists, so the caller reports that path."""
+    if os.path.isabs(name):
+        return name
+    candidates = [os.path.join(os.path.dirname(config_path), name),
+                  str(Path(__file__).resolve().parents[1] / 'config' / name)]
+    try:
+        candidates.append(os.path.join(get_package_share_directory('robot_console'), 'config', name))
+    except PackageNotFoundError:
+        pass
+    return next((c for c in candidates if os.path.isfile(c)), candidates[0])
+
+
 def load(path=None):
     explicit = path is not None
     path = path or default_config_path()
@@ -189,11 +204,22 @@ def load(path=None):
             mapping[key] = expand(mapping[key])
     if mapping.get('slam_profiles'):
         mapping['slam_profiles'] = expand.tree(mapping['slam_profiles'])
+        # Layered SLAM configuration (slam_config.py): the specification file is named relative to this file;
+        # a console.yaml copied elsewhere on its own (test instances) falls back to the installed package's copy
+        for prof in mapping['slam_profiles'].values():
+            if isinstance(prof, dict) and prof.get('config'):
+                prof['config'] = resolve_packaged(prof['config'], path)
+    mapping['slam_config_dir'] = expand(mapping.get('slam_config_dir') or '${data_root}/slam/effective')
+    mapping['slam_overrides_file'] = expand(mapping.get('slam_overrides_file')
+                                            or '${data_root}/slam/overrides.yaml')
+    mapping['slam_facts_file'] = expand(mapping.get('slam_facts_file') or '${data_root}/slam/sensor_facts.yaml')
     playback = cfg['playback'] = cfg.get('playback') or {}
     playback['bag_dirs'] = [expand(d) for d in (playback.get('bag_dirs') or ['${data_root}/bags'])]
     if playback.get('upload_dir'):
         playback['upload_dir'] = expand(playback['upload_dir'])
     playback['space_check'] = [expand(d) for d in (playback.get('space_check') or [])]
+    if (playback.get('scan_recording') or {}).get('dir'):
+        playback['scan_recording']['dir'] = expand(playback['scan_recording']['dir'])
     # Sensor profiles of real robots (bags played through robot_console/sensor_adapter.py)
     profiles = {}
     sfile = playback.get('sensor_profiles_file')
@@ -206,6 +232,12 @@ def load(path=None):
         p['slam_args'] = {stack: [expand(a) for a in (args or [])]
                           for stack, args in (p.get('slam_args') or {}).items()}
     playback['sensor_profiles'] = profiles
+    # Profiles made on the Playback page (robot_console/sensor_profiles.py) live in a writable file of their own
+    # and all get the SLAM configurations of sensor_slam_args
+    playback['user_sensor_profiles_file'] = expand(playback.get('user_sensor_profiles_file')
+                                                   or '${data_root}/sensor_profiles.yaml')
+    playback['sensor_slam_args'] = {stack: [expand(a) for a in (args or [])]
+                                    for stack, args in (playback.get('sensor_slam_args') or {}).items()}
     ev = cfg['evaluation'] = cfg.get('evaluation') or {}
     ev.setdefault('results_dir', '${data_root}/results')
     ev.setdefault('evo_python', '~/venvs/evo/bin/python')

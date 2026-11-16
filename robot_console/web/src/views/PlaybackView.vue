@@ -22,6 +22,9 @@ import MapSaveStep from '@/components/MapSaveStep.vue'
 import BagPicker from '@/components/BagPicker.vue'
 import PlaybackControls from '@/components/PlaybackControls.vue'
 import BagUploadDialog from '@/components/BagUploadDialog.vue'
+import SensorProfileDialog from '@/components/SensorProfileDialog.vue'
+import SlamConfigDialog from '@/components/SlamConfigDialog.vue'
+import { useSlamConfigCount } from '@/mapping/slamConfig'
 import TrashBin, { type TrashItem } from '@/components/TrashBin.vue'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
@@ -39,8 +42,11 @@ const chosenBag = ref<string>(typeof saved.pbBag === 'string' ? saved.pbBag : ''
 const chosenSlam = ref<string>(typeof saved.pbSlam === 'string' ? saved.pbSlam : '')
 const pbRate = ref<number>(typeof saved.pbRate === 'number' ? saved.pbRate : 1)
 const chosenOpts = ref<string[]>(savedOptions(saved.pbSlamOpts, saved.pbGround)) // 算法开关（仅激光、地面约束）
-watch([chosenBag, chosenSlam, pbRate, chosenOpts], () =>
-  savePrefs({ pbBag: chosenBag.value, pbSlam: chosenSlam.value, pbRate: pbRate.value, pbSlamOpts: chosenOpts.value }),
+// "Save raw scans" (off by default): record every scan with its pose during the playback
+const saveScans = ref<boolean>(saved.pbSaveScans === true)
+watch([chosenBag, chosenSlam, pbRate, chosenOpts, saveScans], () =>
+  savePrefs({ pbBag: chosenBag.value, pbSlam: chosenSlam.value, pbRate: pbRate.value, pbSlamOpts: chosenOpts.value,
+    pbSaveScans: saveScans.value }),
 )
 
 // Opened from a run record on the Evaluation page ("Replay with the same set-up", ?bag=&slam=&begin=&end=&rate=&from=):
@@ -121,6 +127,13 @@ watch(() => store.connected, (c) => {
 
 // Upload (BagUploadDialog), delete (to the trash of the bag's folder), recycle bin (TrashBin: restore, delete, empty)
 const uploadOpen = ref(false)
+// Sensor setup of a bag (SensorProfileDialog): after a save the bag list shows which profile each bag uses
+const sensorBag = ref<BagInfo | null>(null)
+const sensorOpen = ref(false)
+function openSensor(b: BagInfo) {
+  sensorBag.value = b
+  sensorOpen.value = true
+}
 async function onUploaded(path: string) {
   await loadBags()
   chosenBag.value = path
@@ -234,6 +247,13 @@ const slamOptions = choice.bases
 const selectedBase = choice.selectedBase
 const selectedSlam = choice.selectedSlam
 const slam = computed(() => (selectedSlam.value ? stackOf(selectedSlam.value.name) : null))
+// Parameters of the selected SLAM (SlamConfigDialog): stored per variant and data source (the bag's sensor profile)
+const paramsOpen = ref(false)
+const slamCfg = useSlamConfigCount(
+  () => (selectedSlam.value?.config ? selectedSlam.value.name : null),
+  () => selectedBag.value?.path ?? null,
+  () => store.connected,
+)
 // SLAM 是从建图页（仿真）启动的：这里只显示，不控制
 const slamFromSim = computed(() => !!slam.value && running(slam.value) && slam.value.origin !== 'playback')
 // 所选的包缺 SLAM 需要的输入，或话题被重映射到按仿真机器人调的算法上
@@ -263,7 +283,7 @@ const canToggle = (s: StackInfo | null, ready: boolean) =>
 
 // ---------------- ③ 回放 ----------------
 
-// 要放的片段（s，相对于包的开头）；换包时恢复为整个包
+// 要放的片段（s，相对于包的开头）；换包时恢复为整个包，传感器配置有 start_offset 时跳过开头这几秒
 const range = ref<[number, number]>([0, 0])
 watch(selectedBag, (b, old) => {
   const want = pendingRange.value
@@ -272,7 +292,8 @@ watch(selectedBag, (b, old) => {
     pendingRange.value = null
     return
   }
-  if (b && (b.path !== old?.path || range.value[1] <= 0 || range.value[1] > b.duration)) range.value = [0, b.duration]
+  if (b && (b.path !== old?.path || range.value[1] <= 0 || range.value[1] > b.duration))
+    range.value = [b.sensor?.start_offset ?? 0, b.duration]
 }, { immediate: true })
 const pbBusy = ref(false)
 async function pbCall(fn: () => Promise<unknown>) {
@@ -286,11 +307,17 @@ async function pbCall(fn: () => Promise<unknown>) {
     pbBusy.value = false
   }
 }
+// only SLAMs that publish body-frame scans can record them (console.yaml playback.scan_recording.topics)
+const scansSupported = computed(() =>
+  !!selectedSlam.value && (pb.value?.scan_slams ?? []).includes(selectedSlam.value.name))
+// while a playback runs the switch shows what that playback does
+const scansOn = computed(() => (pbActive.value ? !!pb.value?.scans : saveScans.value && scansSupported.value))
 function startPlayback() {
   const b = selectedBag.value
   if (!b) return
   const [begin, end] = range.value
-  pbCall(() => api.startPlayback(b.path, pbRate.value, begin, end >= b.duration - 0.05 ? undefined : end))
+  pbCall(() => api.startPlayback(b.path, pbRate.value, begin, end >= b.duration - 0.05 ? undefined : end,
+    saveScans.value && scansSupported.value))
 }
 const pausePlayback = (paused: boolean) => pbCall(() => api.pausePlayback(paused))
 const setPlaybackRate = (rate: number) => pbCall(() => api.setPlaybackRate(rate))
@@ -335,7 +362,7 @@ const saveWarn = computed(() => (pb.value?.catching_up ? t('playback.saveCatchin
           :model-value="selectedBagPath" :bags="shownBags" :roots="bagRoots" :loading="bagsLoading" :locked="pbActive"
           :compact="locked && !!selectedBag" :deleting="deleting" :connected="store.connected" :run-counts="runCounts"
           @update:model-value="chosenBag = $event" @refresh="loadBags" @upload="uploadOpen = true"
-          @delete="deleteBag"
+          @delete="deleteBag" @sensor="openSensor"
         >
           <template #trash="{ disabled }">
             <TrashBin
@@ -375,6 +402,12 @@ const saveWarn = computed(() => (pb.value?.catching_up ? t('playback.saveCatchin
             @update:model-value="(v: string | number | boolean) => choice.setOption(k, !!v)"
           />
         </div>
+        <div v-if="selectedSlam?.config" class="field">
+          <span class="k">{{ t('mapping.steps.params') }}<InfoTip :content="t('mapping.tips.params')" /></span>
+          <el-button size="small" :disabled="!store.connected" @click="paramsOpen = true">
+            {{ slamCfg.count.value ? t('mapping.steps.paramsChanged', { n: slamCfg.count.value }) : t('mapping.steps.paramsDefault') }}
+          </el-button>
+        </div>
         <p v-if="choice.forced.value.includes('lidar')" class="note">{{ t('playback.bag.lidarForced') }}</p>
         <p v-if="slamBagNote" class="note">{{ slamBagNote }}</p>
         <p v-if="selectedSlam?.save_mode === 'dump'" class="note">{{ t('mapping.steps.dumpNote') }}</p>
@@ -395,6 +428,13 @@ const saveWarn = computed(() => (pb.value?.catching_up ? t('playback.saveCatchin
             {{ pb.state === 'running' && pb.paused ? t('playback.controls.paused') : pb.finished ? t('playback.controls.done') : t(`monitor.state.${pb.state}`) }}
           </span>
         </header>
+        <div class="field">
+          <span class="k">{{ t('playback.saveScans') }}<InfoTip :content="t('playback.saveScansTip')" /></span>
+          <el-switch
+            :model-value="scansOn" size="small" :disabled="pbActive || !scansSupported"
+            @update:model-value="(v: string | number | boolean) => (saveScans = !!v)"
+          />
+        </div>
         <PlaybackControls
           v-model:rate="pbRate" v-model:range="range" :status="pb" :bag="selectedBag"
           :slam-name="selectedSlam?.name ?? null" :slam-running="running(slam)" :busy="pbBusy"
@@ -411,6 +451,11 @@ const saveWarn = computed(() => (pb.value?.catching_up ? t('playback.saveCatchin
       <MapSaveStep :ms="ms" :current="currentStep === 4" :name-base="selectedBag?.name ?? 'bag'" :warn="saveWarn" />
     </aside>
     <BagUploadDialog v-model="uploadOpen" :storage="storage" :disabled="!store.connected" @uploaded="onUploaded" />
+    <SensorProfileDialog v-model="sensorOpen" :bag="sensorBag" :disabled="!store.connected || pbActive" @saved="loadBags" />
+    <SlamConfigDialog
+      v-model="paramsOpen" :stack="selectedSlam?.name ?? null" :bag="selectedBag?.path ?? null"
+      :running="running(slam)" :disabled="!store.connected" @saved="slamCfg.reload"
+    />
   </div>
 </template>
 

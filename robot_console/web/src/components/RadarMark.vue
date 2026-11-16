@@ -25,7 +25,7 @@ const sweepId = `radar-sweep-${uid}`
       </linearGradient>
     </defs>
 
-    <circle cx="50" cy="50" r="46" fill="rgba(255,255,255,0.55)" :stroke="`url(#${ringId})`" stroke-width="2.5" />
+    <circle cx="50" cy="50" r="46" style="fill: rgba(var(--paper-rgb), 0.55)" :stroke="`url(#${ringId})`" stroke-width="2.5" />
     <circle cx="50" cy="50" r="31" fill="none" :stroke="`url(#${ringId})`" stroke-width="1.2" opacity="0.55" />
     <circle cx="50" cy="50" r="16" fill="none" :stroke="`url(#${ringId})`" stroke-width="1.2" opacity="0.4" />
     <path d="M50 6 V94 M6 50 H94" stroke="#0891b2" stroke-width="0.8" opacity="0.25" />
@@ -46,7 +46,7 @@ const sweepId = `radar-sweep-${uid}`
 .radar {
   display: block;
   flex: none;
-  filter: drop-shadow(0 4px 10px rgba(8, 145, 178, 0.25));
+  filter: drop-shadow(0 4px 10px rgba(var(--accent-rgb), 0.25));
 }
 .sweep {
   transform-origin: 50px 50px;

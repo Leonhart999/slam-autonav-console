@@ -13,6 +13,19 @@ import threading
 from concurrent.futures import Future
 
 
+def add_map_file(directory, name):
+    """Update an ended run without overwriting a final trajectory's metadata."""
+    path = os.path.join(directory, 'run.json')
+    with open(path, encoding='utf-8') as f:
+        info = json.load(f)
+    maps = info.setdefault('maps', [])
+    if name not in maps:
+        maps.append(name)
+    with open(path + '.tmp', 'w', encoding='utf-8') as f:
+        json.dump(info, f, ensure_ascii=False, indent=2)
+    os.replace(path + '.tmp', path)
+
+
 def replace_est_files(directory, lines, fields):
     if not os.path.isdir(directory):
         return False

@@ -169,7 +169,13 @@ class RunRecorder:
         if force or time.monotonic() - self._last_write > 5.0:
             self._write()
 
-    def add_map(self, name):
+    def add_map(self, name, run_id=None):
+        if run_id and run_id != self.run_id:
+            from .record_io import add_map_file
+            directory = os.path.join(self.runs_dir, run_id)
+            if self._io:
+                return self._io.submit(directory, add_map_file, directory, name)
+            return add_map_file(directory, name)
         self.commit()             # saving a map always keeps the run
         if self.run_id is not None:
             self._info['maps'].append(name)
@@ -261,9 +267,10 @@ class RunRecorder:
             for f in self._files.values():
                 f.flush()
 
-    def export(self, directory):
+    def export(self, directory, run_id=None):
         """Queue a consistent copy before any subsequently queued trajectory writes."""
-        return self._io.export(directory, self._dir)
+        source = os.path.join(self.runs_dir, run_id) if run_id else self._dir
+        return self._io.export(directory, source)
 
     def shutdown(self):
         self.end()

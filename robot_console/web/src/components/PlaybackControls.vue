@@ -2,6 +2,7 @@
      Purely presentational: PlaybackView calls the API and passes the backend status in. There is no seeking
      during a playback: a jump inside one SLAM run breaks the SLAM, so the part is chosen before playing. -->
 <script setup lang="ts">
+import { VideoPlay, VideoPause } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { fmtDuration } from '@/format'
@@ -35,6 +36,9 @@ const pctOf = (v: number) => (duration.value > 0 ? Math.min(100, Math.max(0, (10
 const band = computed(() => ({ left: `${pctOf(part.value[0])}%`, width: `${pctOf(part.value[1]) - pctOf(part.value[0])}%` }))
 const fill = computed(() => ({ left: `${pctOf(part.value[0])}%`, width: `${pctOf(position.value) - pctOf(part.value[0])}%` }))
 const wholeBag = computed(() => range.value[0] <= 0 && range.value[1] >= duration.value - 0.05)
+// the sensor profile skips the first seconds of the bag by default (start_offset); say so while it is chosen
+const skipStart = computed(() => props.bag?.sensor?.start_offset ?? 0)
+const skipping = computed(() => skipStart.value > 0 && Math.abs(range.value[0] - skipStart.value) < 0.01)
 const plan = computed(() => {
   const p = active.value ? st.value?.plan : props.slamName ? props.bag?.slams[props.slamName]?.plan : undefined
   return p ? Object.values(p) : []
@@ -81,6 +85,7 @@ function wholeRange() {
         <span>{{ t('playback.controls.partHint') }}</span>
         <el-button v-if="!wholeBag" link type="primary" size="small" @click="wholeRange">{{ t('playback.controls.whole') }}</el-button>
       </div>
+      <div v-if="skipping" class="part-hint">{{ t('playback.controls.skipStart', { s: skipStart }) }}</div>
     </template>
     <!-- Progress of the running / finished playback -->
     <div v-else-if="shown" class="progress">
@@ -176,7 +181,7 @@ function wholeRange() {
   display: inline-flex;
   padding: 3px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(var(--paper-rgb), 0.55);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
 .seg button {
@@ -193,8 +198,8 @@ function wholeRange() {
 .seg button.on {
   color: var(--accent);
   font-weight: 600;
-  background: #fff;
-  box-shadow: 0 2px 8px -3px rgba(20, 60, 120, 0.3);
+  background: var(--paper);
+  box-shadow: 0 2px 8px -3px rgba(var(--shade-rgb), 0.3);
 }
 .seg button:disabled {
   cursor: not-allowed;
@@ -247,7 +252,7 @@ function wholeRange() {
   top: 0;
   bottom: 0;
   border-radius: 5px;
-  background: rgba(8, 145, 178, 0.16);
+  background: rgba(var(--accent-rgb), 0.16);
 }
 .track i {
   position: absolute;

@@ -4,6 +4,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CostmapLayer, MapTool, NavMap, NavStatus, PickedPose, WaypointMark } from '@/types'
+import { scenePalette } from '@/theme'
 
 const props = withDefaults(defineProps<{
   map: NavMap | null
@@ -94,6 +95,13 @@ function draw() {
     ctx.scale(1, -1)
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(props.image, 0, 0, m.grid.width * res, m.grid.height * res)
+    // Dark look: a thin shade over the map pixels only (nothing else is drawn yet), so a white map does not glare
+    const shade = scenePalette.value.mapShade
+    if (shade) {
+      ctx.globalCompositeOperation = 'source-atop'
+      ctx.fillStyle = shade
+      ctx.fillRect(0, 0, m.grid.width * res, m.grid.height * res)
+    }
     ctx.restore()
   }
   // Costmaps (semi-transparent; the local one is drawn on top)
@@ -293,6 +301,7 @@ watch(
   },
 )
 watch(() => props.status, request)
+watch(scenePalette, draw)
 watch(() => [props.waypoints, props.costmaps.global, props.costmaps.local], request)
 
 onMounted(() => {

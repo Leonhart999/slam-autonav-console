@@ -106,6 +106,14 @@ sensor_adapter:
   cmd: [ros2, run, robot_console, sensor_adapter]
   page_only: true
 
+scan_recorder:
+  label: {zh: 原始扫描录制, en: Scan recorder}
+  description:
+    zh: 回放页打开“保存原始扫描”时，把 SLAM 的每一帧车体系点云和位姿存到磁盘，供地图管理页按逐帧证据重新生成 2D 栅格。随回放启动，SLAM 停止时结束
+    en: With "Save raw scans" on the Playback page, stores every body-frame scan of the SLAM with its pose, so the Maps page can rebuild the 2D grid from scan evidence. Starts with the playback and ends when the SLAM stops
+  cmd: [ros2, run, robot_console, fastlio_loop_record]
+  page_only: true
+
 waypoints:
   label: {zh: 自动航点, en: Auto waypoints}
   description:

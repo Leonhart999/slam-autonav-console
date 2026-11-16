@@ -2,6 +2,7 @@
 
 Usage: python regrid_worker.py <job.json>
 job.json: {"cloud": path, "out_dir": dir, "params": {GridParams fields}}
+      or  {"method": "scans", "recording": dir, "trajectory": tum, "out_dir": dir, "params": {...}}
 Writes <out_dir>/map.pgm, map.yaml and result.json (stats, warnings, info, grid geometry).
 A separate process keeps the console's memory flat and isolates crashes in experimental features.
 """
@@ -14,9 +15,37 @@ import time
 import numpy as np
 
 
+def scan_grid(job):
+    """Grid from recorded scans and their poses (per-cell evidence), see fastlio_loop_grid.py."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        'fastlio_loop_grid', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fastlio_loop_grid.py'))
+    grid = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(grid)
+
+    t0 = time.time()
+    stats, _ = grid.build_grid(job['recording'], job['trajectory'], os.path.join(job['out_dir'], 'map'),
+                               job['params'], log=lambda *_: None)
+    res, w, h = stats['params']['res'], stats['width'], stats['height']
+    out = {
+        'method': 'scans',
+        'input_scans': stats['scans'],
+        'elapsed': round(time.time() - t0, 2),
+        'grid': {'resolution': res, 'width': w, 'height': h, 'origin': stats['origin'],
+                 'size_m': [round(w * res, 2), round(h * res, 2)]},
+        'stats': {'width': w, 'height': h, 'occupied': stats['occupied'], 'free': stats['free']},
+        'warnings': [],
+        'info': f"{stats['scans']} scans, sensor {stats['params']['sensor_height']:.2f} m above the floor",
+    }
+    with open(os.path.join(job['out_dir'], 'result.json'), 'w', encoding='utf-8') as f:
+        json.dump(out, f, ensure_ascii=False, indent=2, default=float)
+
+
 def main():
     with open(sys.argv[1], encoding='utf-8') as f:
         job = json.load(f)
+    if job.get('method') == 'scans':
+        return scan_grid(job)
     import pcd2grid
     from pcd2grid.core import GridParams, convert
     from pcd2grid.io import read_points

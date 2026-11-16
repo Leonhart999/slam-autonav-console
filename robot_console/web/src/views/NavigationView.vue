@@ -3,17 +3,21 @@
      pose, laser points and Nav2 paths. Initial pose, single goals and waypoint missions are set on the 2D view;
      every mission is recorded in ~/runs/nav_<time>/ (see robot_console/nav_mission.py). -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowReactive, shallowRef, watch } from 'vue'
+import { Aim } from '@element-plus/icons-vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { api, fetchAsset } from '@/api'
+import { api } from '@/api'
+import { useMapAssets } from '@/navigation/useMapAssets'
+import { useCostmaps } from '@/navigation/useCostmaps'
+import { useQuery } from '@/composables/useQuery'
 import { errorText } from '@/messages'
 import { pick as pickText } from '@/i18n'
 import { useStatusStore } from '@/stores/status'
 import type {
   MappingPreset,
-  CostmapLayer, MapTool, NavGoalState, NavMap, NavMission, NavSolid, NavStatus, PickedPose, StackState, WaypointMark,
+  MapTool, NavGoalState, NavMap, NavMission, NavStatus, PickedPose, StackState, WaypointMark,
 } from '@/types'
 import type { ViewMode } from '@/mapping/stream'
 import NavGrid2D from '@/components/NavGrid2D.vue'
@@ -66,15 +70,9 @@ watch([chosen, showCloud, showGrid, model3d, view3d, () => showCost.global, () =
 
 // ---------------- Map list ----------------
 const maps = ref<NavMap[]>([])
-const mapsError = ref('')
-async function loadMaps() {
-  try {
-    maps.value = await api.navigationMaps()
-    mapsError.value = ''
-  } catch (e) {
-    mapsError.value = errorText(e)
-  }
-}
+const mapQuery = useQuery()
+const mapsError = mapQuery.error
+async function loadMaps() { await mapQuery.run(signal => api.navigationMaps(signal), value => { maps.value = value }) }
 
 // ---------------- Nav2 parameter variants (nav2_params_<variant>.yaml) ----------------
 const variants = ref<string[]>([])
@@ -90,25 +88,13 @@ async function loadVariants() {
 
 // ---------------- Status polling ----------------
 const nav = shallowRef<NavStatus | null>(null)
-const statusError = ref('')
+const statusQuery = useQuery()
+const statusError = statusQuery.error
 let pollTimer = 0
-let pollSeq = 0
 let alive = true
 async function poll() {
-  const seq = ++pollSeq
-  try {
-    if (!document.hidden) {
-      const s = await api.navigationStatus()
-      if (seq === pollSeq && alive) {
-        nav.value = s
-        statusError.value = ''
-      }
-    }
-  } catch (e) {
-    if (seq === pollSeq && alive) statusError.value = errorText(e)
-  } finally {
-    if (alive) pollTimer = window.setTimeout(poll, 300)
-  }
+  if (!document.hidden) await statusQuery.run(signal => api.navigationStatus(signal), value => { nav.value = value })
+  if (alive) pollTimer = window.setTimeout(poll, 300)
 }
 
 onMounted(() => {
@@ -149,62 +135,7 @@ const selectValue = computed({
   },
 })
 
-// ---------------- Map assets (grid image + point cloud) ----------------
-const image = shallowRef<ImageBitmap | null>(null)
-const cloud = shallowRef<Float32Array | null>(null)
-const solid = shallowRef<NavSolid | null>(null)
-const loadingAssets = ref(false)
-const assetError = ref('')
-let assetAbort: AbortController | null = null
-
-function setImage(next: ImageBitmap | null) {
-  image.value?.close()
-  image.value = next
-}
-
-async function loadAssets(m: NavMap | null) {
-  assetAbort?.abort()
-  setImage(null)
-  cloud.value = null
-  solid.value = null
-  assetError.value = ''
-  if (!m) return
-  const ctrl = new AbortController()
-  assetAbort = ctrl
-  loadingAssets.value = true
-  const base = `/api/navigation/maps/${encodeURIComponent(m.name)}`
-  try {
-    const blob = await (await fetchAsset(`${base}/grid.png`, ctrl.signal)).blob()
-    const bmp = await createImageBitmap(blob)
-    if (ctrl.signal.aborted) {
-      bmp.close()
-      return
-    }
-    setImage(bmp)
-    if (m.has_cloud) {
-      const buf = await (await fetchAsset(`${base}/cloud`, ctrl.signal)).arrayBuffer()
-      if (ctrl.signal.aborted) return
-      cloud.value = new Float32Array(buf, 0, Math.floor(buf.byteLength / 12) * 3)
-    }
-    if (m.has_solid) {
-      const sol = (await (await fetchAsset(`${base}/solid`, ctrl.signal)).json()) as NavSolid
-      if (ctrl.signal.aborted) return
-      solid.value = sol
-    }
-  } catch (e) {
-    if (!ctrl.signal.aborted) assetError.value = errorText(e)
-  } finally {
-    if (assetAbort === ctrl) loadingAssets.value = false
-  }
-}
-watch(effectiveMap, (m, old) => {
-  if (m?.name !== old?.name) loadAssets(m)
-})
-onMounted(() => loadAssets(effectiveMap.value))
-onBeforeUnmount(() => {
-  assetAbort?.abort()
-  setImage(null)
-})
+const { image, cloud, solid, loadingAssets, assetError } = useMapAssets(effectiveMap)
 
 // ---------------- Simulation switch (independent of the mapping page) ----------------
 // There is only one Gazebo. Starting it here uses the scene recorded in the map, so the robot spawns at the
@@ -516,56 +447,7 @@ watch(
   },
 )
 
-// ---------------- Costmap overlays (2D view) ----------------
-// shallowReactive: an ImageBitmap must not be wrapped in a proxy (drawImage rejects it)
-const costmaps = shallowReactive<{ global: CostmapLayer | null; local: CostmapLayer | null }>({ global: null, local: null })
-const costLoading = { global: false, local: false }
-const costShown = { global: -1, local: -1 } // version currently displayed
-function setLayer(key: 'global' | 'local', next: CostmapLayer | null) {
-  costmaps[key]?.image.close()
-  costmaps[key] = next
-}
-async function fetchCostmap(key: 'global' | 'local', version: number) {
-  if (costLoading[key]) return // the next poll fetches the newer version
-  costLoading[key] = true
-  try {
-    const res = await fetch(`/api/navigation/costmap/${key}.png`, { cache: 'no-store' })
-    if (!res.ok) return
-    const num = (h: string) => (res.headers.get(h) ?? '').split(',').map(Number)
-    const [ox, oy, oyaw] = num('X-Origin')
-    const [w, h] = num('X-Size')
-    const resolution = num('X-Resolution')[0]
-    const image = await createImageBitmap(await res.blob())
-    if (!alive || !showCost[key] || ![ox, oy, oyaw, w, h, resolution].every(Number.isFinite)) {
-      image.close()
-      return
-    }
-    setLayer(key, { image, origin: [ox, oy, oyaw], resolution, width: w, height: h })
-    costShown[key] = version
-  } catch {
-    // Network hiccup: try again on the next status
-  } finally {
-    costLoading[key] = false
-  }
-}
-watch(
-  () => [nav.value?.costmaps, showCost.global, showCost.local, running.value] as const,
-  () => {
-    for (const key of ['global', 'local'] as const) {
-      const v = nav.value?.costmaps?.[key] ?? null
-      if (!running.value || !showCost[key] || v == null) {
-        setLayer(key, null)
-        costShown[key] = -1
-      } else if (v !== costShown[key]) {
-        void fetchCostmap(key, v)
-      }
-    }
-  },
-)
-onBeforeUnmount(() => {
-  setLayer('global', null)
-  setLayer('local', null)
-})
+const costmaps = useCostmaps(nav, showCost, running, effectiveName)
 </script>
 
 <template>
@@ -916,7 +798,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius);
   overflow: hidden;
   background:
-    radial-gradient(ellipse at 50% 35%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.55) 70%),
+    var(--stage-glow),
     var(--glass);
   box-shadow: var(--shadow);
 }
@@ -952,7 +834,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   padding: 4px 10px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(var(--paper-rgb), 0.72);
   backdrop-filter: blur(12px);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
@@ -969,7 +851,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   padding: 3px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(var(--paper-rgb), 0.72);
   backdrop-filter: blur(12px);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
@@ -988,8 +870,8 @@ onBeforeUnmount(() => {
 .seg button.on {
   color: var(--accent);
   font-weight: 600;
-  background: #fff;
-  box-shadow: 0 2px 8px -3px rgba(20, 60, 120, 0.3);
+  background: var(--paper);
+  box-shadow: 0 2px 8px -3px rgba(var(--shade-rgb), 0.3);
 }
 .seg button:focus-visible {
   outline: 2px solid var(--accent);
@@ -1001,7 +883,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   padding: 5px 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(var(--paper-rgb), 0.78);
   backdrop-filter: blur(12px);
   box-shadow: inset 0 0 0 1px var(--hairline);
   color: var(--ink-2);
@@ -1019,7 +901,7 @@ onBeforeUnmount(() => {
   height: 9px;
   border: 1.5px solid #0891b2;
   border-radius: 2px;
-  background: #fff;
+  background: var(--paper);
 }
 .sw.scan {
   width: 6px;
@@ -1102,7 +984,7 @@ h3 {
   margin-top: 12px;
   padding: 8px 10px 4px;
   border-radius: 10px;
-  background: rgba(8, 145, 178, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
 .speed-head {
@@ -1130,6 +1012,9 @@ h3 {
 }
 .dot.pose {
   color: #7c3aed;
+}
+html.dark .dot.pose {
+  color: #a78bfa;
 }
 .dot.goal {
   color: #16a34a;

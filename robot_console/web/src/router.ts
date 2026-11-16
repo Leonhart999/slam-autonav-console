@@ -1,30 +1,32 @@
 // 页面路由。meta.titleKey 是菜单标题在语言包里的键，meta.step 是还没实现的页面计划在第几步做
+import type { Component } from 'vue'
+import { MapLocation, VideoPlay, Files, Position, DataAnalysis, Monitor } from '@element-plus/icons-vue'
 import { createRouter, createWebHashHistory, type RouteRecordSingleView } from 'vue-router'
-import MonitorView from '@/views/MonitorView.vue'
-import MappingView from '@/views/MappingView.vue'
-import PlaybackView from '@/views/PlaybackView.vue'
-import NavigationView from '@/views/NavigationView.vue'
-import MapsView from '@/views/MapsView.vue'
-import EvaluationView from '@/views/EvaluationView.vue'
+const MonitorView = () => import('@/views/MonitorView.vue')
+const MappingView = () => import('@/views/MappingView.vue')
+const PlaybackView = () => import('@/views/PlaybackView.vue')
+const NavigationView = () => import('@/views/NavigationView.vue')
+const MapsView = () => import('@/views/MapsView.vue')
+const EvaluationView = () => import('@/views/EvaluationView.vue')
 
 /** step: set only on pages that still show PlaceholderView (all pages are built now; kept for future pages) */
 interface PageMeta {
   titleKey: string
-  icon: string
+  icon: Component
   step?: number
 }
 
 export const pages: (RouteRecordSingleView & { meta: PageMeta })[] = [
   {
-    path: '/mapping', name: 'mapping', component: MappingView, meta: { titleKey: 'nav.mapping', icon: 'MapLocation' },
+    path: '/mapping', name: 'mapping', component: MappingView, meta: { titleKey: 'nav.mapping', icon: MapLocation },
     // bag playback used to be a mode of the mapping page (?source=bag)
     beforeEnter: (to) => (to.query.source === 'bag' ? { path: '/playback' } : true),
   },
-  { path: '/playback', name: 'playback', component: PlaybackView, meta: { titleKey: 'nav.playback', icon: 'VideoPlay' } },
-  { path: '/maps', name: 'maps', component: MapsView, meta: { titleKey: 'nav.maps', icon: 'Files' } },
-  { path: '/navigation', name: 'navigation', component: NavigationView, meta: { titleKey: 'nav.navigation', icon: 'Position' } },
-  { path: '/evaluation', name: 'evaluation', component: EvaluationView, meta: { titleKey: 'nav.evaluation', icon: 'DataAnalysis' } },
-  { path: '/monitor', name: 'monitor', component: MonitorView, meta: { titleKey: 'nav.monitor', icon: 'Monitor' } },
+  { path: '/playback', name: 'playback', component: PlaybackView, meta: { titleKey: 'nav.playback', icon: VideoPlay } },
+  { path: '/maps', name: 'maps', component: MapsView, meta: { titleKey: 'nav.maps', icon: Files } },
+  { path: '/navigation', name: 'navigation', component: NavigationView, meta: { titleKey: 'nav.navigation', icon: Position } },
+  { path: '/evaluation', name: 'evaluation', component: EvaluationView, meta: { titleKey: 'nav.evaluation', icon: DataAnalysis } },
+  { path: '/monitor', name: 'monitor', component: MonitorView, meta: { titleKey: 'nav.monitor', icon: Monitor } },
 ]
 
 export const router = createRouter({

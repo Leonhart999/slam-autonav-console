@@ -1,10 +1,12 @@
 <!-- Batch mapping experiments: N repetitions of sim -> SLAM -> waypoints, then evo on every run (batch.py). -->
 <script setup lang="ts">
+import { FolderOpened, Delete } from '@element-plus/icons-vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { pick } from '@/i18n'
 import { errorText } from '@/messages'
+import { isCancelled } from '@/http'
 import { fmtDuration } from '@/format'
 import { batchApi, type BatchHistoryEntry, type BatchOptions, type BatchRun, type BatchStatus, type MeanStd } from '@/evaluation/batch'
 import { evalApi, type ExportResult, type RunTrashEntry } from '@/evaluation/api'
@@ -199,15 +201,21 @@ async function cancel() {
     ElMessage.error(errorText(e))
   }
 }
+let exportAbort: AbortController | undefined
+onBeforeUnmount(() => exportAbort?.abort())
+watch(() => view.value?.id, () => { exportAbort?.abort(); exporting.value = false; exportResult.value = null })
 async function exportBatch() {
   if (!view.value) return
+  exportAbort?.abort()
+  const ctrl = exportAbort = new AbortController()
   exporting.value = true
   try {
-    exportResult.value = await batchApi.exportBatch(view.value)
+    const result = await batchApi.exportBatch(view.value, ctrl.signal)
+    if (!ctrl.signal.aborted) exportResult.value = result
   } catch (e) {
-    ElMessage.error(errorText(e))
+    if (!isCancelled(e)) ElMessage.error(errorText(e))
   } finally {
-    exporting.value = false
+    if (exportAbort === ctrl) exporting.value = false
   }
 }
 
@@ -402,34 +410,42 @@ const runElapsed = computed(() =>
       <el-table ref="batchTable" :data="history" size="small" max-height="220" class="batch-list" :row-key="(b: BatchHistoryEntry) => b.id"
         :row-class-name="({ row }: { row: BatchHistoryEntry }) => (row.id === shownId ? 'is-selected' : '')"
         @selection-change="onPick" @row-click="showBatch">
+        <!-- @vue-generic {BatchHistoryEntry} -->
         <el-table-column type="selection" width="40" reserve-selection />
+        <!-- @vue-generic {BatchHistoryEntry} -->
         <el-table-column :label="t('batch.cmp.batch')" min-width="190">
           <template #default="{ row }">
             <span class="swatch" :style="{ background: picked.includes(row.id) && canCompare(row) ? colorOf(row.id) : 'transparent' }" />
             <span class="mono name">{{ row.id }}</span>
           </template>
         </el-table-column>
+        <!-- @vue-generic {BatchHistoryEntry} -->
         <el-table-column :label="t('batch.scene')" min-width="110" show-overflow-tooltip>
           <template #default="{ row }">{{ labelOf(options?.presets, row.preset) }}</template>
         </el-table-column>
+        <!-- @vue-generic {BatchHistoryEntry} -->
         <el-table-column :label="t('batch.slam')" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ labelOf(options?.slam, row.slam) }}{{ speedTag(row.speed) }}</template>
         </el-table-column>
+        <!-- @vue-generic {BatchHistoryEntry} -->
         <el-table-column :label="t('batch.cmp.okN')" width="70" align="right">
           <template #default="{ row }"><span class="mono">{{ row.summary ? `${row.summary.succeeded}/${row.summary.runs}` : `—/${row.n}` }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {BatchHistoryEntry} -->
         <el-table-column :label="t('batch.col.ate')" width="150" align="right">
           <template #default="{ row }">
             <span class="mono strong">{{ fmtStat('ape_rmse', row.summary?.ape_rmse?.mean) }}</span>
             <span v-if="row.summary?.ape_rmse" class="mono dim"> ± {{ fmtStat('ape_rmse', row.summary.ape_rmse.std) }}</span>
           </template>
         </el-table-column>
+        <!-- @vue-generic {BatchHistoryEntry} -->
         <el-table-column :label="t('batch.col.rpe')" width="150" align="right">
           <template #default="{ row }">
             <span class="mono">{{ fmtStat('rpe_rmse', row.summary?.rpe_rmse?.mean) }}</span>
             <span v-if="row.summary?.rpe_rmse" class="mono dim"> ± {{ fmtStat('rpe_rmse', row.summary.rpe_rmse.std) }}</span>
           </template>
         </el-table-column>
+        <!-- @vue-generic {BatchHistoryEntry} -->
         <el-table-column :label="t('batch.col.result')" width="96">
           <template #default="{ row }">
             <!-- Normal outcomes are plain text, only the ones that need attention get a colored chip -->
@@ -482,8 +498,9 @@ const runElapsed = computed(() =>
       </div>
       <div v-if="!viewing && view.state === 'running' && view.n" class="track"><i :style="{ width: `${((view.index ?? 1) - 1) / view.n * 100}%` }" /></div>
 
-      <el-table :data="view.runs ?? []" size="small" class="batch-runs" :row-key="(r: BatchRun) => r.index"
+      <el-table :data="view.runs ?? []" size="small" class="batch-runs" :row-key="(r: BatchRun) => String(r.index)"
         @row-click="(r: BatchRun) => r.run_id && emit('focus', r.run_id)">
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column width="40">
           <template #header>
             <el-checkbox :model-value="allPicked" :indeterminate="somePicked && !allPicked" :disabled="!okRuns.length"
@@ -492,19 +509,22 @@ const runElapsed = computed(() =>
           <template #default="{ row }">
             <span @click.stop>
               <el-checkbox :model-value="!!row.run_id && selectedRuns.includes(row.run_id)" :disabled="!tickable(row)"
-                @change="(v: unknown) => emit('pickRun', row.run_id, !!v)" />
+                @change="(v: unknown) => row.run_id && emit('pickRun', row.run_id, !!v)" />
             </span>
           </template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.index')" width="44" align="right">
           <template #default="{ row }"><span class="mono">{{ row.index }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.run')" min-width="180">
           <template #default="{ row }">
             <span class="swatch" :style="{ background: row.run_id && selectedRuns.includes(row.run_id) ? runColor(row.run_id) : 'transparent' }" />
             <span class="mono">{{ row.run_id ?? '—' }}</span>
           </template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.result')" min-width="130">
           <template #default="{ row }">
             <span v-if="!row.ended" class="chip primary live">{{ t('batch.state.running') }}</span>
@@ -512,21 +532,27 @@ const runElapsed = computed(() =>
             <span v-else class="chip danger">{{ failText(row) }}</span>
           </template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.ate')" width="100" align="right">
           <template #default="{ row }"><span class="mono strong">{{ m3(row.ape_rmse) }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.rpe')" width="100" align="right">
           <template #default="{ row }"><span class="mono">{{ m3(row.rpe_rmse) }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.length')" width="90" align="right">
           <template #default="{ row }"><span class="mono">{{ row.length == null ? '—' : `${row.length.toFixed(1)} m` }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.rtf')" width="80" align="right">
           <template #default="{ row }"><span class="mono">{{ row.rtf == null ? '—' : row.rtf.toFixed(2) }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.wall')" width="90" align="right">
           <template #default="{ row }"><span class="mono">{{ row.wall_s == null ? '—' : fmtDuration(row.wall_s) }}</span></template>
         </el-table-column>
+        <!-- @vue-generic {BatchRun} -->
         <el-table-column :label="t('batch.col.map')" min-width="84" show-overflow-tooltip>
           <template #default="{ row }"><span class="mono">{{ row.map ?? '—' }}</span></template>
         </el-table-column>
@@ -590,6 +616,6 @@ const runElapsed = computed(() =>
 :deep(.el-table__row) { cursor: pointer; }
 .state-ok { font-size: 12px; color: var(--ink-3); }
 .state-ok::before { content: '✓ '; color: var(--ok); font-weight: 700; }
-:deep(.el-table__row.is-selected > td) { background: rgba(8, 145, 178, 0.06); }
+:deep(.el-table__row.is-selected > td) { background: rgba(var(--accent-rgb), 0.06); }
 .swatch { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 2px; vertical-align: 1px; }
 </style>

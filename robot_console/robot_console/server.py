@@ -30,6 +30,8 @@ from .run_trash import register_run_trash_routes
 from .map_edit import register_map_edit_routes
 from .playback import register_playback_routes
 from .bag_files import register_bag_file_routes
+from .sensor_profiles import register_sensor_profile_routes
+from .slam_config import register_slam_config_routes
 from .open_folder import register_open_folder_routes
 from .map_scene import register_map_scene_routes
 from .stream_cache import SharedSnapshot
@@ -51,7 +53,7 @@ class WebFiles(StaticFiles):
         return response
 
 
-def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback):
+def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs=None):
     app = FastAPI(title='robot_console')
     period = 1.0 / float(cfg['server'].get('status_rate', 2.0))
     psutil.cpu_percent()            # 第一次调用只是开始计时，返回值无意义
@@ -96,6 +98,28 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
     register_map_edit_routes(app, cfg)
     register_playback_routes(app, playback, procs)
     register_bag_file_routes(app, cfg, playback)
+    sensor_profiles = register_sensor_profile_routes(app, cfg, playback)
+
+    def measure_sensor(bag):
+        """Make sure the facts the SLAM configuration derives values from (rings, scan rate, points per scan)
+        are measured for the sensor profile of `bag`. A failed measurement only means no derived values."""
+        if slam_configs is None or not bag:
+            return
+        try:
+            sensor_profiles.facts(bag, slam_configs.facts)
+        except Exception as e:      # a broken bag must not block the page or the start
+            node.get_logger().warn(f'sensor facts of {bag} not measured: {e}')
+    if slam_configs is not None:
+        def slam_preset(stack, bag):
+            """The preset the SLAM would start with: the sensor profile of the bag, else the simulated robot."""
+            if not bag:
+                return None
+            measure_sensor(bag)
+            try:
+                return playback.slam_start_args(stack, bag)[0]
+            except PlaybackError as e:
+                raise HTTPException(e.status, detail={'code': e.code, 'params': e.params})
+        register_slam_config_routes(app, slam_configs, slam_preset)
     register_open_folder_routes(app, cfg)
     sim_name = mapping.stacks.get('sim')
 
@@ -163,6 +187,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         preset, extra = preset_args(name, preset)
         if bag and name in mapping.profiles:
             # Playback page: a bag of a real robot (sensor profile) needs the SLAM configuration of that robot
+            if slam_configs is not None and slam_configs.has(name):
+                measure_sensor(bag)
             try:
                 preset, extra = playback.slam_start_args(name, bag)
             except PlaybackError as e:
@@ -184,8 +210,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
                 mapping.select(name)
                 mapping.reset()       # 每次开始建图都从空地图开始
             return info
-        except StackRunning:
-            raise error(409, 'stack_running', name=name)
+        except StackRunning as e:
+            raise error(409, 'stack_running', name=e.name)
         except OSError as e:          # 命令不存在等
             raise error(500, 'start_failed', name=name, reason=str(e))
 

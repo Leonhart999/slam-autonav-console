@@ -13,6 +13,7 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js'
 import type { NavMap, NavSolid, NavStatus } from '@/types'
 import type { ViewMode } from '@/mapping/stream'
+import { scenePalette } from '@/theme'
 
 const props = withDefaults(defineProps<{
   map: NavMap | null
@@ -121,14 +122,8 @@ let resizeObs: ResizeObserver | null = null
 let floorZ = 0
 let framedFor = ''
 
-// Height ramp: light cyan -> blue -> indigo (matches the mapping page)
-const RAMP = [
-  [0.6, 0.86, 0.93],
-  [0.02, 0.64, 0.8],
-  [0.15, 0.39, 0.92],
-  [0.33, 0.25, 0.85],
-]
-function ramp(t: number, out: number[], i: number) {
+// Height ramp: light cyan -> blue -> indigo (matches the mapping page; theme.ts has the light and the dark set)
+function ramp(RAMP: number[][], t: number, out: number[], i: number) {
   const x = Math.min(0.999, Math.max(0, t)) * 3
   const k = Math.floor(x)
   const f = x - k
@@ -153,7 +148,8 @@ function setCloud(data: Float32Array | null) {
     const z1 = Math.max(z0 + 0.5, Math.min(percentile(zs, 0.98), z0 + 4))
     floorZ = z0
     const colors: number[] = new Array(data.length)
-    for (let i = 0; i < zs.length; i++) ramp((zs[i] - z0) / (z1 - z0), colors, i * 3)
+    const colorRamp = scenePalette.value.ramp
+    for (let i = 0; i < zs.length; i++) ramp(colorRamp, (zs[i] - z0) / (z1 - z0), colors, i * 3)
     geo.setAttribute('position', new THREE.BufferAttribute(data, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
   } else {
@@ -187,7 +183,8 @@ function setFloor(m: NavMap | null, image: ImageBitmap | null) {
   const tex = new THREE.CanvasTexture(cv)
   tex.magFilter = THREE.NearestFilter
   tex.colorSpace = THREE.SRGBColorSpace
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.72, depthWrite: false })
+  const mat = new THREE.MeshBasicMaterial({ map: tex, color: scenePalette.value.floorTint, transparent: true,
+    opacity: 0.72, depthWrite: false })
   floor = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat)
   // The plane is centered; put its lower-left corner on the map origin, rotated by the origin yaw
   floor.position.set(w / 2, h / 2, 0)
@@ -452,6 +449,13 @@ watch(
   },
 )
 watch(() => props.status, applyStatus)
+
+// Light / dark look: recolor the cloud with the other height ramp, retint the floor, and redraw right away
+watch(scenePalette, (p) => {
+  setCloud(props.cloud)
+  if (floor) (floor.material as THREE.MeshBasicMaterial).color.set(p.floorTint)
+  renderer.render(scene, props.mode === 'top' ? ortho : camera)
+})
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)

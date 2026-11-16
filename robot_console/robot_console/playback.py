@@ -39,8 +39,16 @@ offset) the first /clock is anchored to a wall-time estimate and the position fo
 
 A SLAM that already received one playback is not fed a second one: the bag time would jump back and the SLAM
 would mix both runs. Restart the SLAM first (the page says so).
+
+Raw scans ("Save raw scans" switch, off by default): the stack `scan_recorder` (fastlio_loop_record.py) stores
+every body-frame scan of the SLAM with its pose under playback.scan_recording.dir/<time>. It starts before the
+player and stops when the SLAM stops, because the SLAM keeps working on queued scans after the bag has ended.
+A map saved from the run names the recording in meta.json (input_recording) and keeps the poses in
+data/scan_poses.tum; its 2D grid can then be rebuilt from scan evidence (map_regrid.py). A recording that no
+saved map names is deleted when the SLAM stops.
 """
 import os
+import shutil
 import threading
 import time
 
@@ -67,6 +75,7 @@ QOS_NAMES = {   # rmw enum numbers in metadata.yaml -> names accepted by --qos-p
     'durability': {0: 'system_default', 1: 'transient_local', 2: 'volatile'},
 }
 QOS_FILE = '/tmp/robot_console_playback_qos_{pid}.yaml'   # QoS overrides for the current playback
+SCANS_USED = 'used_by_maps.txt'   # written into a scan recording when a map is saved from it (map_library.py)
 
 
 class PlaybackError(Exception):
@@ -192,6 +201,18 @@ def sensor_profile_of(bag, profiles):
     return None
 
 
+def start_offset(profile, duration):
+    """s at the start of a bag that the Playback page skips by default (profile key start_offset), kept so that at
+    least MIN_PART of the bag is left; 0 when the profile has none or an invalid one."""
+    try:
+        s = float((profile or {}).get('start_offset') or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if not s > 0 or s > duration - MIN_PART:
+        return 0.0
+    return round(s, 2)
+
+
 def profile_plan(profile, inputs):
     """Like match_inputs for a bag with a sensor profile: bag topic -> adapter input (via) -> SLAM input (to)."""
     plan, missing = {}, []
@@ -248,13 +269,31 @@ class Playback:
         self.adapter_stack = p.get('adapter_stack', 'sensor_adapter')
         self.profiles = p.get('sensor_profiles') or {}
         self.profiles_file = p.get('sensor_profiles_file') or ''
+        self.profile_files = {}     # profile name -> its YAML file when not profiles_file (page-made profiles)
+        self.user_profiles = set()  # names of the profiles made on the page (sensor_profiles.py)
         self._node, self._procs, self._mapping = node, procs, mapping
         self._lock = threading.Lock()
         self._cur = None            # the current / last playback, see start()
         self._played = None         # (SLAM name, its started_at) that has already received a playback
         self._ready = (0.0, None)   # (monotonic time, subscriber count) cache for status()
+        # "Save raw scans": recorder stack, folder, and the body-frame scan topic of each SLAM that has one
+        rec = p.get('scan_recording') or {}
+        self.scan_stack = rec.get('stack', 'scan_recorder')
+        self.scan_dir = os.path.expanduser(rec.get('dir') or '')
+        self.scan_topics = dict(rec.get('topics') or {}) if self.scan_dir else {}
+        if hasattr(procs, 'on_stopped'):
+            for name in self.scan_topics:
+                procs.on_stopped(name, self._slam_stopped)
 
     # ---------------- bag list ----------------
+
+    def set_profiles(self, profiles, files, user):
+        """Replace the sensor profiles (sensor_profiles.py after a profile was saved on the page)."""
+        self.profiles, self.profile_files, self.user_profiles = profiles, files, set(user)
+
+    def playback_active(self):
+        s = self._procs.get(self.stack)
+        return s is not None and s.state() in ('running', 'stopping')
 
     def bags(self):
         """Bags with what each SLAM would get from them (shown on the page as the bag list)."""
@@ -279,7 +318,9 @@ class Playback:
                 'has_clock': '/clock' in names, 'has_gt': bool(self.gt_topic and self.gt_topic in names),
                 'reference': self._reference(sensor, names),
                 'slams': slams,
-                'sensor': {'name': sensor, 'label': self.profiles[sensor]['label']} if sensor else None,
+                'sensor': {'name': sensor, 'label': self.profiles[sensor]['label'],
+                           'user': sensor in self.user_profiles,
+                           'start_offset': start_offset(self.profiles[sensor], b['duration'])} if sensor else None,
             })
         return out
 
@@ -383,8 +424,10 @@ class Playback:
                 'running', 'stopping')
         out = {'stack': self.stack, 'available': s is not None, 'state': state, 'rates': self.rates,
                'roots': self.roots, 'slam': slam, 'needs_slam_restart': restart, 'slam_ready': False,
-               'slam_lag': None, 'catching_up': False}
+               'slam_lag': None, 'catching_up': False,
+               'scan_slams': sorted(self.scan_topics) if self._procs.get(self.scan_stack) else []}
         if cur:
+            out['scans'] = bool(cur.get('scans'))
             out.update(bag=cur['path'], name=cur['name'], rate=cur['rate'], paused=cur['paused'],
                        duration=cur['duration'], position=round(pos, 2), plan=cur['plan'], finished=finished,
                        range=[round(cur['begin'], 2), round(cur['end'], 2)],
@@ -435,12 +478,15 @@ class Playback:
             if cur.get('ref'):
                 out['ref_source'] = cur['ref']['topic']
                 out['ref_label'] = cur['ref']['label']
+            if cur.get('scans'):
+                out['input_recording'] = cur['scans']
             return out
 
     # ---------------- commands ----------------
 
-    def start(self, path, rate=1.0, begin=0.0, end=None):
-        """Play the part [begin, end] (s into the bag; end None = to the end) at `rate` into the running SLAM."""
+    def start(self, path, rate=1.0, begin=0.0, end=None, save_scans=False):
+        """Play the part [begin, end] (s into the bag; end None = to the end) at `rate` into the running SLAM.
+        save_scans: also record the SLAM's body-frame scans and poses (see the module doc)."""
         s = self._player()
         if s is None:
             raise PlaybackError('stack_not_found', 404, name=self.stack)
@@ -487,12 +533,17 @@ class Playback:
                                     ref['topic'] if ref else None)
         if begin > 0:
             args += ['--start-offset', f'{begin:g}']
-        if sensor:
-            self._start_adapter(sensor, plan)
+        scans = self._start_recorder(slam) if save_scans else None
         try:
-            info = self._procs.start(self.stack, args, None, 'playback')
+            if sensor:
+                self._start_adapter(sensor, plan)
+            try:
+                info = self._procs.start(self.stack, args, None, 'playback')
+            except Exception:
+                self._stop_adapter()
+                raise
         except Exception:
-            self._stop_adapter()
+            self._drop_recording(scans)
             raise
         with self._lock:
             self._played = (slam, ss.started_at)
@@ -501,10 +552,62 @@ class Playback:
                          'rate': float(rate), 'paused': False, 'duration': bag['duration'], 'start': bag['start'],
                          'begin': begin, 'end': end, 'own_clock': own_clock,
                          'pos0': begin, 'wall0': time.monotonic(), 'last_pos': begin, 'plan': plan, 'slam': slam,
-                         'sensor': sensor, 'has_gt': bool(self.gt_topic and self.gt_topic in names), 'ref': ref}
+                         'sensor': sensor, 'has_gt': bool(self.gt_topic and self.gt_topic in names), 'ref': ref,
+                         'scans': scans}
             cur = self._cur
         threading.Thread(target=self._monitor, args=(cur,), daemon=True).start()
         return info
+
+    # ---------------- raw scans ----------------
+
+    def _start_recorder(self, slam):
+        """Start the scan recorder for `slam` and wait until it listens; returns the recording folder."""
+        topic = self.scan_topics.get(slam)
+        r = self._procs.get(self.scan_stack)
+        if not topic or r is None:
+            raise PlaybackError('playback_scans_unsupported', name=slam)
+        if r.state() in ('running', 'stopping'):
+            self._procs.stop(self.scan_stack)
+        out = os.path.join(self.scan_dir, time.strftime('%Y%m%d_%H%M%S'))
+        os.makedirs(self.scan_dir, exist_ok=True)
+        args = [out, '--cloud-topic', topic, '--odom-topic', self._mapping.profiles[slam]['odom_topic']]
+        self._procs.start(self.scan_stack, args, None, 'playback')
+        deadline = time.monotonic() + ADAPTER_READY
+        while self._node.count_subscribers(topic) == 0:
+            if r.state() != 'running' or time.monotonic() > deadline:
+                self._drop_recording(out)
+                raise PlaybackError('playback_recorder_failed', 500, name=self.scan_stack)
+            time.sleep(0.2)
+        return out
+
+    def _drop_recording(self, folder):
+        """Stop the recorder and delete a recording of this console that is not going to be used."""
+        if not folder:
+            return
+        r = self._procs.get(self.scan_stack)
+        if r is not None and r.state() == 'running':
+            self._procs.stop(self.scan_stack)
+        if os.path.dirname(folder) == self.scan_dir and os.path.isdir(folder) and not os.path.islink(folder):
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def _recording_used(self, folder):
+        """Has a map been saved from this recording? (map_library.py leaves SCANS_USED in the folder)"""
+        return os.path.isfile(os.path.join(folder, SCANS_USED))
+
+    def _slam_stopped(self, stack):
+        """After the SLAM stopped: end its scan recording; delete it when no saved map uses it."""
+        with self._lock:
+            cur = self._cur
+            folder = cur.get('scans') if cur and cur['slam'] == stack.name else None
+        if not folder:
+            return
+        r = self._procs.get(self.scan_stack)
+        if r is not None and r.state() == 'running':
+            self._procs.stop(self.scan_stack)
+        if not self._recording_used(folder):
+            self._drop_recording(folder)
+            with self._lock:
+                cur['scans'] = None
 
     def _start_adapter(self, sensor, plan):
         """Start the sensor adapter and wait until it listens, so the first scans of the bag are not lost."""
@@ -513,7 +616,7 @@ class Playback:
             raise PlaybackError('stack_not_found', 404, name=self.adapter_stack)
         if a.state() in ('running', 'stopping'):
             self._procs.stop(self.adapter_stack)
-        params = {'profiles_file': self.profiles_file, 'profile': sensor}
+        params = {'profiles_file': self.profile_files.get(sensor, self.profiles_file), 'profile': sensor}
         for kind, p in plan.items():
             params[f'{kind}_in'] = p['via']
             if kind != 'points2':           # the second lidar goes into the same output as the first
@@ -625,9 +728,10 @@ def register_playback_routes(app, pb, procs):
         return pb.status()
 
     @app.post('/api/playback/start')
-    def playback_start(bag: str, rate: float = 1.0, begin: float = 0.0, end: float | None = None):
+    def playback_start(bag: str, rate: float = 1.0, begin: float = 0.0, end: float | None = None,
+                       save_scans: bool = False):
         try:
-            pb.start(bag, rate, begin, end)
+            pb.start(bag, rate, begin, end, save_scans)
         except PlaybackError as e:
             raise fail(e)
         except OSError as e:

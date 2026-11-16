@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.formparsers import MultiPartException
 
 from .map_import import MAX_REQUEST, MIB, MapImportError, import_navigation
+from .map_regrid import auto_params, run_worker
 from .scene_import import SceneImportError
 
 
@@ -18,6 +19,12 @@ def register_import_routes(app, cfg, library, scenes, presets, procs):
     lock = threading.Lock()
     temp_root = scenes.root / '.uploads'
     temp_root.mkdir(parents=True, exist_ok=True)
+    python = Path(cfg['server']['venv']).expanduser() / 'bin/python'
+
+    def auto_grid(cloud, out_dir, extent):
+        """2D grid of a cloud-only import, projected with the default pcd2grid parameters."""
+        params = auto_params(extent)
+        return {**run_worker(python, cloud, out_dir, params), 'params': params}
 
     def error(exc, status=None):
         code = exc.code
@@ -113,10 +120,13 @@ def register_import_routes(app, cfg, library, scenes, presets, procs):
                         raise MapImportError('import_invalid', reason='Spawn coordinates are not finite or out of range')
                     path, filename = await copy_file(form, 'file', d / 'scene.upload', {'.sdf', '.zip'}, 256 * MIB)
                     return await asyncio.to_thread(scenes.import_scene, name, path, filename, spawn)
-                fields(form, {'name', 'yaml_file', 'image_file', 'cloud_file', 'preset'})
+                fields(form, {'name', 'yaml_file', 'image_file', 'cloud_file', 'preset', 'auto_grid'})
                 preset = text(form, 'preset') or None
                 if preset is not None and preset not in presets:
                     raise MapImportError('import_invalid', reason='The selected simulation scene does not exist')
+                flag = text(form, 'auto_grid', '1')
+                if flag not in ('0', '1'):
+                    raise MapImportError('import_invalid', reason='auto_grid must be 0 or 1')
                 has_yaml = 'yaml_file' in form
                 has_image = 'image_file' in form
                 if has_yaml != has_image:
@@ -126,7 +136,8 @@ def register_import_routes(app, cfg, library, scenes, presets, procs):
                 y, _ = await copy_file(form, 'yaml_file', d / 'map.upload', {'.yaml', '.yml'}, 65536, required=False)
                 im, filename = await copy_file(form, 'image_file', d / 'image.upload', {'.pgm', '.png'}, 64 * MIB, required=False)
                 cloud, _ = await copy_file(form, 'cloud_file', d / 'cloud.upload', {'.pcd'}, 256 * MIB, required=False)
-                return await asyncio.to_thread(import_navigation, library.maps_dir, name, y, im, filename, cloud, preset)
+                return await asyncio.to_thread(import_navigation, library.maps_dir, name, y, im, filename, cloud, preset,
+                                               auto_grid if flag == '1' else None)
         except (MapImportError, SceneImportError) as exc:
             raise error(exc)
         except Exception as exc:

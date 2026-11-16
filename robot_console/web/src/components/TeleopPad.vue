@@ -68,13 +68,13 @@ function up() {
   touch-action: none; /* 触屏拖动时不滚动页面 */
   user-select: none;
   cursor: grab;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0%, rgba(236, 244, 250, 0.9) 70%);
-  box-shadow: inset 0 0 0 1px rgba(8, 145, 178, 0.22), inset 0 6px 18px -8px rgba(20, 60, 120, 0.25),
-    0 8px 20px -14px rgba(8, 145, 178, 0.8);
+  background: radial-gradient(circle, rgba(var(--paper-rgb), 0.95) 0%, color-mix(in srgb, var(--paper) 90%, var(--page)) 70%);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.22), inset 0 6px 18px -8px rgba(var(--shade-rgb), 0.25),
+    0 8px 20px -14px rgba(var(--accent-rgb), 0.8);
 }
 .pad.dragging {
   cursor: grabbing;
-  box-shadow: inset 0 0 0 1.5px rgba(8, 145, 178, 0.5), inset 0 6px 18px -8px rgba(20, 60, 120, 0.25),
+  box-shadow: inset 0 0 0 1.5px rgba(var(--accent-rgb), 0.5), inset 0 6px 18px -8px rgba(var(--shade-rgb), 0.25),
     0 0 0 6px rgba(6, 182, 212, 0.1);
 }
 .pad.disabled {
@@ -88,7 +88,7 @@ function up() {
 }
 .ring {
   border-radius: 50%;
-  border: 1px dashed rgba(8, 145, 178, 0.25);
+  border: 1px dashed rgba(var(--accent-rgb), 0.25);
 }
 .r1 {
   inset: 14%;
@@ -97,7 +97,7 @@ function up() {
   inset: 32%;
 }
 .axis {
-  background: rgba(8, 145, 178, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 .axis.h {
   left: 10%;
@@ -114,7 +114,7 @@ function up() {
 .mark {
   position: absolute;
   font-size: 9px;
-  color: rgba(8, 145, 178, 0.45);
+  color: rgba(var(--accent-rgb), 0.45);
   pointer-events: none;
 }
 .up { top: 5px; left: 50%; transform: translateX(-50%); }
@@ -130,11 +130,11 @@ function up() {
   border-radius: 50%;
   pointer-events: none;
   background: radial-gradient(circle at 35% 30%, #67e8f9, #0891b2 55%, #2563eb);
-  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.85), 0 6px 16px -4px rgba(37, 99, 235, 0.65);
+  box-shadow: 0 0 0 4px rgba(var(--paper-rgb), 0.85), 0 6px 16px -4px rgba(37, 99, 235, 0.65);
   transition: transform 0.12s ease-out;
 }
 .dragging .knob {
   transition: none; /* 拖动时紧跟手指，松开时才有回中动画 */
-  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.9), 0 0 18px rgba(6, 182, 212, 0.75);
+  box-shadow: 0 0 0 4px rgba(var(--paper-rgb), 0.9), 0 0 18px rgba(6, 182, 212, 0.75);
 }
 </style>

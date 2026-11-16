@@ -1,7 +1,8 @@
 // Batch mapping experiments API (backend: robot_console/batch.py)
 import type { ExportResult } from '@/evaluation/api'
-import type { Bilingual, CodedMsg } from '@/types'
-import { ApiError } from '@/api'
+import type { Bilingual } from '@/types'
+import { request } from '@/http'
+import { taskResult } from '@/tasks'
 
 export interface MeanStd { mean: number; std: number; min: number; max: number; n: number }
 
@@ -79,20 +80,6 @@ export interface BatchHistoryEntry {
   run_ids: string[]
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const d = data.detail
-    if (d && typeof d === 'object' && 'code' in d) throw new ApiError(d as CodedMsg)
-    throw new ApiError({ code: 'unknown', params: { reason: String(d ?? `${res.status} ${res.statusText}`) } })
-  }
-  return data as T
-}
 
 export const batchApi = {
   options: () => request<BatchOptions>('GET', '/api/batch/options'),
@@ -103,8 +90,8 @@ export const batchApi = {
     request<BatchStatus>('POST', '/api/batch/start', p),
   cancel: () => request<BatchStatus>('POST', '/api/batch/cancel'),
   /** Same export as the run list, plus batch_summary.csv / batch_runs.csv of this batch */
-  exportBatch: (b: BatchStatus): Promise<ExportResult> =>
-    request<ExportResult>('POST', '/api/evaluation/export', {
+  exportBatch: (b: BatchStatus, signal?: AbortSignal): Promise<ExportResult> =>
+    taskResult<ExportResult>('/api/evaluation/export', {
       ids: (b.runs ?? []).filter((r) => r.ok && r.run_id).map((r) => r.run_id), batch: b.id,
-    }),
+    }, signal),
 }

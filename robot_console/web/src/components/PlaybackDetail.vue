@@ -175,8 +175,10 @@ const slamCmd = computed(() => (typeof info.value.slam_cmd === 'string' ? info.v
 </template>
 
 <style scoped>
+/* The charts follow the width of this block, not of the window: on the Evaluation page it sits in a column */
 .pb-detail {
   margin-top: 10px;
+  container: pb-detail / inline-size;
 }
 .note {
   margin: 6px 0 0;
@@ -267,12 +269,25 @@ figcaption {
   font-weight: 600;
   color: var(--ink-2);
 }
-@media (max-width: 1100px) {
+/* Not enough room for readable time charts beside the trajectory: they go under it at full width,
+   side by side when there are two */
+@container pb-detail (max-width: 900px) {
   .charts {
     grid-template-columns: minmax(0, 1fr);
   }
+  .stack {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+  .stack > figure {
+    flex: 1 1 300px;
+  }
+  .stack > .hint {
+    flex-basis: 100%;
+  }
 }
-@media (max-width: 720px) {
+@container pb-detail (max-width: 460px) {
   .kpis {
     grid-template-columns: minmax(0, 1fr);
   }

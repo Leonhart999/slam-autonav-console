@@ -138,11 +138,17 @@ Strings in the configuration may use `~`, `${data_root}` (the value of `paths.da
 | `mapping.runs_dir` | `${data_root}/runs` | run records used by the evaluation page |
 | `mapping.scenes_dir` | `${data_root}/scenes` | Gazebo scenes uploaded on the Mapping page |
 | `evaluation.results_dir` | `${data_root}/results` | CSV and PNG exports of the evaluation page |
-| `mapping.slam_profiles.*.save.pcd_path` | `~/results/fastlio_map.pcd` | must match FAST-LIO `map_file_path` |
+| `mapping.slam_profiles.*.save.pcd_path` | `~/results/fastlio_map.pcd` | where FAST-LIO writes its map; the console puts it into the generated parameter file |
+| `mapping.slam_profiles.*.config` | `slam/fastlio.yaml` | layered SLAM configuration the console builds the stack's parameter file from (see below) |
+| `mapping.slam_config_dir` | `${data_root}/slam/effective` | the generated parameter files, one per SLAM stack |
+| `mapping.slam_overrides_file` | `${data_root}/slam/overrides.yaml` | SLAM parameters changed on the pages |
+| `mapping.slam_facts_file` | `${data_root}/slam/sensor_facts.yaml` | measured sensor facts per sensor profile |
 | `mapping.gt_topic` | `/ground_truth` | simulation ground truth; leave empty without one |
 | `playback.bag_dirs` | `[${data_root}/bags]` | folders searched for rosbag2 bags (Playback page) |
 | `playback.upload_dir` | `<first bag_dirs>/uploads` | where bags uploaded from the page go |
 | `playback.space_check` | `[]` | extra paths whose free space an upload must fit in. Under WSL the Linux disk reports the free space of its virtual disk, not of the Windows drive holding the disk image: list that drive's mount point |
+| `playback.user_sensor_profiles_file` | `${data_root}/sensor_profiles.yaml` | browser-created sensor profiles (checked before built-in ones) |
+| `playback.scan_recording.dir` | `${data_root}/scans` | raw body-frame scans recorded when **Save raw scans** is enabled during playback |
 | `navigation.default_map` | `~/maps/office_fastlio.yaml` | map `lidar_nav/nav.launch.py` loads without `map:=` |
 | `teleop.max_v`, `teleop.max_w` | 5.0, 1.2 | hard speed limits for manual driving |
 
@@ -152,6 +158,44 @@ built with `--symlink-install`. The override file needs only a console restart.
 Use one console per machine and ROS domain. Starting a second console on the same port is refused, because
 on startup the console stops processes left over from its previous run on that port. For tests, run a
 second console on another port and another `ROS_DOMAIN_ID` (see `install/check.sh`).
+
+## SLAM configuration
+
+The SLAM stacks do not run hand-written parameter files. At every start the console builds them from a
+specification in `config/slam/` (`fastlio.yaml`, `glim.yaml`, `glim_lidar.yaml`) in layers, later layers winning:
+
+| Layer | Holds | Source |
+|---|---|---|
+| base | the validated parameters, the same for every robot | `base` in the specification |
+| input | what depends on the data source: `sim` (the simulated robot, also bags recorded from it) or `adapter` (a real-robot bag played through the sensor adapter) | `inputs` |
+| derived | values computed from what the console measured of the sensor: number of rings, scan rate, points per scan | `derive` + `mapping.slam_facts_file` |
+| options | the switches of the page: LiDAR only, ground-vehicle constraint | `options` |
+| console | input topics and the map path | `mapping.slam_profiles` in `console.yaml` |
+| user | values changed on the page ("Parameters" in the SLAM step) | `mapping.slam_overrides_file` |
+
+The result is written to `mapping.slam_config_dir/<stack>.yaml` (GLIM: a folder of JSON files
+`mapping.slam_config_dir/<stack>/`, whose base is the folder named by `base_dir`) and stored in the run record (`run.json`,
+key `slam_config`: every value, the layer each one came from, and the validation record of that combination),
+so two runs can be compared by their parameters. Every key of a layer must exist in `base` with the same type.
+
+**Derived values.** For a bag played with a sensor profile the console measures, once per profile, the number
+of ring values of the cloud, the scan rate, the valid points per scan and the IMU rate (the first scans of the
+bag and its message counts; stored in `mapping.slam_facts_file`, delete an entry to measure again). Rules in
+the specification (`derive`) turn these into parameter values (for FAST-LIO: `scan_line`, `scan_rate` and
+`point_filter_num`; for GLIM: `k_correspondences` from the ring count). A rule sets the value only when it is marked
+`enabled`, which is done after it was checked on recorded data; otherwise the Parameters dialog shows its value
+as a suggestion that can be taken over with a click.
+
+The **Parameters** button of the SLAM step (Mapping and Playback pages) opens the list of parameters named
+under `tunable` in the specification, each with its base value, the automatic value, your value and the range
+accepted. Your values are stored per SLAM variant and data source (`sim`, or the sensor profile of the bag), so
+a value tuned for one robot never reaches another; they apply at the next start. A run started with changed
+values is marked on the Evaluation page, and the validation record of the specification is shown as no longer
+describing it.
+GLIM with IMU runs on real-robot bags too: through the sensor adapter it gets cloud and IMU in one frame,
+so its input layer `adapter` only sets an identity `T_lidar_imu`.
+The files `sim_robot/config/fastlio_*.yaml` are no longer used by the console; they remain for running FAST-LIO
+from the command line, and a unit test checks that the layers reproduce them exactly.
 
 ## Bag playback
 
@@ -245,7 +289,8 @@ emergency. The tests in `tests/` need no running ROS graph. Run them directly wi
 `~/venvs/console/bin/python -m pytest -p no:anyio tests -q` after sourcing `/opt/ros/humble/setup.bash`.
 `-p no:anyio` is needed because the anyio pytest plugin in the venv requires a newer pytest than the one
 Ubuntu ships (6.2.5).
-UI smoke test (manual, not in the hook): `bash tools/ui_smoke.sh` opens all 5 pages in zh/en with headless Edge on a separate console instance (port 8010, domain 90) and fails on JS errors, failed requests or raw i18n keys; screenshots and summary go to `<data_root>/ui_screens/smoke_<time>/` (WSL only; machine-specific `WIN_NODE` / `OUT_WIN` defaults can go in `~/.config/robot_console/dev.env`).
+Frontend unit tests: `(cd web && npm test)` runs the Node test suite (`web/tests/*.test.mjs`).
+UI smoke test (manual, not in the hook): `THEME=light|dark VIEWPORT=1440x1000 bash tools/ui_smoke.sh` opens all 6 pages in zh/en with headless Edge on a separate console instance (port 8010, domain 90) and fails on JS errors, failed requests, raw i18n keys, layout overflow or low contrast; screenshots and summary go to `<data_root>/ui_screens/smoke_<time>/` (WSL only; machine-specific `WIN_NODE` / `OUT_WIN` defaults can go in `~/.config/robot_console/dev.env`).
 Running-state UI check (manual, ~3 min): `bash tools/ui_states.sh <map>` starts a separate console with a simulation, FAST-LIO and Nav2 and runs the same checks on the Navigation, Mapping and Monitor pages in those states (scene mismatch warning, live SLAM controls, active navigation) at 1707x985 and 1100x700; `<map>` is a saved map of a non-warehouse world. Buttons, tags and chips whose text runs past their own border fail both checks.
 
 ## Uninstall

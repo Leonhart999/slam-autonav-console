@@ -2,18 +2,20 @@
 import type { EChartsCoreOption } from 'echarts/core'
 import { AXIS, MONO } from './colors'
 
+// Getters, not plain values: the colors are read when an option is built (`...axisCommon` inside a computed),
+// so charts pick up the current look and are rebuilt when it changes
 export const axisCommon = {
-  axisLine: { lineStyle: { color: AXIS.line } },
+  get axisLine() { return { lineStyle: { color: AXIS.line } } },
   axisTick: { show: false },
-  axisLabel: { color: AXIS.label, fontFamily: MONO, fontSize: 11 },
-  splitLine: { lineStyle: { color: AXIS.split } },
-  nameTextStyle: { color: AXIS.label, fontSize: 11 },
+  get axisLabel() { return { color: AXIS.label, fontFamily: MONO, fontSize: 11 } },
+  get splitLine() { return { lineStyle: { color: AXIS.split } } },
+  get nameTextStyle() { return { color: AXIS.label, fontSize: 11 } },
 }
 
 export const tooltipCommon = {
-  backgroundColor: 'rgba(255,255,255,0.96)',
-  borderColor: AXIS.line,
-  textStyle: { color: '#0b1526', fontSize: 12 },
+  get backgroundColor() { return AXIS.tipBg },
+  get borderColor() { return AXIS.line },
+  get textStyle() { return { color: AXIS.tipInk, fontSize: 12 } },
 }
 
 export interface XYSeries {
@@ -46,7 +48,7 @@ export function topView(series: XYSeries[], labels: { start: string; end: string
     })
     if (s.ends && s.points.length) {
       out.push({ name: labels.start, type: 'line', data: [s.points[0]], symbol: 'circle', symbolSize: 9,
-        itemStyle: { color: '#fff', borderColor: s.color, borderWidth: 2 }, tooltip: { show: false } })
+        itemStyle: { color: AXIS.paper, borderColor: s.color, borderWidth: 2 }, tooltip: { show: false } })
       out.push({ name: labels.end, type: 'line', data: [s.points[s.points.length - 1]], symbol: 'rect', symbolSize: 8,
         itemStyle: { color: s.color }, tooltip: { show: false } })
     }

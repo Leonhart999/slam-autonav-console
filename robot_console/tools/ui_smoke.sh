@@ -4,7 +4,9 @@
 # Needs WSL: the browser is the Windows Edge, driven by the Windows node.exe.
 #   bash tools/ui_smoke.sh            # screenshots + summary in <data_root>/ui_screens/smoke_<time>/
 # Env: PORT (8010), DOMAIN (90), OUT_WIN (Windows output dir), WIN_NODE (Windows node.exe, see below),
-#      VIEWPORT (1440x1000; the laptop at 150 % scaling gives a maximised --app window of about 1707x985).
+#      PAGES (comma-separated routes, a query is allowed: "evaluation?run=<id>"; default: every page),
+#      VIEWPORT (1440x1000; the laptop at 150 % scaling gives a maximised --app window of about 1707x985),
+#      THEME (light | dark: the look of the console; run once per look).
 #      Machine-specific defaults for these can go in ~/.config/robot_console/dev.env (sourced, may use $STAMP).
 # The instance reads (never writes) the maps and runs of the normal console configuration.
 # Uses the working tree as it is (uncommitted changes included). Exit code 1 when any page fails.
@@ -45,7 +47,7 @@ for i in $(seq 60); do curl -s -m 1 -o /dev/null "http://127.0.0.1:$PORT/api/sta
 curl -s -m 2 -o /dev/null "http://127.0.0.1:$PORT/api/status" || { tail -20 $D/console.log; exit 2; }
 
 "$WIN_NODE" "$(wslpath -w "$HERE/tools/ui_smoke.mjs")" --base "http://localhost:$PORT" --out "$OUT_WIN" \
-    --src "$(wslpath -w "$HERE/web/src")" --viewport "$VIEWPORT"
+    --src "$(wslpath -w "$HERE/web/src")" --viewport "$VIEWPORT" ${PAGES:+--pages "$PAGES"} ${THEME:+--theme "$THEME"}
 code=$?
 grep -E "Traceback|ERROR|Exception" $D/console.log | head -5 | sed 's/^/console.log: /'
 exit $code

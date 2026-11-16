@@ -4,6 +4,7 @@
      Entries: name (mono), optional detail (type, group size, original folder), deleted time, size;
      row actions restore / delete permanently; footer: total, open folder, empty. -->
 <script setup lang="ts">
+import { Delete, FolderOpened } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
@@ -78,19 +79,24 @@ async function empty() {
       v-loading="loading" :data="entries" size="small" max-height="420" :row-key="(e: TrashItem) => e.id"
       :empty-text="t('trashBin.empty')"
     >
-      <el-table-column :label="t('trashBin.col.name')" min-width="200" show-overflow-tooltip>
+      <!-- @vue-generic {TrashItem} -->
+        <el-table-column :label="t('trashBin.col.name')" min-width="200" show-overflow-tooltip>
         <template #default="{ row }"><span class="mono">{{ row.name }}</span></template>
       </el-table-column>
-      <el-table-column v-if="hasDetail" :label="t('trashBin.col.detail')" min-width="140" show-overflow-tooltip>
+      <!-- @vue-generic {TrashItem} -->
+        <el-table-column v-if="hasDetail" :label="t('trashBin.col.detail')" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ row.detail ?? '' }}</template>
       </el-table-column>
-      <el-table-column :label="t('trashBin.col.deleted')" width="156">
+      <!-- @vue-generic {TrashItem} -->
+        <el-table-column :label="t('trashBin.col.deleted')" width="156">
         <template #default="{ row }"><span class="num">{{ fmtDeleted(row.deleted) }}</span></template>
       </el-table-column>
-      <el-table-column :label="t('trashBin.col.size')" width="88" align="right">
+      <!-- @vue-generic {TrashItem} -->
+        <el-table-column :label="t('trashBin.col.size')" width="88" align="right">
         <template #default="{ row }"><span class="num">{{ size(row.size) }}</span></template>
       </el-table-column>
-      <el-table-column width="180" align="right">
+      <!-- @vue-generic {TrashItem} -->
+        <el-table-column width="180" align="right">
         <template #default="{ row }">
           <el-button
             v-if="row.restorable" size="small" link type="primary" :disabled="locked"

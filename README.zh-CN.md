@@ -2,14 +2,14 @@
 
 [English](README.md) | 中文
 
-LiDAR SLAM 建图和自主导航控制台，覆盖LiDAR SLAM 建图、地图管理、Nav2 自主导航、全流程自动化实验和轨迹评估，在 ROS 2 Humble 中和 Gazebo Fortress 仿真上运行。
-从一个建模场景开始，在同一个网页里就能完成建图、存图、导航，最后用 evo 出评估结果。
+LiDAR SLAM 建图和自主导航控制台，覆盖 LiDAR SLAM 建图、地图管理、Nav2 自主导航、全流程自动化实验和轨迹评估，在 ROS 2 Humble 中和 Gazebo Fortress 仿真上运行。
+从一个建模场景或录制的 rosbag2 数据包开始，在同一个网页里就能完成建图、调参、存图、导航，最后用 evo 出评估结果。
 
-本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* 的配套软件。界面支持中文和英文。
+本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* 的配套软件。界面支持中英文切换，以及浅色 / 深色双外观主题。
 
 [![控制台视频导览，2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 
-*视频导览（2:19，[在 B 站观看](https://www.bilibili.com/video/BV1wm4v6GEQq)，或[下载 MP4](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4)，49 MB）：在办公室场景用 FAST-LIO2 建图并保存，在仓库场景执行三个航点的 Nav2任务，再看系统监控页和实验评估页。*
+*视频导览（2:19，[在 B 站观看](https://www.bilibili.com/video/BV1wm4v6GEQq)，或[下载 MP4](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4)，49 MB）：在办公室场景用 FAST-LIO2 建图并保存，在仓库场景执行三个航点的 Nav2 任务，再看系统监控页和实验评估页。*
 
 ![导航页：带代价地图和路径的 2D 栅格、3D 点云地图、任务控制](robot_console/docs/images/navigation.png)
 
@@ -17,14 +17,16 @@ LiDAR SLAM 建图和自主导航控制台，覆盖LiDAR SLAM 建图、地图管�
 
 | 页面 | 能做什么 |
 |---|---|
-| **建图** | 启动场景（办公室、仓库，或自己上传的 SDF / ZIP），运行 FAST-LIO2 或 GLIM，在 3D 视图里看体素地图实时增长；用屏幕摇杆 / WASD 遥控，或按航点路线自动行驶；保存地图 |
-| **数据回放** | 把 rosbag2 数据包（整包或选定片段，0.5–8 倍速）回放给 FAST-LIO2、GLIM 或 GLIM（纯激光雷达），像实时建图一样保存地图；在浏览器里上传数据包，删除到回收站。逐帧导出的 PCD 可以先用 `robot_console/tools/pcd_frames_to_bag.py` 转成数据包 |
-| **地图管理** | 浏览已保存的地图（3D 点云和 2D 栅格并排显示），换一组参数从点云重新生成 2D 栅格，用画笔编辑栅格，导入地图，删除到回收站和恢复 |
-| **导航** | 载入地图，启动仿真和 Nav2，在地图上设初始位姿和目标点，执行多航点任务，叠加全局 / 局部代价地图，调整导航倍速，在点云模型和实体模型之间切换。数据包回放建的地图可以绑定录包时的场景，或由地图自身的栅格生成仿真场景，再用于导航 |
-| **实验评估** | 用 evo 计算建图运行的 ATE / RPE；导航指标（成功率、用时、路径长度、到达误差、AMCL 误差、与障碍的最小距离）；多条记录对比；批量重复实验，给出均值 ± 标准差；导出 CSV / PNG |
+| **建图** | 启动场景（办公室、仓库，或自己上传的 SDF / ZIP），运行 FAST-LIO2（可选“仅激光”与“地面车辆约束”开关）或 GLIM，通过**参数**弹窗按分层配置微调算法参数，在 3D 视图里看体素地图实时增长；用屏幕摇杆 / WASD 遥控，或按航点路线自动行驶；保存地图 |
+| **数据回放** | 把 rosbag2 数据包（整包或选定片段，0.5–8 倍速）回放给 FAST-LIO2、GLIM 或 GLIM（仅激光）；支持在网页内**传感器配置**自动探测话题、逐点时间字段/单位、加速度单位与外参对齐，并可配置 `start_offset` 跳过启动振动段；可勾选**保存原始扫描**保留逐帧扫描；支持按实测传感器事实自动推导并调参；在浏览器里上传数据包，删除到回收站。逐帧导出的 PCD 可以先用 `robot_console/tools/pcd_frames_to_bag.py` 转成数据包 |
+| **地图管理** | 浏览已保存的地图（3D 点云和 2D 栅格并排显示），导入纯 3D `.pcd` 时默认自动投影生成可导航 2D 栅格，从点云或**逐帧证据（Scan evidence）**重新生成 2D 栅格以滤除行人等移动物体噪点，用画笔编辑栅格，删除到回收站和恢复 |
+| **导航** | 载入地图，启动仿真和 Nav2（可选不同参数变体），在地图上设初始位姿和目标点，执行多航点任务，叠加全局 / 局部代价地图，调整导航倍速，在点云模型和实体模型之间切换。数据包回放建的地图可以绑定录包时的场景，或由地图自身的栅格生成仿真场景，再用于导航 |
+| **实验评估** | 区分建图、导航与回放三类运行记录；计算建图 ATE / RPE、导航指标、回放首尾距离/闭合误差/终点高度变化/参考里程计偏差与 SLAM 滞后；支持**左右分栏**和**上下排列**视图切换；多条记录与同片段相对对比、批量重复实验（均值 ± 标准差）、用户改参标记、CSV / PNG 导出 |
 | **系统监控** | 从控制台启动的进程、各话题的实际频率与期望频率、TF 链、节点列表、每个进程是怎么停止的 |
 
-每次运行都会留下记录：建图运行保存估计轨迹和真值轨迹，导航运行保存每个目标点的结果、AMCL 误差随时间的变化和图表。
+重投影、evo 评估、相对轨迹对比与报告导出等耗时操作已接入页头**后台任务**抽屉，切换页面或刷新后可继续追踪进度、找回结果或手动重试。侧栏底部提供**浅色 / 深色**外观切换开关。
+
+每次运行都会留下记录：建图与回放运行保存轨迹、滞后统计与本次实际生效的分层配置（`slam_config`）；导航运行保存每个目标点的结果、AMCL 误差随时间的变化和图表。
 保存的地图是一个文件夹，里面有完整点云、Nav2 用的 `map.yaml` / `map.pgm`、图片和元数据。
 
 <p>
@@ -41,6 +43,7 @@ LiDAR SLAM 建图和自主导航控制台，覆盖LiDAR SLAM 建图、地图管�
 ```
 
 - 后端按白名单（`robot_console/config/stacks.yaml`）把仿真、SLAM 和导航分别作为独立的进程组启动。网页只能指定白名单里的名字，不能传命令行。
+- 每次启动 SLAM 时，控制台从 `robot_console/config/slam/` 按 `base → input → derived → options → console → user` 分层合成实际生效参数并记入 `run.json`。
 - 点云在后端做体素化，再以二进制增量推给网页，所以浏览器能流畅地画出大地图（同样的累积地图在 WSLg 下的 rviz2 里只有约 3 fps）。
 - 遥控时 0.5 s 收不到指令，或网页断开连接，小车都会停下。急停会发零速度、取消 Nav2 目标，并停止所有会驱动小车的进程。
 
@@ -55,7 +58,7 @@ bash slam-autonav-console/robot_console/install/install.sh          # 在中国�
 bash slam-autonav-console/robot_console/install/start_console.sh    # 启动控制台并打开 http://localhost:8000
 ```
 
-安装脚本会装好 ROS 2 Humble、Gazebo Fortress、Nav2、Livox-SDK2、FAST-LIO2（固定版本加一个小补丁）、两个 Python
+安装脚本会装好 ROS 2 Humble、Gazebo Fortress、Nav2、Livox-SDK2、FAST-LIO2（固定版本加补丁）、两个 Python
 环境（控制台和 evo）以及网页前端，最后做一次自检。已经完成的步骤会跳过，所以中途失败后直接重新运行即可。
 安装选项、离线安装和配置说明见 [robot_console/README.md](robot_console/README.md)（英文）。
 
@@ -68,28 +71,32 @@ bash slam-autonav-console/robot_console/install/start_console.sh    # 启动控�
 ### 可选部分
 
 - **GLIM**（带回环的因子图 SLAM）：从作者的 PPA 安装 `ros-humble-glim-ros`，见
-  <https://koide3.github.io/glim/installation.html>。针对仿真 16 线激光雷达的配置在 `sim_robot/config/glim`。
+  <https://koide3.github.io/glim/installation.html>。针对仿真 16 线激光雷达的基础配置在 `sim_robot/config/glim`，控制台会在其上按 `robot_console/config/slam/glim.yaml` 分层覆盖。
 - **港科大 4 楼西侧场景**（长走廊，由 SLABIM 的 BIM 模型生成）：先下载
   [SLABIM 数据集](https://github.com/HKUST-Aerial-Robotics/SLABIM)，然后运行
   `bash sim_robot/tools/make_hkust_models.sh /path/to/SLABIM` 和 `colcon build --packages-select sim_robot`，
   建图页就会出现这个场景。
+- **离线平面回环优化后端**（针对单层水平地面 FAST-LIO2 录制数据的离线闭环与重建）：将 `robot_console/install/requirements-loop.txt` 装进单独的 Python 虚拟环境（避免与系统 GLIM / GTSAM 冲突），即可运行 `fastlio_loop_record`、`fastlio_loop` 和 `fastlio_loop_export`，详见 [robot_console/docs/fastlio-loop-backend.md](robot_console/docs/fastlio-loop-backend.md)（英文）。
 
 ### 配置
 
 本机相关的设置写在 `~/.config/robot_console/console.yaml`，只需写要改的项（示例见
-`robot_console/config/user_console.example.yaml`）。地图、运行记录、日志和导出结果默认放在 `~/robot_console_data`。
+`robot_console/config/user_console.example.yaml`）。地图、运行记录、日志、数据包、网页新建的传感器配置、用户覆盖参数和导出结果默认放在 `~/robot_console_data`。
 
 ## 仓库结构
 
 | 目录 | ROS 2 包 | 内容 |
 |---|---|---|
-| `robot_console/` | `robot_console` | 控制台本体：后端、前端（`web/`）、配置、安装脚本、测试 |
+| `robot_console/` | `robot_console` | 控制台本体：后端、前端（`web/`）、SLAM 分层配置规格、安装脚本、测试 |
 | `sim_robot/` | `sim_robot` | Gazebo 场景、差速小车（16 线激光雷达、IMU、真值）、点云适配、航点驱动、FAST-LIO2 / GLIM 配置 |
 | `lidar_nav/` | `lidar_nav` | Nav2 启动文件和参数变体、3D → 2D 地图投影、导航测试工具 |
+| `docker/` | — | Dockerfile、容器入口、容器配置与离线预取包说明 |
 
 ## 局限
 
 - 以仿真为主：导航在 Gazebo 里闭环运行，接真实机器人需要另写进程配置和话题配置。实车数据可以在数据回放页用数据包建图（sqlite3 存储；MCAP 需要 `ros-humble-rosbag2-storage-mcap`），再在由地图生成的场景里导航，此时仿真雷达看到的是理想墙面。
+- 网页传感器配置当前适用于 FAST-LIO2 和带 IMU 的 GLIM，`GLIM（仅激光）`暂不走传感器适配器；对于扫描结束时刻打时间戳、逐点时间为负的雷达（如部分 Velodyne 包），探测会给出提示，但适配器仍会把负偏移截为 0。
+- 离线平面回环后端假设单层大致水平地面，目前通过命令行独立运行，尚未接入网页一键按钮。
 - 还不能导入离线轨迹。
 - 只在 Ubuntu 22.04 + ROS 2 Humble（x86_64）上测试过。
 - 用 GLIM 时保存地图会结束这次 GLIM 运行，因为 GLIM 只在退出时写出优化后的地图。
@@ -98,7 +105,7 @@ bash slam-autonav-console/robot_console/install/start_console.sh    # 启动控�
 
 | 组件 | 许可证 | 获取方式 |
 |---|---|---|
-| [FAST_LIO](https://github.com/hku-mars/FAST_LIO)、ikd-Tree | GPL-2.0 | 安装脚本下载；`robot_console/install/patches/fast_lio-thesis.patch` 把点云订阅改为 reliable QoS，并加入仅激光模式和地面车辆约束 |
+| [FAST_LIO](https://github.com/hku-mars/FAST_LIO)、ikd-Tree | GPL-2.0 | 安装脚本下载；`robot_console/install/patches/fast_lio-thesis.patch` 把点云订阅改为 reliable QoS，并加入仅激光模式、地面车辆约束、ring 越界检查与更大 IMU 队列深度 |
 | Livox-SDK2、livox_ros_driver2 | MIT | 安装脚本下载 |
 | 仓库、货架、托盘和推车模型（Gazebo Fuel；OpenRobotics、MovAi） | CC BY-NC 4.0 / CC BY-NC-ND 4.0 | 由 `sim_robot/tools/fetch_fuel_models.sh` 下载；仅限非商业用途 |
 | 港科大 4 楼建筑模型（SLABIM，Huang 等，ICRA 2025） | 数据集未注明 | 用你自己下载的 SLABIM 生成，仓库里不包含 |

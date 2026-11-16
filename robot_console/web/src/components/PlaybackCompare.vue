@@ -3,11 +3,10 @@
      each estimate against a baseline run's estimate (matched by bag time). Runs with the same algorithm and rate
      give a repeatability line (mean ± std). Different bag parts only share the table. -->
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
 import type { EChartsCoreOption } from 'echarts/core'
-import { errorText } from '@/messages'
+import { useQuery } from '@/composables/useQuery'
 import { evalApi, type RunEntry, type RunEval, type RunTrajectory } from '@/evaluation/api'
 import { evalMessages } from '@/evaluation/messages'
 import { SERIES } from '@/evaluation/colors'
@@ -39,12 +38,15 @@ const comparable = computed(() => groups.value.filter((g) => g.runs.length >= 2)
 
 // ---------------- trajectories of the runs in comparable groups ----------------
 const trajs = reactive<Record<string, RunTrajectory>>({})
+const assetAbort = new AbortController()
+onBeforeUnmount(() => assetAbort.abort())
 watch(comparable, async (gs) => {
   for (const g of gs) {
     for (const r of g.runs.slice(0, SERIES.length)) {
       if (trajs[r.id]) continue
       try {
-        trajs[r.id] = await evalApi.trajectory(r.id)
+        const result = await evalApi.trajectory(r.id, assetAbort.signal)
+        if (!assetAbort.signal.aborted) trajs[r.id] = result
       } catch {
         // no estimate: the run is only in the table
       }
@@ -55,7 +57,9 @@ watch(comparable, async (gs) => {
 // ---------------- relative deviation per group ----------------
 const baselines = reactive<Record<string, string>>({})
 const relative = reactive<Record<string, { baseline: string; rows: { id: string; eval: RunEval | null; error: string | null }[] }>>({})
-const relBusy = ref('')
+const relativeQuery = useQuery()
+const relativeKey = ref('')
+const relBusy = computed(() => relativeQuery.loading.value ? relativeKey.value : '')
 watch(comparable, (gs) => {
   for (const g of gs) {
     if (!g.runs.some((r) => r.id === baselines[g.key])) baselines[g.key] = g.runs[0].id
@@ -65,15 +69,16 @@ watch(comparable, (gs) => {
       || rel.rows.length + 1 !== g.runs.length)) delete relative[g.key]
   }
 }, { immediate: true })
-async function computeRelative(g: Group) {
-  relBusy.value = g.key
-  try {
-    relative[g.key] = await evalApi.relative(g.runs.slice(0, MAX_RELATIVE).map((r) => r.id), baselines[g.key])
-  } catch (e) {
-    ElMessage.error(errorText(e))
-  } finally {
-    relBusy.value = ''
+watch(() => JSON.stringify(comparable.value.map(g => [g.key, baselines[g.key], g.runs.slice(0, MAX_RELATIVE).map(r => r.id)])), () => {
+  relativeQuery.cancel()
+  for (const g of comparable.value) {
+    if (relative[g.key]?.baseline !== baselines[g.key]) delete relative[g.key]
   }
+})
+async function computeRelative(g: Group) {
+  const ids = g.runs.slice(0, MAX_RELATIVE).map(r => r.id), baseline = baselines[g.key]
+  relativeKey.value = g.key
+  await relativeQuery.run(signal => evalApi.relative(ids, baseline, signal), result => { relative[g.key] = result })
 }
 
 const labels = computed(() => ({ start: t('evalPage.pb.chart.start'), end: t('evalPage.pb.chart.end') }))
@@ -159,6 +164,7 @@ const versus = (r: RunEntry) => {
       <el-table-column :label="t('evalPage.pb.compare.lagMax')" width="90" align="right">
         <template #default="{ row }"><span class="num">{{ row.playback.lag ? `${f1(row.playback.lag.max)} s` : '—' }}</span></template>
       </el-table-column>
+      <!-- @vue-generic {RunEntry} -->
       <el-table-column :label="t('evalPage.col.versus')" width="110" align="right">
         <template #default="{ row }"><span class="num">{{ versus(row) }}</span></template>
       </el-table-column>
@@ -188,6 +194,7 @@ const versus = (r: RunEntry) => {
         </el-button>
         <span v-if="g.runs.length > MAX_RELATIVE" class="dim">{{ t('evalPage.pb.compare.relativeCap', { n: MAX_RELATIVE }) }}</span>
       </div>
+      <p v-if="relativeKey === g.key && relativeQuery.error.value" class="bad">{{ relativeQuery.error.value }}</p>
       <template v-if="relative[g.key]">
         <h4 class="sub-title">{{ t('evalPage.pb.compare.relativeTitle', { id: relative[g.key].baseline }) }}</h4>
         <el-table :data="relative[g.key].rows" size="small" :row-key="(r: { id: string }) => r.id">
@@ -226,6 +233,9 @@ const versus = (r: RunEntry) => {
 </template>
 
 <style scoped>
+.pb-compare {
+  container: pb-compare / inline-size;
+}
 .sub-title {
   margin: 16px 0 6px;
   font-size: 12.5px;
@@ -325,7 +335,9 @@ figcaption {
 .facts dd {
   margin: 0;
 }
-@media (max-width: 1100px) {
+/* As in PlaybackDetail: not enough room for a readable height chart beside the trajectories, so it goes
+   under them at full width. The width of this block decides, not the window. */
+@container pb-compare (max-width: 900px) {
   .charts {
     grid-template-columns: minmax(0, 1fr);
   }

@@ -88,11 +88,27 @@ def main():
     threading.Thread(target=executor.spin, daemon=True).start()
 
     procs = ProcessManager(cfg['stacks'], cfg['server']['log_dir'], node, f'.running_{port}.json')
+    procs.set_exclusive(mapping.profiles)
+    # Recording follows the actual child process, independently of browser polling. A stop hook may
+    # still be processing GLIM's final trajectory after exit; it can update the already closed run.
+    def slam_running(name):
+        stack = procs.get(name)
+        return stack is not None and stack.proc is not None and stack.proc.poll() is None
+    mapping.is_running = slam_running
+    node.create_timer(0.5, mapping.finish_if_stopped)
     cleaned = procs.cleanup_orphans()
     if cleaned:
         node.get_logger().warn(f'已停止上次残留的进程：{", ".join(cleaned)}')
     from .playback import Playback
     playback = Playback(cfg, node, procs, mapping)
+    # Layered SLAM configuration: the console writes the parameter file of these stacks at every start
+    from .playback import SENSOR_PRESET
+    from .slam_config import SlamConfigs
+    slam_configs = SlamConfigs(cfg['mapping'], mapping.profiles, SENSOR_PRESET, node.get_logger(),
+                               config.Expander(cfg['paths']['data_root']))
+    for slam_name in slam_configs.specs:
+        if procs.get(slam_name) is not None:
+            procs.on_start(slam_name, lambda extra, preset, n=slam_name: slam_configs.start_args(n, extra, preset))
 
     def session_info():
         """当前场景预设和实际执行的命令，写进运行记录（run.json）和地图的 meta.json。"""
@@ -104,6 +120,9 @@ def main():
                 if key == 'sim':
                     info['preset'] = s.preset
         info.update(playback.session_info())   # bag, when the SLAM run was fed from a bag
+        slam_config = slam_configs.info(mapping.stacks.get('slam'))
+        if slam_config and 'slam_cmd' in info:
+            info['slam_config'] = slam_config      # the parameters this run uses and the layer of each
         return info
     mapping.run_info = session_info
     library = MapLibrary(cfg['mapping'], node, mapping, session_info, procs)
@@ -117,7 +136,7 @@ def main():
     nav_maps = NavigationMaps(cfg['mapping'].get('maps_dir', '~/maps'), SolidModels(cfg['presets']))
     navdata = NavigationData(node)
 
-    app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback)
+    app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs)
     node.get_logger().info(f'网页控制台：http://localhost:{port}（监听 {host}）')
     # Uvicorn replays shutdown signals after restoring the original handlers. SIGTERM's
     # default action terminates Python immediately, skipping this finally block. Convert

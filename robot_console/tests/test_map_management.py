@@ -92,8 +92,8 @@ class ManagementTests(unittest.TestCase):
         raw = response.read()
         return response.status, (json.loads(raw) if 'json' in response.headers.get('Content-Type', '') else raw)
 
-    def upload_cloud(self, name='cloud'):
-        code, body = self.request('POST', '/api/navigation/import', {'name': name},
+    def upload_cloud(self, name='cloud', auto_grid='0'):
+        code, body = self.request('POST', '/api/navigation/import', {'name': name, 'auto_grid': auto_grid},
             {'cloud_file': ('cloud.pcd', self.cloud.read_bytes())})
         self.assertEqual(code, 200, body)
         return body
@@ -102,6 +102,15 @@ class ManagementTests(unittest.TestCase):
         code, body = self.request('POST', f'/api/maps/{name}/regrid', params)
         self.assertEqual(code, 200, body)
         return body
+
+    def test_cloud_import_generates_grid_by_default(self):
+        result = self.upload_cloud('auto', auto_grid='1')
+        self.assertTrue(result['auto_grid']['ok'], result)
+        self.assertEqual(result['grid']['resolution'], 0.05)
+        code, detail = self.request('GET', '/api/maps/auto')
+        self.assertEqual(code, 200)
+        self.assertTrue(detail['navigable'])
+        self.assertTrue((self.root / 'auto' / 'map.yaml').exists())
 
     def test_cloud_import_preview_save_and_recycle(self):
         result = self.upload_cloud()

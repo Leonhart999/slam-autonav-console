@@ -12,9 +12,11 @@
 #   reference         optional {topic, label}: odometry in the bag (nav_msgs/Odometry) recorded as the run's reference
 #                     trajectory (ref.tum). It is not ground truth: the Evaluation page shows the deviation from it
 #                     separately from ATE.
+#   start_offset      optional s at the start of the bag that the Playback page skips by default (e.g. the robot
+#                     shakes while it is switched on, which spoils the SLAM's IMU initialisation)
 
 heu61:
-  label: {zh: HEU61 实车（前后两台雷达 + 前雷达内置 IMU）, en: HEU61 robot (front + rear lidar, front lidar's built-in IMU)}
+  label: {zh: HEU61 实车（前后两台雷达 + 前雷达内置 IMU）, en: "HEU61 robot (front + rear lidar, front lidar's built-in IMU)"}
   match: [/front_lidar, /rear_lidar, /front_lidar/imu]
   points: /front_lidar               # RoboSense, 96 rings, fields x y z intensity ring timestamp
   points2: /rear_lidar               # same model; scans share the front lidar's stamps (10 Hz)
@@ -24,6 +26,9 @@ heu61:
   imu_acc_unit: g
   # Wheel odometry of the robot's motion controller (~48 Hz). Planar and drifting, so only a reference.
   reference: {topic: /odom/mc_odom, label: {zh: 轮速里程计, en: wheel odometry}}
+  # The robot shakes for the first ~4.5 s; FAST-LIO initialises gravity from the first 10 IMU samples (0.05 s),
+  # which are then up to 8 deg off. From 5 s it stands still (2026-11-14 analysis, results/heu61_height_drift).
+  start_offset: 5
   # From the group's calibration_results.yaml (extrinsic_transforms), recorded 2026-10-31.
   # Checked on the first scans: ground plane normal (0.008, 0.005, 1.000) at z = -0.50 m,
   # gravity reaction (-0.02, 0.02, 1.00) g in base axes.
@@ -39,7 +44,7 @@ heu61:
     - [-0.004350188, 0.001756526, -0.999988995, -0.004420614]
     - [0.0, 0.0, 0.0, 1.0]
   # lidar_back_to_lidar_front from calibration_results.yaml, refined 2026-11-11 from the floor seen by both
-  # lidars in 40 scan pairs over the bag (D:/AI/scratch/heu61/calib/refine_rear.py): the calibrated value put the
+  # lidars in 40 scan pairs over the bag (floor-plane calibration fit): the calibrated value put the
   # rear floor 0.85 deg tilted and 1.6 cm low against the front floor, which made FAST-LIO
   # climb ~13 m on the first leg. Roll/pitch and height corrected; yaw and x/y are as calibrated.
   # Original: [[0.99983909, -0.01445223, -0.01062646, -0.00332108], [-0.01449000, -0.99988894, -0.00348621,
@@ -49,13 +54,21 @@ heu61:
     - [-0.025012601, -0.999680753, -0.003572401, -0.007892531]
     - [-0.000191291, 0.003578305, -0.99999358, -0.720335768]
     - [0.0, 0.0, 0.0, 1.0]
+  # imu_to_base from calibration_results.yaml, levelled 2026-11-14: standing still at 5-6 s the IMU's gravity
+  # (and the floor seen by the lidars) is 1.23 deg off the base z axis, so the SLAM's start frame (camera_init) was
+  # tilted and a level 170 m corridor gained ~3.6 m of height. Rotated so that gravity at 5-6 s is exactly +z.
+  # The sensor head really tilts by up to ~1.6 deg between the legs of the drive (IMU and floor agree), so this
+  # only levels the start. Original: [[-0.001603891156921, -0.00510939027353, -0.999985663874949, 0.361718237727878],
+  # [-1.000059913327676, 0.012369792381494, 0.00159768924537, 0.004205674593522],
+  # [0.001228799361362, 1.000048143000276, -0.005111040440324, -0.004208218875391], [0, 0, 0, 1]]
   imu_to_base:
-    - [-0.001603891156921, -0.00510939027353, -0.999985663874949, 0.361718237727878]
-    - [-1.000059913327676, 0.012369792381494, 0.00159768924537, 0.004205674593522]
-    - [0.001228799361362, 1.000048143000276, -0.005111040440324, -0.004208218875391]
+    - [-0.001659003, 0.004990718, -0.999986170, 0.361657691]
+    - [-0.999925697, -0.012084924, 0.001598589, 0.004318905]
+    - [-0.012076779, 0.999914520, 0.005010396, -0.007780862]
     - [0.0, 0.0, 0.0, 1.0]
   slam_args:
     mapping_fastlio: &fastlio_bag ['config_path:=${pkg:sim_robot}/config', config_file:=fastlio_bag.yaml]
     mapping_fastlio_ground: *fastlio_bag
     mapping_fastlio_lidar: &fastlio_bag_lidar ['config_path:=${pkg:sim_robot}/config', config_file:=fastlio_bag_lidar_only.yaml]
     mapping_fastlio_lidar_ground: *fastlio_bag_lidar
+    mapping_glim: []

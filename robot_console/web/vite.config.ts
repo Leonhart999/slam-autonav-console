@@ -2,11 +2,13 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import Components from 'unplugin-vue-components/vite'
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 const BACKEND = 'http://127.0.0.1:8000'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), Components({ dirs: [], dts: 'src/element-plus.d.ts', resolvers: [ElementPlusResolver()] })],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
@@ -20,6 +22,7 @@ export default defineConfig({
     },
   },
   build: {
-    chunkSizeWarningLimit: 2000, // Element Plus 整体引入后包比较大，本机使用不影响
+    manifest: true,
+    chunkSizeWarningLimit: 1000,
   },
 })

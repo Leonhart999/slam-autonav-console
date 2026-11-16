@@ -3,6 +3,7 @@
      Each card has a delete button (the bag moves to the trash of its folder); the dashed card at the end opens
      the upload dialog; the page puts its recycle bin (TrashBin) into the bar's "trash" slot. The page does the API calls. -->
 <script setup lang="ts">
+import { Refresh, Setting, Delete, Upload } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -22,7 +23,7 @@ const props = defineProps<{
   runCounts?: Record<string, number>
 }>()
 const selected = defineModel<string>({ required: true })
-defineEmits<{ refresh: []; upload: []; delete: [bag: BagInfo] }>()
+defineEmits<{ refresh: []; upload: []; delete: [bag: BagInfo]; sensor: [bag: BagInfo] }>()
 const { t } = useI18n()
 
 const scans = (b: BagInfo) => b.topics.filter((x) => b.points.includes(x.name)).reduce((n, x) => Math.max(n, x.count), 0)
@@ -57,6 +58,7 @@ const openRuns = (bag: string) => router.push({ path: '/evaluation', query: { ba
               <span class="tag" :class="{ off: !b.points.length }">{{ b.points.length ? b.points[0] : t('playback.bag.noCloud') }}</span>
               <span class="tag" :class="{ off: !b.imu.length }">{{ b.imu.length ? 'IMU' : t('playback.bag.noImu') }}</span>
               <span v-if="b.has_gt" class="tag">{{ t('playback.bag.gt') }}</span>
+              <span v-if="b.sensor" class="tag" :title="t('playback.bag.sensorTag')">{{ pick(b.sensor.label) }}</span>
               <span v-if="b.reference" class="tag" :title="b.reference.topic">{{ t('playback.bag.reference', { name: pick(b.reference.label) }) }}</span>
               <span v-if="!b.supported" class="tag bad">{{ t('playback.bag.storage', { storage: b.storage }) }}</span>
             </span>
@@ -66,6 +68,13 @@ const openRuns = (bag: string) => router.push({ path: '/evaluation', query: { ba
             </span>
           </span>
         </button>
+        <el-button
+          v-if="editable && b.supported" class="bag-sensor" circle text size="small"
+          :title="t('playback.bag.sensorSetup')" :aria-label="`${t('playback.bag.sensorSetup')} ${b.name}`"
+          :disabled="locked" @click="$emit('sensor', b)"
+        >
+          <el-icon><Setting /></el-icon>
+        </el-button>
         <el-button
           v-if="editable" class="bag-del" circle text size="small"
           :title="t('playback.bag.delete')" :aria-label="`${t('playback.bag.delete')} ${b.name}`"
@@ -120,17 +129,17 @@ const openRuns = (bag: string) => router.push({ path: '/evaluation', query: { ba
   font: inherit;
   text-align: left;
   color: inherit;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(var(--paper-rgb), 0.55);
   box-shadow: inset 0 0 0 1px var(--hairline);
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s;
 }
 .bag:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(var(--paper-rgb), 0.9);
 }
 .bag.on {
-  background: #fff;
-  box-shadow: inset 0 0 0 1.5px rgba(8, 145, 178, 0.55), 0 6px 16px -10px rgba(8, 145, 178, 0.7);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px rgba(var(--accent-rgb), 0.55), 0 6px 16px -10px rgba(var(--accent-rgb), 0.7);
 }
 .bag:disabled {
   cursor: not-allowed;
@@ -190,7 +199,7 @@ const openRuns = (bag: string) => router.push({ path: '/evaluation', query: { ba
   font-size: 11px;
   line-height: 18px;
   color: var(--accent);
-  background: rgba(8, 145, 178, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .tag.off {
   color: var(--ink-3);
@@ -219,7 +228,16 @@ const openRuns = (bag: string) => router.push({ path: '/evaluation', query: { ba
   position: relative;
 }
 .bag.deletable {
-  padding-right: 34px;
+  padding-right: 60px;
+}
+.bag-sensor {
+  position: absolute;
+  top: 5px;
+  right: 31px;
+  color: var(--ink-3);
+}
+.bag-sensor:hover:not(.is-disabled) {
+  color: var(--accent);
 }
 .bag-del {
   position: absolute;
@@ -237,7 +255,7 @@ const openRuns = (bag: string) => router.push({ path: '/evaluation', query: { ba
   border: 1px dashed rgba(122, 135, 157, 0.5);
 }
 .bag.upload:hover {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(var(--paper-rgb), 0.7);
 }
 .bag.upload .name {
   font-family: inherit;

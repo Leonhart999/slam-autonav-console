@@ -136,6 +136,10 @@ class Stack:
 class StackRunning(Exception):
     """进程已经在运行，不能重复启动。"""
 
+    def __init__(self, name):
+        super().__init__(name)
+        self.name = name
+
 
 class ProcessManager:
 
@@ -145,6 +149,8 @@ class ProcessManager:
         self._node = node           # 用来调用 before_stop 里的服务
         self._lock = threading.Lock()
         self._after_stop = {}       # stack name -> [fn(stack)], run in stop() after the process group is gone
+        self._before_start = {}     # stack name -> fn(extra_args, preset) -> extra_args, see on_start()
+        self._exclusive_groups = []
         os.makedirs(log_dir, exist_ok=True)
         self._state_path = os.path.join(log_dir, state_file)
 
@@ -152,8 +158,21 @@ class ProcessManager:
         """Call fn(stack) after a console-initiated stop of `name` has finished (e.g. collect GLIM's dump)."""
         self._after_stop.setdefault(name, []).append(fn)
 
+    def on_start(self, name, fn):
+        """Call fn(extra_args, preset) -> extra_args before every start of `name`, whoever starts it (a page,
+        a batch): e.g. write the SLAM's parameter file and point the command at it. An exception aborts the
+        start."""
+        self._before_start[name] = fn
+
     def get(self, name):
         return self._stacks.get(name)
+
+    def set_exclusive(self, names):
+        """Stacks sharing a resource: checking the group and starting must hold the same lock."""
+        group = frozenset(names) & self._stacks.keys()
+        with self._lock:
+            if group and group not in self._exclusive_groups:
+                self._exclusive_groups.append(group)
 
     def status(self):
         with self._lock:
@@ -166,6 +185,13 @@ class ProcessManager:
         with self._lock:
             if s.state() in ('running', 'stopping'):
                 raise StackRunning(name)
+            for group in self._exclusive_groups:
+                if name in group:
+                    for other in sorted(group - {name}):
+                        if self._stacks[other].state() in ('running', 'stopping'):
+                            raise StackRunning(other)
+            if name in self._before_start:
+                extra_args = self._before_start[name](list(extra_args or []), preset)
             stamp = time.strftime('%Y%m%d_%H%M%S')
             s.log_path = os.path.join(self._log_dir, f'{name}_{stamp}.log')
             env = dict(os.environ, RCUTILS_COLORIZED_OUTPUT='0', PYTHONUNBUFFERED='1')

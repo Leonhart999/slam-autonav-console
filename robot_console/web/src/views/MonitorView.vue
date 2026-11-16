@@ -216,7 +216,8 @@ const kpis = computed(() => {
       <!-- 进程 -->
       <GlassPanel :title="t('monitor.processes')" flush>
         <el-table :data="s.stacks" size="small">
-          <el-table-column :label="t('monitor.col.name')" width="180">
+          <!-- @vue-generic {StackInfo} -->
+        <el-table-column :label="t('monitor.col.name')" width="180">
             <template #default="{ row }">
               <el-tooltip :content="row.cmd" placement="top-start">
                 <div class="proc">
@@ -226,22 +227,26 @@ const kpis = computed(() => {
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column :label="t('monitor.col.description')" min-width="220">
+          <!-- @vue-generic {StackInfo} -->
+        <el-table-column :label="t('monitor.col.description')" min-width="220">
             <template #default="{ row }"><span class="desc">{{ pick(row.description) }}</span></template>
           </el-table-column>
-          <el-table-column :label="t('monitor.col.state')" width="110">
+          <!-- @vue-generic {StackInfo} -->
+        <el-table-column :label="t('monitor.col.state')" width="110">
             <template #default="{ row }">
               <span class="chip" :class="[STATE_TAG[row.state as StackState], { live: row.state === 'running' }]">
                 {{ t(`monitor.state.${row.state}`) }}
               </span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('monitor.col.uptime')" width="96">
+          <!-- @vue-generic {StackInfo} -->
+        <el-table-column :label="t('monitor.col.uptime')" width="96">
             <template #default="{ row }">
               <span class="mono">{{ fmtDuration(row.uptime) }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('monitor.col.result')" min-width="130">
+          <!-- @vue-generic {StackInfo} -->
+        <el-table-column :label="t('monitor.col.result')" min-width="130">
             <template #default="{ row }">
               <template v-if="lastStop(row)">
                 <!-- A stop from the console that ended at SIGINT is normal, whatever the exit code (-2, 1, ...) -->
@@ -254,7 +259,8 @@ const kpis = computed(() => {
               <span v-for="(m, i) in row.messages" :key="i" class="msg">{{ resultText(m) }}</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('monitor.col.actions')" width="210">
+          <!-- @vue-generic {StackInfo} -->
+        <el-table-column :label="t('monitor.col.actions')" width="210">
             <template #default="{ row }">
               <el-button
                 size="small" type="primary" :loading="busy[row.name]"
@@ -277,14 +283,18 @@ const kpis = computed(() => {
         <GlassPanel :title="t('monitor.topics')" flush>
           <template #extra><span class="count mono">{{ s.topics.length }}</span></template>
           <el-table :data="s.topics" size="small">
-            <el-table-column :label="t('monitor.col.topic')" min-width="150">
+            <!-- @vue-generic {TopicInfo} -->
+        <el-table-column :label="t('monitor.col.topic')" min-width="150">
               <template #default="{ row }"><span class="mono topic">{{ row.name }}</span></template>
             </el-table-column>
-            <el-table-column :label="t('monitor.col.type')" min-width="120" show-overflow-tooltip>
+            <!-- @vue-generic {TopicInfo} -->
+        <el-table-column :label="t('monitor.col.type')" min-width="120" show-overflow-tooltip>
               <template #default="{ row }"><span class="mono type">{{ shortType(row.type) }}</span></template>
             </el-table-column>
-            <el-table-column prop="publishers" :label="t('monitor.col.publishers')" width="64" align="center" />
-            <el-table-column :label="t('monitor.col.hzExpected')" width="120" align="right">
+            <!-- @vue-generic {TopicInfo} -->
+        <el-table-column prop="publishers" :label="t('monitor.col.publishers')" width="64" align="center" />
+            <!-- @vue-generic {TopicInfo} -->
+        <el-table-column :label="t('monitor.col.hzExpected')" width="120" align="right">
               <template #default="{ row }">
                 <div class="rate mono">
                   <b>{{ row.hz.toFixed(1) }}</b><span class="dim"> / {{ row.expected_hz ?? '—' }}</span>
@@ -294,7 +304,8 @@ const kpis = computed(() => {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column :label="t('monitor.col.state')" width="124">
+            <!-- @vue-generic {TopicInfo} -->
+        <el-table-column :label="t('monitor.col.state')" width="124">
               <template #default="{ row }">
                 <span class="chip" :class="topicTag(row)[1]">{{ topicTag(row)[0] }}</span>
               </template>
@@ -306,19 +317,22 @@ const kpis = computed(() => {
         <GlassPanel :title="t('monitor.tf')" flush>
           <template #extra><span class="count mono">{{ tfRows.length }}</span></template>
           <el-table :data="tfRows" size="small">
-            <el-table-column :label="t('monitor.col.edge')" min-width="190">
+            <!-- @vue-generic {TfEdge & { expected: boolean }} -->
+        <el-table-column :label="t('monitor.col.edge')" min-width="190">
               <template #default="{ row }">
                 <span class="mono edge">{{ row.parent }}<i class="arrow">→</i>{{ row.child }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('monitor.col.source')" width="84">
+            <!-- @vue-generic {TfEdge & { expected: boolean }} -->
+        <el-table-column :label="t('monitor.col.source')" width="84">
               <template #default="{ row }">
                 <span :class="{ dim: !row.expected }">
                   {{ row.expected ? t('monitor.tfSource.config') : t('monitor.tfSource.other') }}
                 </span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('monitor.col.state')" width="120">
+            <!-- @vue-generic {TfEdge & { expected: boolean }} -->
+        <el-table-column :label="t('monitor.col.state')" width="120">
               <template #default="{ row }">
                 <span class="chip" :class="tfTag(row)[1]">{{ tfTag(row)[0] }}</span>
               </template>
@@ -394,7 +408,7 @@ const kpis = computed(() => {
   font-size: 11.5px;
   text-align: center;
   color: var(--accent);
-  background: rgba(8, 145, 178, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 .proc {
   display: flex;
@@ -468,7 +482,7 @@ const kpis = computed(() => {
   border-radius: 8px;
   font-size: 12px;
   color: var(--ink-2);
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(var(--paper-rgb), 0.7);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
 .log {

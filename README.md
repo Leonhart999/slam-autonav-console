@@ -3,11 +3,12 @@
 English | [中文](README.zh-CN.md)
 
 A browser console for LiDAR SLAM mapping, map management, Nav2 autonomous navigation and trajectory
-evaluation, running on ROS 2 Humble with a Gazebo Fortress simulation. One page takes you from an empty
-world to a saved map, a navigation run and an evo report.
+evaluation, running on ROS 2 Humble with a Gazebo Fortress simulation. One workspace takes you from an empty
+world or a recorded rosbag2 to a saved map, a navigation run and an evo report.
 
 It was built for the bachelor thesis *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile
-Robots* (Harbin Engineering University). The interface is bilingual (中文 / English).
+Robots* (Harbin Engineering University). The interface supports Chinese and English, as well as light and
+dark themes.
 
 [![Video tour of the console, 2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 
@@ -20,16 +21,20 @@ mission in the warehouse, the monitor and evaluation pages. Captions in Chinese 
 
 | Page | What it does |
 |---|---|
-| **Mapping** | Start a world (office, warehouse, or your own uploaded SDF / ZIP), run FAST-LIO2 or GLIM, watch the voxel map grow in a 3D view, drive with an on-screen joystick / WASD or a waypoint route, save the map |
-| **Playback** | Play a rosbag2 bag (or a chosen part of it, 0.5–8x) into FAST-LIO2, GLIM or GLIM (LiDAR only) and save the map like a live run; upload bags from the browser, delete them to a trash. `robot_console/tools/pcd_frames_to_bag.py` turns per-frame PCD exports into a bag |
-| **Maps** | Browse saved maps (3D point cloud + 2D grid side by side), regenerate the 2D grid from the cloud with other parameters, edit the grid with a brush, import maps, trash and restore |
-| **Navigation** | Load a map, start the simulation and Nav2, set the initial pose and goals on the map, run multi-waypoint missions, overlay global / local costmaps, change the speed factor, switch between point cloud and solid world model. A map built from a bag gets a simulation world either by linking the world the bag was recorded in or by generating one from its own occupancy grid |
-| **Evaluation** | ATE / RPE of mapping runs with evo, navigation metrics (success rate, time, path length, goal error, AMCL error, clearance), comparisons, repeated batch experiments with mean ± std, CSV / PNG export |
+| **Mapping** | Start a world (office, warehouse, or your own uploaded SDF / ZIP), run FAST-LIO2 (with optional LiDAR-only and ground-vehicle constraint switches) or GLIM, inspect and tune parameters in the **Parameters** dialog, watch the voxel map grow in 3D, drive with an on-screen joystick / WASD or a waypoint route, save the map |
+| **Playback** | Play a rosbag2 bag (or a chosen part of it, 0.5–8×) into FAST-LIO2, GLIM or GLIM (LiDAR only); auto-probe and configure real-robot topics, per-point time fields, acceleration units and extrinsics in the browser (**Sensor setup**), skip shaking starts (`start_offset`), record raw scans (**Save raw scans**), tune derived / user SLAM parameters, upload and trash bags |
+| **Maps** | Browse saved maps (3D point cloud + 2D grid side by side), auto-generate a navigable 2D grid when importing a cloud-only `.pcd`, regenerate the 2D grid by cloud projection or **Scan evidence** (filtering moving objects), edit the grid with a brush, trash and restore |
+| **Navigation** | Load a map, start the simulation and Nav2 (with selectable parameter variants), set the initial pose and goals on the map, run multi-waypoint missions, overlay global / local costmaps, change the speed factor, switch between point cloud and solid world model, and link or generate a world for maps built from bags |
+| **Evaluation** | Separate records for mapping, navigation and playback; evo ATE / RPE, navigation metrics, start-to-end / closure / reference-odometry deviation and SLAM lag for playback; **Side by side** or **Stacked** view; multi-run and batch comparisons with mean ± std, user-parameter badges, CSV / PNG export |
 | **Monitor** | Processes started from the console, topic rates against expected rates, TF chain, node list, how each process was stopped |
 
-Every run is recorded: mapping runs keep the estimated and ground-truth trajectories, navigation runs keep
-per-goal results, the AMCL error over time and figures. A saved map is a folder with the full point cloud,
-a Nav2 `map.yaml` / `map.pgm`, figures and metadata.
+Long-running operations (2D grid regeneration, evo evaluation, relative trajectory comparison, report export)
+run through the **Background tasks** drawer in the header so their progress survives page navigation and can
+be recovered or retried. Light and dark appearances can be switched from the bottom of the sidebar.
+
+Every run is recorded: mapping and playback runs keep trajectories, lag logs and the effective layered SLAM
+configuration (`slam_config`); navigation runs keep per-goal results, AMCL error over time and figures. A
+saved map is a folder with the full point cloud, a Nav2 `map.yaml` / `map.pgm`, figures and metadata.
 
 <p>
   <img src="robot_console/docs/images/mapping.png" width="49%" alt="Mapping page with FAST-LIO2 running in the warehouse world">
@@ -46,6 +51,8 @@ Browser (Vue 3, Three.js, ECharts)  <-- HTTP + WebSocket, 127.0.0.1:8000 -->  ro
 
 - The backend starts the simulation, SLAM and navigation as separate process groups from a whitelist
   (`robot_console/config/stacks.yaml`); the page can only name a stack, never pass a command line.
+- SLAM parameter files are assembled per run in layers (`base -> input -> derived -> options -> console -> user`
+  from `robot_console/config/slam/`) and recorded in `run.json`.
 - Point clouds are voxelized in the backend and streamed as binary deltas, so the browser draws a large
   map at full frame rate (rviz2 under WSLg managed about 3 fps with the accumulated map).
 - Teleoperation stops the robot after 0.5 s without commands and when the page disconnects; E-STOP sends
@@ -79,26 +86,31 @@ page, start the simulation and navigation there, and click a goal on the 2D grid
 ### Optional parts
 
 - **GLIM** (factor-graph SLAM with loop closure): install `ros-humble-glim-ros` from the author's PPA, see
-  <https://koide3.github.io/glim/installation.html>. The configuration for the simulated 16-line lidar is in
-  `sim_robot/config/glim`.
+  <https://koide3.github.io/glim/installation.html>. The base configuration for the simulated 16-line lidar is
+  in `sim_robot/config/glim`; the console applies layered overrides on top of it (`robot_console/config/slam/glim.yaml`).
 - **HKUST 4F west world** (long corridors, built from the SLABIM BIM): download the
   [SLABIM dataset](https://github.com/HKUST-Aerial-Robotics/SLABIM), then
   `bash sim_robot/tools/make_hkust_models.sh /path/to/SLABIM` and
   `colcon build --packages-select sim_robot`. The scene appears on the Mapping page afterwards.
+- **Offline planar loop back-end** (post-processing for FAST-LIO2 recordings on flat single-floor maps):
+  install `robot_console/install/requirements-loop.txt` into a separate Python environment so system GLIM / GTSAM
+  stays untouched, then use `fastlio_loop_record`, `fastlio_loop` and `fastlio_loop_export`. See
+  [robot_console/docs/fastlio-loop-backend.md](robot_console/docs/fastlio-loop-backend.md).
 
 ### Configuration
 
 Machine-specific settings go in `~/.config/robot_console/console.yaml`; only the keys you change are needed
-(example: `robot_console/config/user_console.example.yaml`). Maps, run records, logs and exports live
-under `~/robot_console_data` by default.
+(example: `robot_console/config/user_console.example.yaml`). Maps, run records, logs, bags, browser-created
+sensor profiles, parameter overrides and exports live under `~/robot_console_data` by default.
 
 ## Repository layout
 
 | Folder | ROS 2 package | Contents |
 |---|---|---|
-| `robot_console/` | `robot_console` | the console: backend, frontend (`web/`), configuration, installer, tests |
+| `robot_console/` | `robot_console` | the console: backend, frontend (`web/`), layered SLAM specs, installer, tests |
 | `sim_robot/` | `sim_robot` | Gazebo worlds, the diff-drive robot (16-line lidar, IMU, ground truth), cloud adapter, waypoint driver, FAST-LIO2 / GLIM configuration |
 | `lidar_nav/` | `lidar_nav` | Nav2 launch and parameter variants, 3D → 2D map projection, navigation test tools |
+| `docker/` | — | Dockerfile, entrypoint, container configuration and offline prefetch guide |
 
 ## Limitations
 
@@ -106,6 +118,11 @@ under `~/robot_console_data` by default.
   stacks and topic configuration. Real-robot data can be mapped from a bag on the Playback page (sqlite3
   storage; MCAP needs `ros-humble-rosbag2-storage-mcap`) and navigated in a world generated from the map,
   where the simulated lidar sees ideal walls.
+- Sensor profiles created in the browser configure FAST-LIO2 and GLIM (with IMU); `GLIM (LiDAR only)` does
+  not use sensor profiles yet. Scan-end-stamped lidars with negative per-point offsets (e.g. Velodyne) are
+  warned during probing and clamped to 0 in the sensor adapter.
+- The offline planar loop back-end assumes an approximately horizontal single floor and runs via CLI rather
+  than an online button in the UI.
 - No offline trajectory import yet.
 - Tested on Ubuntu 22.04 + ROS 2 Humble (x86_64) only.
 - Saving a map with GLIM stops the GLIM run, because GLIM writes its optimized map on exit.
@@ -114,7 +131,7 @@ under `~/robot_console_data` by default.
 
 | Component | Licence | How it gets onto your machine |
 |---|---|---|
-| [FAST_LIO](https://github.com/hku-mars/FAST_LIO), ikd-Tree | GPL-2.0 | downloaded by the installer; `robot_console/install/patches/fast_lio-thesis.patch` switches the cloud subscription to reliable QoS and adds a LiDAR-only mode and the ground-vehicle constraint |
+| [FAST_LIO](https://github.com/hku-mars/FAST_LIO), ikd-Tree | GPL-2.0 | downloaded by the installer; `robot_console/install/patches/fast_lio-thesis.patch` switches the cloud subscription to reliable QoS and adds a LiDAR-only mode, ground-vehicle constraint, ring bounds check and deeper IMU queue |
 | Livox-SDK2, livox_ros_driver2 | MIT | downloaded by the installer |
 | Warehouse, shelf, pallet and cart models (Gazebo Fuel; OpenRobotics, MovAi) | CC BY-NC 4.0 / CC BY-NC-ND 4.0 | downloaded by `sim_robot/tools/fetch_fuel_models.sh`; non-commercial use only |
 | HKUST 4F building model (SLABIM, Huang et al., ICRA 2025) | not stated by the dataset | built from your own SLABIM download; not included |

@@ -1,28 +1,12 @@
 // REST 接口封装。后端出错时返回 {code, params}，这里包装成 ApiError；
 // 显示给用户的文字用 messages.ts 里的 errorText() 按当前语言生成
-import type { CodedMsg, MapSceneInfo, MappingPreset, NavMap, NavMission, NavSolid, NavStatus, PickedPose, StackInfo } from './types'
-import type { BagInfo, PlaybackStatus, BagTrash, PlaybackStorage } from './mapping/stream'
+import type { MapSceneInfo, MappingPreset, NavMap, NavMission, NavSolid, NavStatus, PickedPose, StackInfo } from './types'
+import type { BagInfo, PlaybackStatus, BagTrash, PlaybackStorage, SensorProbe, SensorProfileForm } from './mapping/stream'
+import type { SlamConfigInfo } from './mapping/slamConfig'
 
-export class ApiError extends Error {
-  readonly coded: CodedMsg
-  constructor(coded: CodedMsg) {
-    super(coded.code)
-    this.coded = coded
-  }
-}
-
-async function request<T>(method: string, path: string, json?: unknown): Promise<T> {
-  const res = await fetch(path, json === undefined ? { method } : {
-    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(json),
-  })
-  const body = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const d = body.detail
-    if (d && typeof d === 'object' && 'code' in d) throw new ApiError(d as CodedMsg)
-    throw new ApiError({ code: 'unknown', params: { reason: String(d ?? `${res.status} ${res.statusText}`) } })
-  }
-  return body as T
-}
+export { ApiError, fetchAsset } from './http'
+import { ApiError, request, responseError, RequestCancelled, TIMEOUTS, validResponse } from './http'
+import type { RequestOptions } from './http'
 
 export interface UploadProgress {
   loaded: number
@@ -38,7 +22,11 @@ function upload<T>(
   path: string, data: FormData | Blob, onProgress: UploadProgressHandler, method = 'POST', signal?: AbortSignal,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new RequestCancelled()); return }
     const xhr = new XMLHttpRequest()
+    const cancel = () => xhr.abort()
+    const cleanup = () => signal?.removeEventListener('abort', cancel)
+    const fail = (error: unknown) => { cleanup(); reject(error) }
     let loaded = 0
     let total: number | null = null
     xhr.open(method, path)
@@ -48,27 +36,19 @@ function upload<T>(
       onProgress({ loaded, total, sent: false })
     }
     xhr.upload.onload = () => onProgress({ loaded, total, sent: true })
+    xhr.timeout = TIMEOUTS.upload
     xhr.onload = () => {
       let body: unknown
-      try {
-        body = JSON.parse(xhr.responseText)
-      } catch {
-        reject(new ApiError({ code: 'import_failed', params: { reason: `${xhr.status} ${xhr.statusText}` } }))
-        return
-      }
-      if (xhr.status < 200 || xhr.status >= 300) {
-        const d = body && typeof body === 'object' && 'detail' in body ? body.detail : undefined
-        reject(new ApiError(d && typeof d === 'object' && 'code' in d
-          ? d as CodedMsg
-          : { code: 'import_failed', params: { reason: String(d ?? `${xhr.status} ${xhr.statusText}`) } }))
-        return
-      }
-      resolve(body as T)
+      try { body = JSON.parse(xhr.responseText) }
+      catch { fail(new ApiError({ code: 'response_invalid', params: { path } })); return }
+      if (xhr.status < 200 || xhr.status >= 300) { fail(responseError(body, xhr.status, xhr.statusText)); return }
+      if (!validResponse(path, body)) { fail(new ApiError({ code: 'response_invalid', params: { path } })); return }
+      cleanup(); resolve(body as T)
     }
-    // 网络中断时后端可能仍在处理，提示先确认结果再重试，避免重复上传。
-    xhr.onerror = () => reject(new ApiError({ code: 'import_network', params: {} }))
-    xhr.onabort = () => reject(new ApiError({ code: 'import_network', params: {} }))
-    signal?.addEventListener('abort', () => xhr.abort())
+    xhr.onerror = () => fail(new ApiError({ code: 'import_network', params: {} }))
+    xhr.onabort = () => fail(new RequestCancelled())
+    xhr.ontimeout = () => fail(new ApiError({ code: 'request_timeout', params: { seconds: TIMEOUTS.upload / 1000 } }))
+    signal?.addEventListener('abort', cancel, { once: true })
     onProgress({ loaded: 0, total: null, sent: false })
     xhr.send(data)
   })
@@ -106,7 +86,7 @@ export const api = {
   stackLog: (name: string, lines = 300) =>
     request<{ name: string; text: string }>('GET', `/api/stacks/${encodeURIComponent(name)}/log?lines=${lines}`),
   estop: () => request<{ cancelled_actions: string[]; stopped_stacks: string[] }>('POST', '/api/estop'),
-  navigationMaps: () => request<NavMap[]>('GET', '/api/navigation/maps'),
+  navigationMaps: (signal?: AbortSignal) => request<NavMap[]>('GET', '/api/navigation/maps', undefined, { signal }),
   /** Simulation scene of a map without a recorded one (bag playback / imported maps), see map_scene.py */
   mapScene: (map: string) =>
     request<MapSceneInfo>('GET', `/api/navigation/maps/${encodeURIComponent(map)}/scene`),
@@ -117,7 +97,7 @@ export const api = {
     request<MapSceneInfo>('DELETE', `/api/navigation/maps/${encodeURIComponent(map)}/scene`),
   generateMapScene: (map: string, height: number) =>
     request<MapSceneInfo>('POST', `/api/navigation/maps/${encodeURIComponent(map)}/scene/generate?height=${height}`),
-  navigationStatus: () => request<NavStatus>('GET', '/api/navigation/status'),
+  navigationStatus: (signal?: AbortSignal) => request<NavStatus>('GET', '/api/navigation/status', undefined, { signal }),
   startNavigation: (name: string, variant?: string) =>
     request<StackInfo>('POST', `/api/navigation/start?name=${encodeURIComponent(name)}` +
       (variant ? `&variant=${encodeURIComponent(variant)}` : '')),
@@ -135,13 +115,13 @@ export const api = {
     request<{ goals: PickedPose[]; saved: string | null }>('PUT', `/api/navigation/maps/${encodeURIComponent(map)}/goals`, { goals }),
   cancelGoal: () => request<unknown>('POST', '/api/navigation/cancel'),
   setNavSpeed: (scale: number) => request<unknown>('POST', `/api/navigation/speed?scale=${scale}`),
-  navigationSolid: (name: string) =>
-    request<NavSolid>('GET', `/api/navigation/maps/${encodeURIComponent(name)}/solid`),
+  navigationSolid: (name: string, signal?: AbortSignal) =>
+    request<NavSolid>('GET', `/api/navigation/maps/${encodeURIComponent(name)}/solid`, undefined, { signal }),
   /** Bag playback on the playback page (robot_console/playback.py); begin / end: part of the bag in s */
   playbackBags: () => request<{ roots: string[]; bags: BagInfo[] }>('GET', '/api/playback/bags'),
-  startPlayback: (bag: string, rate: number, begin = 0, end?: number) =>
+  startPlayback: (bag: string, rate: number, begin = 0, end?: number, saveScans = false) =>
     request<PlaybackStatus>('POST', `/api/playback/start?bag=${encodeURIComponent(bag)}&rate=${rate}&begin=${begin}` +
-      (end != null ? `&end=${end}` : '')),
+      (end != null ? `&end=${end}` : '') + (saveScans ? '&save_scans=true' : '')),
   pausePlayback: (paused: boolean) => request<PlaybackStatus>('POST', `/api/playback/pause?paused=${paused}`),
   setPlaybackRate: (rate: number) => request<PlaybackStatus>('POST', `/api/playback/rate?rate=${rate}`),
   stopPlayback: () => request<PlaybackStatus>('POST', '/api/playback/stop'),
@@ -162,19 +142,24 @@ export const api = {
     request<{ restored: string; name: string }>('POST', `/api/playback/trash/restore?id=${encodeURIComponent(id)}`),
   purgeBag: (id: string) => request<{ freed: number }>('DELETE', `/api/playback/trash/item?id=${encodeURIComponent(id)}`),
   emptyBagTrash: () => request<{ freed: number }>('DELETE', '/api/playback/trash'),
+  /** Sensor setup of a bag (robot_console/sensor_profiles.py) */
+  sensorProfiles: () => request<SensorProfileForm[]>('GET', '/api/playback/sensor_profiles'),
+  probeSensors: (bag: string) =>
+    request<SensorProbe>('POST', `/api/playback/sensor_profiles/probe?bag=${encodeURIComponent(bag)}`),
+  createSensorProfile: (bag: string, form: SensorProfileForm) =>
+    request<SensorProfileForm>('POST', `/api/playback/sensor_profiles?bag=${encodeURIComponent(bag)}`, form),
+  updateSensorProfile: (bag: string, form: SensorProfileForm) =>
+    request<SensorProfileForm>('PUT',
+      `/api/playback/sensor_profiles/${encodeURIComponent(form.name)}?bag=${encodeURIComponent(bag)}`, form),
+  deleteSensorProfile: (name: string) =>
+    request<{ name: string }>('DELETE', `/api/playback/sensor_profiles/${encodeURIComponent(name)}`),
+  /** Parameters of a SLAM stack (robot_console/slam_config.py); bag: the Playback page's bag, null for the simulation */
+  slamConfig: (stack: string, bag: string | null, options: RequestOptions<SlamConfigInfo> = {}) =>
+    request<SlamConfigInfo>('GET', `/api/slam_config/${encodeURIComponent(stack)}${bag ? `?bag=${encodeURIComponent(bag)}` : ''}`, undefined, options),
+  saveSlamConfig: (stack: string, bag: string | null, values: Record<string, number | boolean>) =>
+    request<SlamConfigInfo>('PUT',
+      `/api/slam_config/${encodeURIComponent(stack)}${bag ? `?bag=${encodeURIComponent(bag)}` : ''}`, { values }),
   /** Open a data folder in the desktop file manager of the machine running the console (open_folder.py) */
   openFolder: (path: string) =>
     request<{ path: string; opened: string }>('POST', `/api/open-folder?path=${encodeURIComponent(path)}`),
-}
-
-/** Binary or image map assets; throws ApiError like request() */
-export async function fetchAsset(path: string, signal: AbortSignal): Promise<Response> {
-  const res = await fetch(path, { signal })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    const d = body.detail
-    if (d && typeof d === 'object' && 'code' in d) throw new ApiError(d as CodedMsg)
-    throw new ApiError({ code: 'unknown', params: { reason: `${res.status} ${res.statusText}` } })
-  }
-  return res
 }

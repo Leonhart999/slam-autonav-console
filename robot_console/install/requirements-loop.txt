@@ -1,0 +1,8 @@
+# Optional offline planar loop back-end; isolate it from ROS/GLIM and the console venv.
+# Supported tested environment: Python 3.10, Ubuntu 22.04, x86_64.
+numpy==1.26.4
+scipy==1.15.3
+gtsam==4.2
+small_gicp==1.0.1
+matplotlib==3.10.9
+PyYAML>=6,<7

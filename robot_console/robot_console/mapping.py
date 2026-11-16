@@ -146,6 +146,9 @@ def slam_profiles(cfg):
             # one algorithm button for the base profile and a switch per option
             'variant_of': p.get('variant_of') if p.get('variant_of') in raw else None,
             'options': _variant_options(p) if p.get('variant_of') in raw else [],
+            # Layered configuration (slam_config.py): the specification file the console builds this stack's
+            # parameter file from at every start; None = the stack runs the file named in its own command
+            'config': p.get('config') or None,
         }
     return out
 
@@ -172,6 +175,7 @@ class MappingData:
         # 运行记录：每次建图（每个 epoch）一条，见 runs.py。run_info 由 main 设置，返回场景、命令等信息
         self.recorder = RunRecorder(cfg.get('runs_dir', '~/runs'), self._log, background=True)
         self.run_info = lambda: {}
+        self.is_running = lambda name: True   # main binds this to the selected stack's lifecycle
         self._run_slam = {}                 # run id -> (SLAM stack name, wall time first seen)
         self._clear()
         self._pubs = {'scan': 0, 'odom': 0}  # 各话题的发布者数量，见 _count_publishers
@@ -256,8 +260,11 @@ class MappingData:
 
     def _clear(self):
         """开始新一次建图：清空所有数据，epoch 加 1，网页看到新 epoch 会清空画面。调用者持有锁。"""
-        if self.recorder.run_id:
+        if self.recorder.run_id or self.recorder.pending:
             self.recorder.end(**self._summary())
+        self._finished = False
+        self._last_run = None
+        self._slot = None
         self.epoch += 1
         self._keys = set()                  # 已有体素的编号
         self._map = PointBuffer(65536)      # 体素中心，顺序 = 出现顺序，网页按偏移量增量接收
@@ -281,11 +288,34 @@ class MappingData:
         with self._lock:
             self._clear()
 
+    def _finish(self):
+        """Close the recording, retaining the displayed map and its run for a later map save. Lock held."""
+        if self._finished:
+            return
+        self._note_run()
+        self._last_run = self.recorder.run_id
+        self.recorder.end(**self._summary())
+        self._finished = True
+        self._slot = None
+
+    def finish_if_stopped(self):
+        """Timer and data callbacks use the same lifecycle check, including unexpected process exits."""
+        with self._lock:
+            if not self.is_running(self.stacks['slam']):
+                self._finish()
+
+    def keep_run(self):
+        """A GLIM map save keeps even a stationary run before stopping the process."""
+        with self._lock:
+            run = self.recorder.commit()
+            self._note_run()
+            return run
+
     def close(self):
         """控制台退出时：结束当前运行记录。"""
         with self._lock:
             self._closed = True
-            if self.recorder.run_id:
+            if self.recorder.run_id or self.recorder.pending:
                 self.recorder.end(**self._summary())
         self._wake.set()
         self._thread.join()
@@ -314,19 +344,23 @@ class MappingData:
     def export_run(self, directory):
         """Queue a consistent snapshot, then wait outside the mapping lock."""
         with self._lock:
-            run = self.recorder.commit()   # a saved map keeps its run even if the robot barely moved
+            if not self.is_running(self.stacks['slam']):
+                self._finish()
+            run = self._last_run if self._finished else self.recorder.commit()
             if run is None:
                 return None
             self._note_run()
             self.recorder.update(force=True, **self._summary())
-            copied = self.recorder.export(directory)
+            copied = self.recorder.export(directory, run)
         copied.result()
         return run
 
     def add_map_to_run(self, name):
         """保存地图后，在当前运行记录里登记（运行记录的文件也被 ROS 回调写，所以要持有锁）。"""
         with self._lock:
-            self.recorder.add_map(name)
+            result = self.recorder.add_map(name, self._last_run if self._finished else None)
+        if hasattr(result, 'result'):
+            result.result()
 
     # ======================= 点云 =======================
 
@@ -334,6 +368,11 @@ class MappingData:
         if topic is not None and topic != self.topics['scan']:
             return                          # another SLAM algorithm's topic
         with self._lock:
+            if not self.is_running(self.stacks['slam']):
+                self._finish()
+                return
+            if self._finished:
+                return
             self._slot = msg
         self._wake.set()
 
@@ -381,7 +420,10 @@ class MappingData:
         scan_frame = encode({'type': 'scan', 'epoch': epoch, 'count': len(scan)}, scan)
 
         with self._lock:
-            if epoch != self.epoch:         # 处理期间已经开始了新一次建图，丢掉
+            if not self.is_running(self.stacks['slam']):
+                self._finish()
+                return
+            if epoch != self.epoch or self._finished:
                 return
             self._scan_seq += 1
             self._scan = (self._scan_seq, scan_frame)
@@ -403,6 +445,11 @@ class MappingData:
         yaw = yaw_of(msg.pose.pose.orientation)
         now = time.monotonic()
         with self._lock:
+            if not self.is_running(self.stacks['slam']):
+                self._finish()
+                return
+            if self._finished:
+                self._clear()
             if self._t_last is not None and self._pubs['odom'] <= 1:
                 # 新一次建图的两种迹象：时间戳倒退（重新放录包、仿真重启）；
                 # 或者里程计中断 3 s 以上后从原点重新开始（FAST-LIO 单独重启）。
@@ -453,6 +500,11 @@ class MappingData:
         p = msg.pose.pose.position
         xyz = np.array([p.x, p.y, p.z])
         with self._lock:
+            if not self.is_running(self.stacks['slam']):
+                self._finish()
+                return
+            if self._finished:
+                return
             if self._t0 is not None and not self.recorder.accepts_gt:
                 return              # playback run whose bag has no ground truth (a simulation may still publish one)
             self.recorder.gt(t, msg.pose.pose)
@@ -467,13 +519,19 @@ class MappingData:
 
     def _on_ref(self, msg):
         with self._lock:
-            if self._t0 is not None:
+            if not self.is_running(self.stacks['slam']):
+                self._finish()
+                return
+            if not self._finished and self._t0 is not None:
                 self.recorder.ref(stamp_of(msg), msg.pose.pose)
 
     def record_lag(self, clock):
         """Playback monitor (about 1 Hz): how far the SLAM odometry is behind the playback clock, into lag.csv."""
         with self._lock:
-            if self._t_last is not None:
+            if not self.is_running(self.stacks['slam']):
+                self._finish()
+                return
+            if not self._finished and self._t_last is not None:
                 self.recorder.lag(clock, max(0.0, clock - self._t_last))
 
     def _nearest_gt(self, t):
@@ -505,13 +563,14 @@ class MappingData:
                 'error': None if self._error is None else round(self._error, 3),
                 'has_gt': self._align is not None,
                 'publishers': dict(self._pubs),
-                'run': self.recorder.run_id,
+                'run': self.recorder.run_id or self._last_run,
                 'stacks': dict(self.stacks), 'topics': dict(self.topics),
                 'slam': self.stacks['slam'], 'algorithm': self.profile['algorithm'],
                 'save_mode': self.profile['save_mode'],
                 'slam_options': [{'name': n, 'algorithm': p['algorithm'], 'save_mode': p['save_mode'],
                                   'sources': p['sources'], 'needs_imu': 'imu' in p['inputs'],
-                                  'variant_of': p['variant_of'], 'options': p['options']}
+                                  'variant_of': p['variant_of'], 'options': p['options'],
+                                  'config': bool(p.get('config'))}
                                  for n, p in self.profiles.items()],
             }
 

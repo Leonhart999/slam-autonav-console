@@ -50,9 +50,14 @@ mapping:
   #   save.service + pcd_path  调 Trigger 服务让 SLAM 写出 pcd_path（FAST-LIO 的 /map_save），之后 SLAM 继续运行
   #   save.dump_dir            SLAM 退出时才写出全局优化后的地图（GLIM）：保存地图会先停止 SLAM，再读这个目录；
   #                            每次停止后还会把运行记录的 est.tum 换成优化后的轨迹（在线结果另存为 est_online.tum）
+  #   config  layered configuration (robot_console/slam_config.py): the console builds the SLAM's parameter
+  #           file from this specification at every start (base -> input -> options -> console -> user),
+  #           writes it to slam_config_dir/<stack>.yaml and records it in run.json. Without it the stack
+  #           runs the file named in its stacks.yaml command
   slam_profiles:
     mapping_fastlio:
       algorithm: FAST-LIO2
+      config: slam/fastlio.yaml
       frame: camera_init         # FAST-LIO 的世界坐标系（= 开始建图时的车体位置）
       scan_topic: /cloud_registered
       odom_topic: /Odometry
@@ -60,13 +65,14 @@ mapping:
       sources: [sim, bag]        # 仿真和数据包回放都能用
       save:
         service: /map_save
-        pcd_path: ~/results/fastlio_map.pcd  # 必须和 FAST-LIO 配置里的 map_file_path 一致（FAST-LIO 不展开 ~，安装脚本会写成绝对路径）
+        pcd_path: ~/results/fastlio_map.pcd  # 控制台生成 FAST-LIO 参数文件时写进 map_file_path（见 config）
         timeout: 60              # 存大地图较慢（s）
     # Variants (thesis patch of FAST-LIO): LiDAR only (constant-velocity model instead of the IMU) and the
     # ground-vehicle constraint. variant_of + options: the pages show one button for the base algorithm and a
     # switch per option (lidar = LiDAR only, ground = ground-vehicle constraint); each combination is its own stack
     mapping_fastlio_ground:
       algorithm: FAST-LIO2 (ground)
+      config: slam/fastlio.yaml
       variant_of: mapping_fastlio
       options: [ground]
       frame: camera_init
@@ -80,6 +86,7 @@ mapping:
         timeout: 60
     mapping_fastlio_lidar:
       algorithm: FAST-LIO2 (LiDAR only)
+      config: slam/fastlio.yaml
       variant_of: mapping_fastlio
       options: [lidar]
       frame: camera_init
@@ -93,6 +100,7 @@ mapping:
         timeout: 60
     mapping_fastlio_lidar_ground:
       algorithm: FAST-LIO2 (LiDAR only, ground)
+      config: slam/fastlio.yaml
       variant_of: mapping_fastlio
       options: [lidar, ground]
       frame: camera_init
@@ -106,6 +114,7 @@ mapping:
         timeout: 60
     mapping_glim:
       algorithm: GLIM
+      config: slam/glim.yaml
       frame: glim_odom           # GLIM 里程计坐标系（= 开始建图时的 IMU 位置，z 轴对齐重力）
       scan_topic: /glim_ros/aligned_points
       odom_topic: /glim_ros/odom
@@ -115,6 +124,7 @@ mapping:
         dump_dir: ${data_root}/slam/glim_dump   # 和 stacks.yaml 里 mapping_glim 的 dump_path 一致
     mapping_glim_lidar:
       algorithm: GLIM (LiDAR only)
+      config: slam/glim_lidar.yaml
       variant_of: mapping_glim
       options: [lidar]
       frame: glim_odom
@@ -139,6 +149,9 @@ mapping:
   maps_dir: ${data_root}/maps
   scenes_dir: ${data_root}/scenes  # 自行上传的 Gazebo 场景，重启控制台后仍可选用
   runs_dir: ${data_root}/runs  # 运行记录：每次建图的估计轨迹、真值轨迹和概况
+  slam_config_dir: ${data_root}/slam/effective   # parameter files the console writes for the SLAM stacks (see config above)
+  slam_overrides_file: ${data_root}/slam/overrides.yaml   # SLAM parameters changed on the pages, per stack and data source
+  slam_facts_file: ${data_root}/slam/sensor_facts.yaml    # rings, scan rate, points per scan measured per sensor profile (SLAM values are derived from them)
 
 # 数据包回放（数据回放页）：用录好的 rosbag2 代替仿真，送进 SLAM 建图（robot_console/playback.py、bag_files.py）
 #   bag_dirs  在这些目录下（最多 4 层）找含 metadata.yaml 的数据包文件夹；网页只能播放这里找到的包
@@ -153,7 +166,27 @@ playback:
   upload_dir: ''
   space_check: []
   sensor_profiles_file: sensor_profiles.yaml   # real robots: bags played through the sensor adapter
+  # Profiles made on the Playback page ("Sensor setup" of a bag). They are checked before the built-in ones above
+  # and all use the SLAM configurations below (identity extrinsic, the adapter's frame; like heu61)
+  user_sensor_profiles_file: ${data_root}/sensor_profiles.yaml
+  sensor_slam_args:
+    mapping_fastlio: &fastlio_bag ['config_path:=${pkg:sim_robot}/config', config_file:=fastlio_bag.yaml]
+    mapping_fastlio_ground: *fastlio_bag
+    mapping_fastlio_lidar: &fastlio_bag_lidar ['config_path:=${pkg:sim_robot}/config', config_file:=fastlio_bag_lidar_only.yaml]
+    mapping_fastlio_lidar_ground: *fastlio_bag_lidar
+    mapping_glim: []             # the console builds GLIM's configuration itself (config/slam/glim.yaml, input adapter)
   adapter_stack: sensor_adapter
+  # "Save raw scans" switch of the Playback page (off by default): the recorder stack stores every body-frame
+  # scan of the SLAM with its pose under dir/<time>; a map saved from that run can rebuild its 2D grid from
+  # scan evidence (Maps page). topics: SLAM stack -> its body-frame scan topic (SLAMs not listed cannot record)
+  scan_recording:
+    stack: scan_recorder
+    dir: ${data_root}/scans
+    topics:
+      mapping_fastlio: /cloud_registered_body
+      mapping_fastlio_ground: /cloud_registered_body
+      mapping_fastlio_lidar: /cloud_registered_body
+      mapping_fastlio_lidar_ground: /cloud_registered_body
 
 # Evaluation page (step 5a): evo APE/RPE per run, cached as <run>/eval.json
 evaluation:

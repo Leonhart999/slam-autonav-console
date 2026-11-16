@@ -214,8 +214,8 @@ class BatchRunner:
         args = self.presets[preset]['args'].get(name, [])
         try:
             self.procs.start(name, args, preset, 'batch')
-        except StackRunning:
-            raise RunFailed('stack_running', name=name)
+        except StackRunning as e:
+            raise RunFailed('stack_running', name=e.name)
         except OSError as e:
             raise RunFailed('start_failed', name=name, reason=str(e))
 

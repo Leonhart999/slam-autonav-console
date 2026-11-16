@@ -1,0 +1,137 @@
+# GLIM (with IMU) configuration of the console, in layers (robot_console/slam_config.py, see fastlio.yaml for the
+# layers). GLIM reads a folder of JSON files; the base is that folder, and a parameter is named
+# <file without .json>.<section>.<key>, e.g. config_preprocess.preprocess.k_correspondences.
+# At every start of the stack the console writes the resulting files to <mapping.slam_config_dir>/<stack>/ and
+# starts GLIM with that folder as config_path.
+
+algorithm: GLIM
+format: glim_json
+# The GLIM 1.2.2 defaults with the CPU modules, own TF frame names and reliable point QoS (see the comments in
+# the files there). Parameters tuned for a robot are in `inputs` below, not in the folder.
+base_dir: ${pkg:sim_robot}/config/glim
+
+# What console.yaml already says about the stack (slam_profiles.<stack>.inputs)
+console:
+  points: config_ros.glim_ros.points_topic
+  imu: config_ros.glim_ros.imu_topic
+
+validated:
+  - input: sim
+    options: []
+    data: {zh: 仿真，办公室环线 / 仓库环线, en: 'simulation, office loop / warehouse loop'}
+    result: ATE 0.031 / 0.015 m
+  - input: adapter
+    options: []
+    data: {zh: HEU61 实车全程（5–1125 s），两台 96 线雷达 + IMU, en: 'HEU61 robot, full loop (5-1125 s), 2 x 96-line lidar + IMU'}
+    result:
+      zh: 1 倍速回放，水平闭合到 1.11 m（总长 620.6 m），但无地面约束，高度漂移至 -14.59 … +0.67 m 且未触发回环；收紧 IMU 噪声仍漂移（无真值）
+      en: 'played at 1x: XY closes to 1.11 m (length 620.6 m), but without a ground constraint height drifts -14.59 .. +0.67 m and loop closure does not trigger; tighter IMU noise still drifts (no ground truth)'
+
+inputs:
+  # The simulated robot (sim_robot): IMU at the base centre, 16-line lidar at base + (0.1, 0, 0.3).
+  # T_lidar_imu is the IMU pose in the lidar frame [x, y, z, qx, qy, qz, qw].
+  # k_correspondences 30: with 16 lines the 10 nearest neighbours of a point mostly lie on its own ring, so the
+  # GICP covariance becomes a line (warehouse replay: ATE 1.31 m -> 0.011 m together with the 0.5 / 0.25 m
+  # voxels of the base folder).
+  sim:
+    config_sensors.sensors.T_lidar_imu: [-0.1, 0.0, -0.3, 0.0, 0.0, 0.0, 1.0]
+    config_preprocess.preprocess.k_correspondences: 30
+    config_preprocess.preprocess.distance_near_thresh: 0.5
+  # A real-robot bag played through the sensor adapter: cloud and IMU arrive in one frame (origin IMU, axes robot
+  # base, z up, acceleration in m/s^2, per-point time in s after the stamp), so T_lidar_imu is identity.
+  adapter:
+    config_sensors.sensors.T_lidar_imu: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    config_preprocess.preprocess.k_correspondences: 20
+    config_preprocess.preprocess.distance_near_thresh: 0.5
+
+derive:
+  adapter:
+    # Sparse ring lidars (<= 24 rings, e.g. 16 lines) need 30 neighbours so planes do not collapse onto one ring;
+    # denser lidars (e.g. HEU61's merged 2 x 96 lines = 224 rings) use 20.
+    config_preprocess.preprocess.k_correspondences: {rule: ring_neighbors, sparse_max_rings: 24, sparse: 30, dense: 20, enabled: true}
+
+tunable:
+  config_preprocess.preprocess.k_correspondences:
+    min: 5
+    max: 60
+    label: {zh: 协方差邻域点数, en: Neighbours for covariances}
+    help:
+      zh: 估计每个点的局部平面时用多少个邻近点。线数少的雷达要取大（16 线用 30），否则邻近点都在同一条扫描线上，配准会漂。
+      en: Number of neighbours used to estimate the local plane of each point. Sparse lidars need more (30 for 16 lines); otherwise the neighbours lie on one scan ring and the registration drifts.
+  config_preprocess.preprocess.distance_near_thresh:
+    min: 0.0
+    max: 10.0
+    label: {zh: 近距离盲区 (m), en: Near range cut (m)}
+    help:
+      zh: 丢弃比这个距离更近的点，用来去掉打在车体上的点。
+      en: Returns nearer than this are dropped, to remove points on the robot itself.
+  config_preprocess.preprocess.distance_far_thresh:
+    min: 5.0
+    max: 500.0
+    label: {zh: 最远距离 (m), en: Far range cut (m)}
+    help:
+      zh: 丢弃比这个距离更远的点。
+      en: Returns farther than this are dropped.
+  config_preprocess.preprocess.random_downsample_target:
+    min: 1000
+    max: 100000
+    label: {zh: 每帧保留点数, en: Points kept per scan}
+    help:
+      zh: 每帧随机降采样后留下的点数。增大更准也更慢。
+      en: Points left of a scan after random downsampling. More points are more accurate and slower.
+  config_odometry_cpu.odometry_estimation.ivox_resolution:
+    min: 0.1
+    max: 2.0
+    label: {zh: 里程计目标体素 (m), en: Odometry target voxel (m)}
+    help:
+      zh: 里程计局部地图的体素边长，也决定最近点搜索的距离。室内 0.5 左右，室外 1.0 左右。
+      en: Voxel size of the odometry's local map; it also sets the correspondence distance. About 0.5 indoors, 1.0 outdoors.
+  config_odometry_cpu.odometry_estimation.vgicp_resolution:
+    min: 0.1
+    max: 2.0
+    label: {zh: VGICP 体素 (m), en: VGICP voxel (m)}
+    help:
+      zh: VGICP 配准用的体素边长。室内 0.25 左右，室外 0.5 左右。
+      en: Voxel size of the VGICP registration. About 0.25 indoors, 0.5 outdoors.
+  config_odometry_cpu.odometry_estimation.smoother_lag:
+    min: 1.0
+    max: 30.0
+    label: {zh: 滑窗长度 (s), en: Smoother window (s)}
+    help:
+      zh: 里程计固定滞后平滑的时间窗。增大更稳也更慢。
+      en: Time window of the odometry's fixed-lag smoother. Longer is steadier and slower.
+  config_sensors.sensors.imu_acc_noise:
+    min: 0.001
+    max: 1.0
+    label: {zh: 加速度噪声, en: Accelerometer noise}
+    help:
+      zh: IMU 加速度噪声的标准差。注意在平地长走廊急转弯场景（如 HEU61）中，即使收紧该值（测过 0.01）仍会发生高度漂移，需要高度精度请用带地面约束的 FAST-LIO2。
+      en: Standard deviation of the IMU acceleration noise. Note that on long flat corridors with sharp turns (such as HEU61), tightening this (tested at 0.01) still drifts in height; use FAST-LIO2 with the ground constraint when height accuracy is required.
+  config_sensors.sensors.imu_gyro_noise:
+    min: 0.0005
+    max: 1.0
+    label: {zh: 角速度噪声, en: Gyroscope noise}
+    help:
+      zh: IMU 角速度噪声的标准差。在平地长走廊急转弯场景中收紧该值（测过 0.002）仍不能消除高度漂移。
+      en: Standard deviation of the IMU angular velocity noise. Tightening this (tested at 0.002) still does not stop height drift on flat corridors with sharp turns.
+  config_sub_mapping_cpu.sub_mapping.submap_downsample_resolution:
+    min: 0.02
+    max: 1.0
+    label: {zh: 子图点间距 (m), en: Submap point spacing (m)}
+    help:
+      zh: 子图点云降采样的体素边长，决定保存的地图有多密；不影响里程计。
+      en: Voxel size the submap clouds are downsampled to; sets how dense the saved map is and does not affect the odometry.
+  config_global_mapping_cpu.global_mapping.max_implicit_loop_distance:
+    min: 5.0
+    max: 500.0
+    label: {zh: 回环搜索距离 (m), en: Loop search distance (m)}
+    help:
+      zh: 两个子图相距在这个范围内才尝试建立回环约束。里程计漂移大时要增大。
+      en: Two submaps closer than this are tried for a loop constraint. Increase it when the odometry drifts a lot.
+  config_global_mapping_cpu.global_mapping.min_implicit_loop_overlap:
+    min: 0.05
+    max: 0.9
+    label: {zh: 回环最小重叠率, en: Minimum loop overlap}
+    help:
+      zh: 两个子图的重叠率超过这个值才建立约束。减小会多建约束，也更容易出错。
+      en: Two submaps overlapping more than this get a constraint. A smaller value creates more constraints and more wrong ones.

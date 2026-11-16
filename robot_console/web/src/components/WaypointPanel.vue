@@ -259,7 +259,7 @@ const summary = computed(() => props.mission?.summary ?? null)
   margin-top: 12px;
   padding: 8px 10px;
   border-radius: 10px;
-  background: rgba(8, 145, 178, 0.05);
+  background: rgba(var(--accent-rgb), 0.05);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
 .head {

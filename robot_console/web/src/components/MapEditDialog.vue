@@ -7,6 +7,7 @@ import { ElMessage } from 'element-plus'
 import { errorText } from '@/messages'
 import type { MapDetail } from '@/maps/api'
 import { editApi, FREE, OCCUPIED, UNKNOWN, type EditGrid } from '@/maps/edit'
+import { scenePalette } from '@/theme'
 
 const props = defineProps<{ modelValue: boolean; map: MapDetail | null }>()
 const emit = defineEmits<{ 'update:modelValue': [boolean]; saved: [string] }>()
@@ -160,28 +161,30 @@ function fit() {
   view = { s, x: (c.width - g.width * s) / 2, y: (c.height - g.height * s) / 2 }
   draw()
 }
+function drawNow() {
+  cancelAnimationFrame(raf)
+  const c = canvas.value
+  const g = grid.value
+  const ctx = c?.getContext('2d')
+  if (!c || !g || !ctx || !off) return
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.fillStyle = scenePalette.value.canvasBg
+  ctx.fillRect(0, 0, c.width, c.height)
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(off, view.x, view.y, g.width * view.s, g.height * view.s)
+  ctx.strokeStyle = scenePalette.value.canvasEdge
+  ctx.lineWidth = 1
+  ctx.strokeRect(view.x - 0.5, view.y - 0.5, g.width * view.s + 1, g.height * view.s + 1)
+  if (hover && mode.value !== 'pan' && !panning) {
+    const r = brushRange(hover.cx, hover.cy)
+    ctx.strokeStyle = '#0891b2'
+    ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1)
+    ctx.strokeRect(view.x + r.x0 * view.s, view.y + r.y0 * view.s, (r.x1 - r.x0 + 1) * view.s, (r.y1 - r.y0 + 1) * view.s)
+  }
+}
 function draw() {
   cancelAnimationFrame(raf)
-  raf = requestAnimationFrame(() => {
-    const c = canvas.value
-    const g = grid.value
-    const ctx = c?.getContext('2d')
-    if (!c || !g || !ctx || !off) return
-    ctx.setTransform(1, 0, 0, 1, 0, 0)
-    ctx.fillStyle = '#eef2f8'
-    ctx.fillRect(0, 0, c.width, c.height)
-    ctx.imageSmoothingEnabled = false
-    ctx.drawImage(off, view.x, view.y, g.width * view.s, g.height * view.s)
-    ctx.strokeStyle = 'rgba(15,30,60,0.25)'
-    ctx.lineWidth = 1
-    ctx.strokeRect(view.x - 0.5, view.y - 0.5, g.width * view.s + 1, g.height * view.s + 1)
-    if (hover && mode.value !== 'pan' && !panning) {
-      const r = brushRange(hover.cx, hover.cy)
-      ctx.strokeStyle = '#0891b2'
-      ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1)
-      ctx.strokeRect(view.x + r.x0 * view.s, view.y + r.y0 * view.s, (r.x1 - r.x0 + 1) * view.s, (r.y1 - r.y0 + 1) * view.s)
-    }
-  })
+  raf = requestAnimationFrame(drawNow)
 }
 
 // ---------------- painting ----------------
@@ -344,6 +347,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keyup', onKey)
 })
 watch(brush, draw)
+watch(scenePalette, drawNow)
 
 // ---------------- save / close ----------------
 
@@ -435,7 +439,7 @@ const brushMeters = computed(() => (grid.value ? (brush.value * grid.value.resol
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .dim { font-size: 12px; color: var(--ink-3); }
 .stage { position: relative; height: min(62vh, 620px); border-radius: 10px; overflow: hidden;
-  box-shadow: inset 0 0 0 1px var(--hairline); background: #eef2f8; cursor: crosshair; touch-action: none; }
+  box-shadow: inset 0 0 0 1px var(--hairline); background: var(--canvas-bg); cursor: crosshair; touch-action: none; }
 .stage.pan { cursor: grab; }
 .stage canvas { display: block; width: 100%; height: 100%; }
 .overlay { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; font-size: 13px; color: var(--ink-3); }

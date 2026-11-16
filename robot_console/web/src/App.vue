@@ -4,13 +4,16 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { Moon, Sunny } from '@element-plus/icons-vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import enLocale from 'element-plus/es/locale/lang/en'
 import { pages } from './router'
 import { LANGS, setLang } from './i18n'
+import { THEMES, setTheme, theme, type Theme } from './theme'
 import { useStatusStore } from './stores/status'
 import StatusBar from './components/StatusBar.vue'
 import RadarMark from './components/RadarMark.vue'
+import TaskCenter from './components/TaskCenter.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -20,6 +23,14 @@ const store = useStatusStore()
 const epLocale = computed(() => (locale.value === 'en' ? enLocale : zhCn))
 // 语言切换滑块停在第几个按钮上
 const langIndex = computed(() => Math.max(0, LANGS.findIndex((l) => l.value === locale.value)))
+
+// Appearance switch: the new look spreads from the button that was pressed
+const THEME_ICON = { light: Sunny, dark: Moon }
+const THEME_LABEL = { light: 'app.themeLight', dark: 'app.themeDark' } as const
+function pickTheme(next: Theme, e: MouseEvent) {
+  const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  setTheme(next, { x: box.left + box.width / 2, y: box.top + box.height / 2 })
+}
 
 const no = (i: number) => String(i + 1).padStart(2, '0')
 // 页头：当前页面在菜单里的序号和标题
@@ -65,6 +76,16 @@ onUnmounted(() => window.clearInterval(clockTimer))
         </nav>
 
         <div class="rail-foot">
+          <div class="lang" role="group" :aria-label="t('app.theme')" :style="{ '--i': THEMES.indexOf(theme) }">
+            <span class="thumb" />
+            <button
+              v-for="th in THEMES" :key="th" :class="{ on: theme === th }" :aria-pressed="theme === th"
+              :title="t(THEME_LABEL[th])" :data-theme="th" @click="pickTheme(th, $event)"
+            >
+              <el-icon :size="14"><component :is="THEME_ICON[th]" /></el-icon>
+              <span class="seg-text">{{ t(THEME_LABEL[th]) }}</span>
+            </button>
+          </div>
           <div class="lang" role="group" :aria-label="t('app.language')" :style="{ '--i': langIndex }">
             <span class="thumb" />
             <button
@@ -83,6 +104,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
             <h1>{{ current.title }}</h1>
             <span class="crumb-path mono">{{ route.path }}</span>
           </div>
+          <TaskCenter />
           <div class="clock">
             <span class="clock-label">{{ t('app.localTime') }}</span>
             <span class="clock-time mono">{{ clock }}</span>
@@ -164,7 +186,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
   transition: background 0.2s, color 0.2s;
 }
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(var(--paper-rgb), 0.6);
   color: var(--ink);
 }
 .nav-item:focus-visible {
@@ -199,7 +221,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
   background: var(--glass-strong);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: 0 0 0 1px rgba(8, 145, 178, 0.12), 0 6px 16px -10px rgba(8, 145, 178, 0.6);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.12), 0 6px 16px -10px rgba(var(--accent-rgb), 0.6);
 }
 .nav-item.active::before {
   content: '';
@@ -232,7 +254,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
   grid-template-columns: 1fr 1fr;
   padding: 3px;
   border-radius: 11px;
-  background: rgba(15, 30, 60, 0.06);
+  background: rgba(var(--tint-rgb), 0.06);
 }
 .thumb {
   position: absolute;
@@ -241,13 +263,17 @@ onUnmounted(() => window.clearInterval(clockTimer))
   width: calc(50% - 3px);
   height: calc(100% - 6px);
   border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 2px 8px -2px rgba(20, 60, 120, 0.25);
+  background: var(--paper);
+  box-shadow: 0 2px 8px -2px rgba(var(--shade-rgb), 0.25);
   transform: translateX(calc(var(--i) * 100%));
   transition: transform 0.25s cubic-bezier(0.3, 0.7, 0.4, 1);
 }
 .lang button {
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   height: 28px;
   border: none;
   background: none;
@@ -359,6 +385,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
   .nav-no,
   .nav-label,
   .nav-soon,
+  .seg-text,
   .stamp {
     display: none;
   }

@@ -1,0 +1,244 @@
+# FAST-LIO2 configuration of the console, in layers (robot_console/slam_config.py).
+#
+# Each time a FAST-LIO stack starts, the console builds the parameter file the SLAM really runs with:
+#     base  ->  input  ->  derived  ->  options  ->  console  ->  user
+#   base      the validated values below, the same for every robot
+#   input     what depends on where the data comes from (the simulated robot, or a real-robot bag played
+#             through the sensor adapter); later steps derive more of these from the sensor profile / bag probe
+#   derived   values computed from what the console measured of the sensor (number of rings, scan rate,
+#             points per scan; once per sensor profile, from a bag). Only rules marked enabled set a value;
+#             the others are shown on the page as a suggestion
+#   options   the switches of the page (console.yaml slam_profiles.<stack>.options): lidar, ground
+#   console   topics and the map path, taken from console.yaml slam_profiles so they are written in one place
+#   user      values changed on the page ("Parameters" of the SLAM step); only the keys under `tunable`, inside
+#             the range given there, stored per stack and data source
+# The result is written to <mapping.slam_config_dir>/<stack>.yaml and recorded in the run's run.json
+# (slam_config: every value and the layer it came from).
+#
+# Rules: every key of a layer must exist in `base` with the same type (FAST-LIO declares typed parameters:
+# an integer where it expects a float aborts the node), so write floats with a decimal point.
+
+algorithm: FAST-LIO2
+
+# Where this configuration was checked (results under results/fastlio_ground_20261108, heu61_height_drift).
+validated:
+  - input: sim
+    options: []
+    data: &sim_data {zh: 仿真，办公室环线 / 仓库环线, en: 'simulation, office loop / warehouse loop'}
+    result: ATE 0.033 / 0.035 m
+  - {input: sim, options: [ground], data: *sim_data, result: ATE 0.026 / 0.042 m}
+  - {input: sim, options: [lidar], data: *sim_data, result: ATE 0.031 / 0.038 m}
+  - {input: sim, options: [lidar, ground], data: *sim_data, result: ATE 0.022 / 0.041 m}
+  - input: adapter
+    options: [ground]
+    data: {zh: HEU61 实车，两台 96 线雷达 + IMU，室内环线 616 m, en: 'HEU61 robot, 2 x 96-line lidar + IMU, 616 m indoor loop'}
+    # 2026-11-15: the full bag at 2x with the derived values (scan_line 224, scan_rate 10, point_filter_num 17)
+    result:
+      zh: 2 倍速回放，高度在 -0.11 … +0.08 m 之内，回到起点时相差 1.6 m，平均滞后 1.0 s（无真值）
+      en: 'played at 2x: height within -0.11 .. +0.08 m, loop closes to 1.6 m, mean lag 1.0 s (no ground truth)'
+
+# What console.yaml already says about the stack (slam_profiles.<stack>.inputs and save.pcd_path)
+console:
+  points: common.lid_topic
+  imu: common.imu_topic
+  map_file: map_file_path
+
+base:
+  feature_extract_enable: false
+  point_filter_num: 4              # keep every 4th point of a scan
+  max_iteration: 3
+  filter_size_surf: 0.5            # m, voxel of the scan before matching
+  filter_size_map: 0.5             # m, voxel of the map
+  cube_side_length: 1000.0
+  runtime_pos_log_enable: false
+  map_file_path: ''                # console layer: slam_profiles.<stack>.save.pcd_path
+
+  common:
+    lid_topic: /points_fastlio     # console layer: slam_profiles.<stack>.inputs.points
+    imu_topic: /imu                # console layer: slam_profiles.<stack>.inputs.imu
+    time_sync_en: false
+    time_offset_lidar_to_imu: 0.0
+    imu_en: true                   # false = LiDAR only (thesis patch of FAST_LIO), see options.lidar
+
+  preprocess:
+    lidar_type: 2                  # Velodyne layout (x y z intensity time ring); cloud_adapter and the sensor
+                                   # adapter both write it
+    scan_line: 16                  # number of ring values; only sizes per-ring arrays when points carry a time
+    scan_rate: 10
+    timestamp_unit: 0              # s
+    blind: 0.4                     # m, nearer returns are dropped
+
+  mapping:
+    acc_cov: 0.1
+    gyr_cov: 0.1
+    b_acc_cov: 0.0001
+    b_gyr_cov: 0.0001
+    fov_degree: 360.0
+    det_range: 100.0
+    extrinsic_est_en: false
+    extrinsic_T: [0.0, 0.0, 0.0]   # lidar position in the IMU frame
+    extrinsic_R: [1.0, 0.0, 0.0,
+                  0.0, 1.0, 0.0,
+                  0.0, 0.0, 1.0]
+    nn_every_iter: false           # search the map neighbours in every filter iteration (thesis patch)
+
+  publish:
+    path_en: true
+    map_en: true                   # /map_save needs the accumulated map
+    scan_publish_en: true
+    dense_publish_en: true
+    scan_bodyframe_pub_en: true
+
+  pcd_save:
+    pcd_save_en: true
+    interval: -1
+
+  # Ground-vehicle constraint (thesis patch): roll / pitch relative to gravity and the height stay as at the
+  # first scan, as soft pseudo-measurements. FAST-LIO treats every LiDAR point as an independent measurement,
+  # so the scan match is far more confident than any realistic prior: the rows only hold against slow drift
+  # when they are this tight (sweep 2026-11-08: 2 deg / 0.05 m had no visible effect; on HEU61 1 deg diverged,
+  # 0.02 deg / 0.002 m removed the drift and did not change the ATE in the simulation). Off on ramps and steps.
+  ground_constraint:
+    enable: false
+    rp_std_deg: 0.02
+    z_std: 0.002                   # m, 0 = no height row
+
+# Parameters a user may change on the page: min / max accepted, the name and the explanation shown.
+tunable:
+  point_filter_num:
+    min: 1
+    max: 20
+    label: {zh: 点云抽稀, en: Point decimation}
+    help:
+      zh: 每 N 个点取 1 个再送进算法。数值小则参与配准的点多、计算慢；线数多的雷达可以取大一些。
+      en: Keeps every N-th point of a scan. A smaller value gives more points for matching and costs more time; lidars with many lines can use a larger one.
+  filter_size_surf:
+    min: 0.05
+    max: 2.0
+    label: {zh: 当前帧体素 (m), en: Scan voxel (m)}
+    help:
+      zh: 当前帧降采样的体素边长。室内窄处可减小到 0.2–0.3，室外大场景可增大。
+      en: Voxel size the scan is downsampled to before matching. 0.2-0.3 suits narrow indoor spaces, larger values wide outdoor scenes.
+  filter_size_map:
+    min: 0.05
+    max: 2.0
+    label: {zh: 地图体素 (m), en: Map voxel (m)}
+    help:
+      zh: 地图点的体素边长，也决定保存的点云有多密。一般和当前帧体素取相同的值。
+      en: Voxel size of the map points; it also sets how dense the saved cloud is. Usually the same as the scan voxel.
+  max_iteration:
+    min: 1
+    max: 10
+    label: {zh: 滤波迭代次数, en: Filter iterations}
+    help:
+      zh: 每帧迭代卡尔曼更新的最多次数。增大会变慢，快速转弯时可能更稳。
+      en: Maximum iterations of the Kalman update per scan. More iterations cost time and can help in fast turns.
+  preprocess.blind:
+    min: 0.0
+    max: 10.0
+    label: {zh: 近距离盲区 (m), en: Near range cut (m)}
+    help:
+      zh: 丢弃比这个距离更近的点，用来去掉打在车体上的点。应略大于雷达到车体最远处的距离。
+      en: Returns nearer than this are dropped, to remove points on the robot itself. Set it just above the distance from the lidar to the farthest part of the robot.
+  mapping.det_range:
+    min: 5.0
+    max: 500.0
+    label: {zh: 探测距离 (m), en: Detection range (m)}
+    help:
+      zh: 雷达的有效量程，用于决定地图在车周围保留多大范围。
+      en: Usable range of the lidar; decides how much of the map is kept around the robot.
+  mapping.acc_cov:
+    min: 0.0001
+    max: 100.0
+    label: {zh: 加速度噪声, en: Accelerometer noise}
+    help:
+      zh: IMU 加速度的噪声协方差。仅激光模式下是匀速模型里加速度的过程噪声。
+      en: Noise covariance of the IMU acceleration. In LiDAR-only mode it is the process noise of the acceleration in the constant-velocity model.
+  mapping.gyr_cov:
+    min: 0.0001
+    max: 100.0
+    label: {zh: 角速度噪声, en: Gyroscope noise}
+    help:
+      zh: IMU 角速度的噪声协方差。仅激光模式下是匀速模型里角速度的过程噪声。
+      en: Noise covariance of the IMU angular velocity. In LiDAR-only mode it is the process noise of the angular velocity in the constant-velocity model.
+  mapping.b_acc_cov:
+    min: 0.0000000001
+    max: 1.0
+    label: {zh: 加速度零偏噪声, en: Accelerometer bias noise}
+    help:
+      zh: 加速度零偏随机游走的协方差。越大，零偏估计变化越快。
+      en: Covariance of the accelerometer bias random walk. A larger value lets the bias estimate change faster.
+  mapping.b_gyr_cov:
+    min: 0.0000000001
+    max: 1.0
+    label: {zh: 角速度零偏噪声, en: Gyroscope bias noise}
+    help:
+      zh: 角速度零偏随机游走的协方差。越大，零偏估计变化越快。
+      en: Covariance of the gyroscope bias random walk. A larger value lets the bias estimate change faster.
+  mapping.nn_every_iter:
+    label: {zh: 每次迭代重新找近邻, en: Neighbour search in every iteration}
+    help:
+      zh: 每次滤波迭代都重新在地图里找最近点。更慢；仅激光模式必须打开，否则原地转弯时会配错平面。
+      en: Searches the map neighbours again in every filter iteration. Slower; LiDAR-only mode needs it, otherwise an in-place turn can lock onto wrong planes.
+  ground_constraint.rp_std_deg:
+    min: 0.001
+    max: 10.0
+    label: {zh: 地面约束：横滚俯仰标准差 (°), en: 'Ground constraint: roll / pitch std (deg)'}
+    help:
+      zh: 只在打开地面车辆约束时起作用。验证过的值是 0.02°；HEU61 数据上 1° 会发散，2° 等于没有约束。有坡道或台阶时请关掉约束，而不是放宽这个值。
+      en: Only used with the ground-vehicle constraint on. The validated value is 0.02 deg; on the HEU61 data 1 deg diverged and 2 deg had no effect. On ramps or steps switch the constraint off instead of loosening this value.
+  ground_constraint.z_std:
+    min: 0.0
+    max: 1.0
+    label: {zh: 地面约束：高度标准差 (m), en: 'Ground constraint: height std (m)'}
+    help:
+      zh: 只在打开地面车辆约束时起作用。验证过的值是 0.002 m；0 表示不约束高度。
+      en: Only used with the ground-vehicle constraint on. The validated value is 0.002 m; 0 switches the height row off.
+
+inputs:
+  # The simulated robot (sim_robot), live or from a bag recorded in the simulation: 16-line lidar at
+  # base + (0.1, 0, 0.3), IMU at the base centre (models/sim_robot/model.sdf). Gazebo emits fake points at
+  # exactly 0.30 m, hence blind 0.4.
+  sim:
+    preprocess.scan_line: 16
+    preprocess.blind: 0.4
+    mapping.extrinsic_T: [0.1, 0.0, 0.3]
+  # A real-robot bag played through the sensor adapter (sensor_adapter.py, sensor_profiles.yaml): cloud and IMU
+  # arrive in one frame (origin IMU, axes robot base, z up), so the extrinsic is identity. blind 0.5 drops
+  # returns from the robot itself. The second lidar's rings start at 128.
+  adapter:
+    preprocess.scan_line: 128
+    preprocess.blind: 0.5
+    mapping.extrinsic_T: [0.0, 0.0, 0.0]
+
+# Values computed from the measured sensor facts (slam_config.py RULES). A rule is enabled only after it was
+# checked on recorded data; until then the page shows its value as a suggestion.
+derive:
+  adapter:
+    # One array entry per ring number of the merged cloud (HEU61: 128 + 96 = 224). Only used by FAST-LIO when
+    # points carry no time, where a too small value loses the rings above it.
+    preprocess.scan_line: {rule: rings, enabled: true}
+    # Scans per second; FAST-LIO uses it to spread point times over a scan when points carry no time.
+    preprocess.scan_rate: {rule: scan_rate, enabled: true}
+    # Keep about as many points of a scan as the simulated 16-line lidar gives with point_filter_num 4
+    # (28 700 / 4): a 2 x 96-line robot with 126 000 valid points per scan gets 17 instead of 4.
+    # Checked 2026-11-15 on the full HEU61 bag at 2x with the ground constraint: with 4 FAST-LIO fell behind the
+    # playback from ~550 s (lag up to 308 s) and diverged; 8 and 18 kept up (mean lag 1.0 / 0.9 s) and closed the
+    # 618 m loop to 2.3 / 1.8 m with height within -0.11 .. +0.09 m (results/slam_config_20261115).
+    point_filter_num: {rule: decimate, target: 7200, min: 1, max: 20, enabled: true}
+
+options:
+  # LiDAR only: the filter runs a constant-velocity model (angular velocity from the last two scans, zero
+  # acceleration); acc_cov / gyr_cov become its process noise, there are no biases to estimate.
+  # nn_every_iter: without it a turn that starts between two scans can lock onto wrong planes
+  # (warehouse bag wh_loop_02: ATE 3.5 m -> 0.04 m).
+  lidar:
+    common.imu_en: false
+    preprocess.scan_line: 256      # ring numbers up to 255 (two merged 96-line lidars use up to 223)
+    mapping.acc_cov: 1.0
+    mapping.gyr_cov: 0.5
+    mapping.b_acc_cov: 0.00000001
+    mapping.b_gyr_cov: 0.00000001
+    mapping.nn_every_iter: true
+  ground:
+    ground_constraint.enable: true

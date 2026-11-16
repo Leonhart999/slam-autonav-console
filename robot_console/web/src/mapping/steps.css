@@ -13,13 +13,13 @@
   position: relative;
   padding: 12px 14px 14px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.45);
+  background: rgba(var(--paper-rgb), 0.45);
   box-shadow: inset 0 0 0 1px var(--hairline);
   transition: background 0.25s, box-shadow 0.25s;
 }
 .step.current {
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: inset 0 0 0 1px rgba(8, 145, 178, 0.3), 0 8px 22px -14px rgba(8, 145, 178, 0.8);
+  background: rgba(var(--paper-rgb), 0.92);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3), 0 8px 22px -14px rgba(var(--accent-rgb), 0.8);
 }
 .step.current::before {
   content: '';
@@ -104,8 +104,8 @@
 .algo.on {
   color: var(--accent);
   font-weight: 600;
-  background: rgba(8, 145, 178, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(8, 145, 178, 0.25);
+  background: rgba(var(--accent-rgb), 0.1);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.25);
 }
 .note {
   margin: 0 0 10px;
@@ -132,7 +132,7 @@
   display: inline-flex;
   padding: 3px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(var(--paper-rgb), 0.55);
   backdrop-filter: blur(12px);
   box-shadow: inset 0 0 0 1px var(--hairline);
 }
@@ -151,8 +151,8 @@
 .seg button.on {
   color: var(--accent);
   font-weight: 600;
-  background: #fff;
-  box-shadow: 0 2px 8px -3px rgba(20, 60, 120, 0.3);
+  background: var(--paper);
+  box-shadow: 0 2px 8px -3px rgba(var(--shade-rgb), 0.3);
 }
 .seg button:disabled {
   cursor: not-allowed;

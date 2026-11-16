@@ -9,6 +9,7 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js'
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js'
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import type { LayerKey, MappingStream, PointBuffer, ViewMode } from '@/mapping/stream'
+import { scenePalette } from '@/theme'
 
 const props = defineProps<{
   stream: MappingStream
@@ -29,13 +30,14 @@ uniform float uZMin;
 uniform float uZMax;
 uniform vec3 uColor;
 uniform float uSolid;  // 1 = 统一颜色（当前帧），0 = 按高度着色（地图）
+uniform vec3 uRamp[4]; // 高度色带，低 → 高：淡青、青、蓝、靛（theme.ts 的 scenePalette，浅色 / 深色外观各一套）
 varying vec3 vColor;
 
 vec3 ramp(float t) {
-  vec3 a = vec3(0.60, 0.86, 0.93);  // 低处：淡青
-  vec3 b = vec3(0.02, 0.64, 0.80);  // 青
-  vec3 c = vec3(0.15, 0.39, 0.92);  // 蓝
-  vec3 d = vec3(0.33, 0.25, 0.85);  // 高处：靛
+  vec3 a = uRamp[0];
+  vec3 b = uRamp[1];
+  vec3 c = uRamp[2];
+  vec3 d = uRamp[3];
   if (t < 0.33) return mix(a, b, t / 0.33);
   if (t < 0.66) return mix(b, c, (t - 0.33) / 0.33);
   return mix(c, d, (t - 0.66) / 0.34);
@@ -71,6 +73,7 @@ function makePoints(solid: boolean, color: number) {
       uZMax: { value: 2.5 },
       uColor: { value: new THREE.Color(color) },
       uSolid: { value: solid ? 1 : 0 },
+      uRamp: { value: scenePalette.value.ramp.map((c) => new THREE.Vector3(...c)) },
     },
   })
   const pts = new THREE.Points(new THREE.BufferGeometry(), mat)
@@ -251,7 +254,7 @@ function updateGrid() {
     grid.geometry.dispose()
     ;(grid.material as THREE.Material).dispose()
   }
-  grid = new THREE.GridHelper(size, size, 0x9db4cc, 0xd5dfea)
+  grid = new THREE.GridHelper(size, size, scenePalette.value.gridMajor, scenePalette.value.gridMinor)
   grid.rotation.x = Math.PI / 2 // GridHelper 默认在 xz 平面，转到 xy 平面
   grid.position.set(cx, cy, z)
   const m = grid.material as THREE.LineBasicMaterial
@@ -372,7 +375,7 @@ onMounted(() => {
   mapSync = { obj: makePoints(false, 0), buf: s.map, version: -1, resets: -1, data: null, uploaded: 0 }
   scanSync = { obj: makePoints(true, 0x00b4d8), buf: s.scan, version: -1, resets: -1, data: null, uploaded: 0 }
   scanSync.obj.renderOrder = 2
-  estSync = { obj: makeLine(0x2563eb, false), buf: s.est, version: -1 }
+  estSync = { obj: makeLine(scenePalette.value.estLine, false), buf: s.est, version: -1 }
   gtSync = { obj: makeLine(0x8a97ad, true), buf: s.gt, version: -1 }
   robot = makeRobot()
   scene.add(mapSync.obj, scanSync.obj, estSync.obj, gtSync.obj, robot.group)
@@ -390,6 +393,17 @@ function applyMode() {
   resetView()
 }
 watch(() => props.mode, applyMode)
+
+// 浅色 / 深色外观切换：换高度色带、轨迹颜色和地面网格，并立刻画一帧（切换动画截图时不会残留旧颜色）
+watch(scenePalette, (p) => {
+  const ramp = (mapSync.obj.material as THREE.ShaderMaterial).uniforms.uRamp.value as THREE.Vector3[]
+  p.ramp.forEach((c, i) => ramp[i].set(...c))
+  ;(estSync.obj.material as LineMaterial).color.set(p.estLine)
+  gridKey = ''
+  updateGrid()
+  if (grid) grid.visible = props.layers.grid
+  renderer.render(scene, activeCamera())
+})
 
 onBeforeUnmount(() => {
   cancelAnimationFrame(raf)

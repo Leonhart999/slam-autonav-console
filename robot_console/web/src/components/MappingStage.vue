@@ -3,6 +3,7 @@
      the data stream (createMappingStream) and passes it in. Layers, camera mode and point size are kept in the
      browser (mapping/prefs.ts); ?view=top in the address picks the camera mode. -->
 <script setup lang="ts">
+import { Aim, WarningFilled } from '@element-plus/icons-vue'
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'

@@ -54,6 +54,24 @@ def dir_size(p):
     return total
 
 
+def scan_source(folder, meta):
+    """(recording dir, trajectory file) when the map still has the scans it was built from, else None.
+
+    meta.json names the recording (input_recording). The trajectory has one pose per scan: data/scan_poses.tum
+    for maps saved from a playback with "Save raw scans", data/est.tum for maps of the loop back-end.
+    The 2D grid can then be rebuilt from scan evidence instead of the merged cloud."""
+    recording = meta.get('input_recording') if isinstance(meta, dict) else None
+    if not folder or not isinstance(recording, str):
+        return None
+    recording, trajectory = Path(recording), Path(folder) / 'data' / 'scan_poses.tum'
+    if not trajectory.is_file() and meta.get('postprocess') == 'fastlio_planar_loop':
+        trajectory = Path(folder) / 'data' / 'est.tum'
+    files = (recording / 'scans.bin', recording / 'index.csv', trajectory)
+    if not all(f.is_file() and not f.is_symlink() for f in files):
+        return None
+    return recording, trajectory
+
+
 class MapCatalog:
 
     def __init__(self, root, solids=None):
@@ -210,6 +228,7 @@ class MapCatalog:
         info = {k: meta.get(k) for k in ('frame', 'run', 'duration', 'length', 'voxel_size', 'sim_cmd',
                                          'slam_cmd')}
         return {**self._public(s), **info,
+                'has_scans': scan_source(s['_folder'], meta) is not None,
                 'location': str(location), 'location_win': windows_path(location),
                 'yaml_path': str(s['_folder'] / 'map.yaml' if s['_folder'] else path) if s['has_grid'] else None,
                 'files': files, 'total_size': sum(f['size'] for f in files)}

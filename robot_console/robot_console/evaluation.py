@@ -287,7 +287,7 @@ class Evaluation:
                 'evaluable': m['finished'] > 0, 'variant': m['variant'], 'nav': m,
                 'figures': [f for f in NAV_FIGURES if (d / f).is_file()],
                 'ape_rmse': None, 'rpe_rmse': None, 'evaluated': None, 'eval_error': None,
-                'algorithm': None, 'playback': None,
+                'algorithm': None, 'playback': None, 'params_changed': None,
             }
         has_est = _nonempty(d / 'est.tum')
         suspect = kind == 'playback' and gt_suspect(info, self.gt_topic)
@@ -327,6 +327,9 @@ class Evaluation:
             'evaluated': ev['created'] if ev else None,
             'eval_error': info.get('recording_error') or (failed['reason'] if failed else None),
             'algorithm': info.get('algorithm'), 'playback': pb,
+            # SLAM parameters the user changed for this run (slam_config.py); None: the automatic configuration,
+            # or a run from before the parameters were recorded
+            'params_changed': (info.get('slam_config') or {}).get('user') or None,
         }
 
     def list(self):
@@ -408,10 +411,11 @@ class Evaluation:
             e.status = 422
             raise
 
-    def evaluate(self, run_id, force=False):
+    def evaluate(self, run_id, force=False, progress=lambda phase: None):
         """Ground-truth APE/RPE (eval.json) and, for a playback run with reference odometry, the deviation from
         the reference (eval_ref.json, x/y only)."""
         d = self._dir(run_id)
+        progress('reading')
         entry = self._entry(d, self._recording())
         if entry['type'] == 'navigation':
             if not entry['evaluable']:
@@ -422,6 +426,7 @@ class Evaluation:
         if not entry['evaluable'] and not has_ref:
             raise EvalError('run_not_evaluable', 409, id=run_id)
         if has_ref and (force or not pb['ref_error']):
+            progress('reference')
             with self.lock:
                 if force or self._cached(d, 'eval_ref.json', 'ref.tum') is None:
                     try:
@@ -435,7 +440,9 @@ class Evaluation:
             raise EvalError('evaluation_failed', 422, reason=entry['eval_error'])
         with self.lock:
             if force or self._cached(d) is None:
+                progress('evaluating')
                 self._run_evo(d, d / 'gt.tum', 'eval.json', 'eval_error.json')
+        progress('writing')
         return self.detail(run_id)
 
     def relative(self, ids, baseline):
@@ -629,7 +636,19 @@ class Evaluation:
 
 
 def register_evaluation_routes(app, cfg, mapping):
+    from .tasks import tasks_for
     evaluation = Evaluation(cfg, mapping)
+    tasks = tasks_for(app, cfg)
+    tasks.register('evaluate', lambda target, params, progress:
+                   evaluation.evaluate(target, params.get('force', False), progress), resource='evaluation')
+    def export_task(target, params, progress):
+        progress('exporting')
+        return evaluation.export(params['ids'], params.get('batch'))
+    tasks.register('eval_export', export_task, resource='evaluation')
+    def relative_task(target, params, progress):
+        progress('comparing')
+        return evaluation.relative(params['ids'], params['baseline'])
+    tasks.register('eval_relative', relative_task, resource='evaluation')
 
     def fail(e):
         return HTTPException(e.status, detail={'code': e.code, 'params': e.params})
@@ -646,8 +665,11 @@ def register_evaluation_routes(app, cfg, mapping):
             raise fail(e)
 
     @app.post('/api/evaluation/runs/{run_id}/evaluate')
-    def evaluation_evaluate(run_id: str, force: bool = False):
+    def evaluation_evaluate(run_id: str, force: bool = False, background: bool = False):
         try:
+            if background:
+                evaluation._dir(run_id)
+                return tasks.submit('evaluate', run_id, {'force': force})
             return evaluation.evaluate(run_id, force)
         except EvalError as e:
             raise fail(e)
@@ -676,15 +698,27 @@ def register_evaluation_routes(app, cfg, mapping):
             raise HTTPException(500, detail={'code': 'evaluation_failed', 'params': {'reason': str(e)}})
 
     @app.post('/api/evaluation/relative')
-    def evaluation_relative(ids: list = Body(..., embed=True), baseline: str = Body(..., embed=True)):
+    def evaluation_relative(ids: list = Body(..., embed=True), baseline: str = Body(..., embed=True),
+                            background: bool = False):
         try:
+            if background:
+                if baseline not in ids or not 2 <= len(set(ids)) <= MAX_RELATIVE:
+                    raise EvalError('relative_bad_selection', 400, n=MAX_RELATIVE)
+                for ident in ids:
+                    evaluation._dir(str(ident))
+                return tasks.submit('eval_relative', baseline, {'ids': [str(i) for i in ids], 'baseline': baseline})
             return evaluation.relative([str(i) for i in ids], baseline)
         except EvalError as e:
             raise fail(e)
 
     @app.post('/api/evaluation/export')
-    def evaluation_export(ids: list = Body(..., embed=True), batch: str | None = Body(None, embed=True)):
+    def evaluation_export(ids: list = Body(..., embed=True), batch: str | None = Body(None, embed=True),
+                          background: bool = False):
         try:
+            if background:
+                for ident in ids:
+                    evaluation._dir(str(ident))
+                return tasks.submit('eval_export', batch or 'selection', {'ids': [str(i) for i in ids], 'batch': batch})
             return evaluation.export([str(i) for i in ids], batch)
         except EvalError as e:
             raise fail(e)

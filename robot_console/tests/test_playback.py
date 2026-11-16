@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from robot_console.playback import Playback, PlaybackError, find_bags, match_inputs, play_args  # noqa: E402
+from robot_console.playback import (Playback, PlaybackError, find_bags, match_inputs, play_args,  # noqa: E402
+                                    start_offset)
 
 META = """rosbag2_bagfile_information:
   version: 5
@@ -116,6 +117,14 @@ class FindAndMatchTests(unittest.TestCase):
                 self.assertEqual(list(yaml.safe_load(f)), ['/front_lidar'])
         args, _ = play_args({**bag, 'qos_fix': {}}, plan, 1.0, None, '/nowhere.yaml')
         self.assertNotIn('--qos-profile-overrides-path', args)
+
+    def test_start_offset_of_a_sensor_profile(self):
+        self.assertEqual(start_offset({'start_offset': 5}, 1125.0), 5.0)
+        self.assertEqual(start_offset({}, 1125.0), 0.0)
+        self.assertEqual(start_offset(None, 1125.0), 0.0)
+        for bad in (-3, 'soon', float('nan')):
+            self.assertEqual(start_offset({'start_offset': bad}, 1125.0), 0.0)
+        self.assertEqual(start_offset({'start_offset': 5}, 5.5), 0.0)   # less than MIN_PART would be left
 
 
 class FakeStack:

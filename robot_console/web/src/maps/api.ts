@@ -1,6 +1,6 @@
 // Map catalog, projection previews and recycle bin API.
-import { ApiError, fetchAsset } from '@/api'
-import type { CodedMsg } from '@/types'
+import { fetchAsset, request, xyz, type RequestOptions } from '@/http'
+import { taskResult, type ConsoleTask } from '@/tasks'
 
 export type IssueLevel = 'error' | 'warn' | 'info'
 
@@ -60,6 +60,8 @@ export interface MapDetail extends MapEntry {
   yaml_path: string | null
   files: MapFile[]
   total_size: number
+  /** the scans the map was built from are still on disk (2D can be rebuilt from scan evidence) */
+  has_scans?: boolean
 }
 
 export interface RegridPreview {
@@ -74,37 +76,30 @@ export interface RegridPreview {
 }
 export interface TrashEntry { id: string; name: string; deleted: string; size: number }
 
-async function getJson<T>(path: string, method = 'GET', data?: unknown): Promise<T> {
-  const res = await fetch(path, { method, headers: data ? { 'Content-Type': 'application/json' } : undefined,
-    body: data ? JSON.stringify(data) : undefined })
-  const body = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    const d = body.detail
-    if (d && typeof d === 'object' && 'code' in d) throw new ApiError(d as CodedMsg)
-    throw new ApiError({ code: 'unknown', params: { reason: `${res.status} ${res.statusText}` } })
-  }
-  return body as T
+function getJson<T>(path: string, method = 'GET', data?: unknown, options: RequestOptions<T> = {}): Promise<T> {
+  return request<T>(method, path, data, options)
 }
 
 const enc = encodeURIComponent
 
 export const mapsApi = {
   discardPreview: (token: string) => getJson<unknown>(`/api/maps/regrid/${enc(token)}`, 'DELETE'),
-  preview: (name: string, params: unknown) => getJson<RegridPreview>(`/api/maps/${enc(name)}/regrid`, 'POST', params),
+  preview: (name: string, params: unknown, signal?: AbortSignal, onTask?: (task: ConsoleTask<RegridPreview>) => void) =>
+    taskResult<RegridPreview>(`/api/maps/${enc(name)}/regrid`, params, signal, onTask),
   savePreview: (token: string, name: string) => getJson<MapDetail>(`/api/maps/regrid/${enc(token)}/save`, 'POST', { name }),
   trash: () => getJson<TrashEntry[]>('/api/map-trash'),
   remove: (name: string) => getJson<unknown>(`/api/maps/${enc(name)}`, 'DELETE'),
   restore: (id: string) => getJson<unknown>(`/api/map-trash/${enc(id)}/restore`, 'POST'),
   purge: (id?: string) => getJson<unknown>(`/api/map-trash${id ? '/' + enc(id) : ''}`, 'DELETE'),
-  list: () => getJson<MapEntry[]>('/api/maps'),
-  detail: (name: string) => getJson<MapDetail>(`/api/maps/${enc(name)}`),
+  list: (signal?: AbortSignal) => getJson<MapEntry[]>('/api/maps', 'GET', undefined, { signal }),
+  detail: (name: string, signal?: AbortSignal) => getJson<MapDetail>(`/api/maps/${enc(name)}`, 'GET', undefined, { signal }),
   /** 2D grid image (same rendering the navigation page uses) */
   grid: async (name: string, signal: AbortSignal) =>
     createImageBitmap(await (await fetchAsset(`/api/navigation/maps/${enc(name)}/grid.png`, signal)).blob()),
   /** Down-sampled xyz cloud; works for maps without a 2D grid too */
   cloud: async (name: string, signal: AbortSignal) => {
     const buf = await (await fetchAsset(`/api/maps/${enc(name)}/cloud`, signal)).arrayBuffer()
-    return new Float32Array(buf, 0, Math.floor(buf.byteLength / 12) * 3)
+    return xyz(buf)
   },
 }
 

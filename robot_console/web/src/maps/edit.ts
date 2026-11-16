@@ -1,6 +1,5 @@
 // 2D grid editor API (backend: robot_console/map_edit.py)
-import { ApiError, fetchAsset } from '@/api'
-import type { CodedMsg } from '@/types'
+import { fetchAsset, request } from '@/http'
 
 export const OCCUPIED = 0
 export const UNKNOWN = 205
@@ -43,16 +42,8 @@ export const editApi = {
   },
   save: async (name: string, newName: string, cells: Uint8Array, legacyUnknown = false): Promise<EditSaved> => {
     const q = `new_name=${enc(newName)}${legacyUnknown ? '&legacy_unknown=true' : ''}`
-    const res = await fetch(`/api/maps/${enc(name)}/edit/save?${q}`, {
-      method: 'POST', headers: { 'Content-Type': 'application/octet-stream' },
-      body: cells.slice().buffer as ArrayBuffer,
+    return request<EditSaved>('POST', `/api/maps/${enc(name)}/edit/save?${q}`, undefined, {
+      raw: cells.slice().buffer as ArrayBuffer, headers: { 'Content-Type': 'application/octet-stream' }, category: 'long',
     })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      const d = data.detail
-      if (d && typeof d === 'object' && 'code' in d) throw new ApiError(d as CodedMsg)
-      throw new ApiError({ code: 'unknown', params: { reason: `${res.status} ${res.statusText}` } })
-    }
-    return data as EditSaved
   },
 }

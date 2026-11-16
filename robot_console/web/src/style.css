@@ -28,6 +28,36 @@
   --shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 0 0 1px rgba(15, 30, 60, 0.05),
     0 10px 30px -14px rgba(20, 60, 120, 0.28);
 
+  /* Building blocks that differ between the light and the dark look (html.dark below overrides them).
+     Component styles use these instead of literal white / navy, so one rule serves both looks. */
+  --page: #eef2f8;                 /* page background behind everything */
+  --paper: #fff;                   /* raised solid surface: slider thumbs, selected cards, key caps */
+  --card-solid: #f8fafd;           /* opaque equivalent of --glass for morphing cards during layout transitions */
+  --paper-rgb: 255, 255, 255;      /* same, for translucent fills: rgba(var(--paper-rgb), 0.6) */
+  --tint-rgb: 15, 30, 60;          /* faint ink wash: tracks, insets, scrollbars */
+  --shade-rgb: 20, 60, 120;        /* drop shadows */
+  --accent-rgb: 8, 145, 178;       /* accent washes and outlines */
+  --deepen: #000;                  /* colored text is mixed toward this to stay readable on its own tint */
+  --overlay: rgba(15, 23, 42, 0.16);
+  --drawer-bg: rgba(247, 250, 253, 0.84);
+  --stage-glow: radial-gradient(ellipse at 50% 35%, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.55) 70%);
+  --canvas-bg: #eef2f8;            /* letterbox of 2D canvases (map editor) */
+  --ramp: #99dbed, #05a3cc, #2563eb, #5440d9;   /* point cloud height colors, low to high (theme.ts) */
+  --line-est: #2563eb;
+  --grid-line: #9db4cc;
+  --note-ink: #92400e;             /* amber notice: title, body text, fill, outline */
+  --note-ink-2: #a16207;
+  --note-bg: rgba(255, 251, 235, 0.92);
+  --note-edge: rgba(217, 119, 6, 0.35);
+  --offline-bg: rgba(254, 242, 242, 0.75);
+  --offline-edge: rgba(252, 165, 165, 0.7);
+  --bg-glow:
+    radial-gradient(900px 620px at 8% -10%, rgba(56, 189, 248, 0.3), transparent 60%),
+    radial-gradient(820px 620px at 105% 112%, rgba(129, 140, 248, 0.26), transparent 60%),
+    radial-gradient(640px 420px at 68% 18%, rgba(255, 255, 255, 0.95), transparent 70%),
+    linear-gradient(180deg, #f7f9fd, #e8edf6);
+  --bg-grid: rgba(15, 40, 80, 0.055);
+
   /* Element Plus 主题色改成青色（light-N 是和白色按比例混合的结果） */
   --el-color-primary: #0891b2;
   --el-color-primary-light-3: #52b2c9;
@@ -42,6 +72,120 @@
   --el-text-color-regular: var(--ink-2);
 }
 
+/* Dark look: the same frosted panels over a deep navy page. Element Plus ships its own dark variables
+   (theme-chalk/dark/css-vars.css, imported in main.ts before this file); the neutral greys are retinted here. */
+html.dark {
+  --ink: #e8eef8;
+  --ink-2: #aab6cb;
+  --ink-3: #8090a9;
+  --accent: #22d3ee;
+  --accent-2: #818cf8;
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --idle: #7c8aa3;
+
+  --glass: rgba(18, 26, 44, 0.62);
+  --glass-strong: rgba(28, 38, 62, 0.9);
+  --glass-edge: rgba(150, 180, 230, 0.13);
+  --hairline: rgba(150, 180, 230, 0.12);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 14px 34px -16px rgba(0, 0, 0, 0.75);
+
+  --page: #080d18;
+  --paper: #2e3c5c;
+  --card-solid: #111a2c;
+  --paper-rgb: 46, 60, 92;
+  --tint-rgb: 150, 180, 230;
+  --shade-rgb: 0, 0, 0;
+  --accent-rgb: 34, 211, 238;
+  --deepen: #fff;
+  --overlay: rgba(2, 6, 14, 0.55);
+  --drawer-bg: rgba(16, 23, 39, 0.88);
+  --stage-glow: radial-gradient(ellipse at 50% 35%, rgba(34, 48, 78, 0.55), rgba(8, 13, 24, 0.55) 75%);
+  --canvas-bg: #0d1424;
+  --ramp: #b8edfa, #21c7ed, #5c99ff, #9e8cff;
+  --line-est: #60a5fa;
+  --grid-line: #53678c;
+  --note-ink: #fcd34d;
+  --note-ink-2: #e9c46a;
+  --note-bg: rgba(69, 46, 8, 0.88);
+  --note-edge: rgba(251, 191, 36, 0.4);
+  --offline-bg: rgba(88, 22, 28, 0.6);
+  --offline-edge: rgba(248, 113, 113, 0.45);
+  --bg-glow:
+    radial-gradient(900px 620px at 8% -10%, rgba(34, 150, 210, 0.22), transparent 60%),
+    radial-gradient(820px 620px at 105% 112%, rgba(99, 102, 241, 0.2), transparent 60%),
+    linear-gradient(180deg, #0a1120, #070b14);
+  --bg-grid: rgba(130, 170, 240, 0.06);
+
+  /* Deeper than --accent: Element Plus puts white text on its primary color (checked radio buttons, tags) */
+  --el-color-primary: #12a5c6;
+  --el-color-primary-light-3: color-mix(in srgb, #12a5c6 70%, #131b2d);
+  --el-color-primary-light-5: color-mix(in srgb, #12a5c6 50%, #131b2d);
+  --el-color-primary-light-7: color-mix(in srgb, #12a5c6 30%, #131b2d);
+  --el-color-primary-light-8: color-mix(in srgb, #12a5c6 20%, #131b2d);
+  --el-color-primary-light-9: color-mix(in srgb, #12a5c6 10%, #131b2d);
+  --el-color-primary-dark-2: #41b7d1;
+  --el-color-success: #22b573;
+  --el-color-success-light-3: color-mix(in srgb, #22b573 70%, #131b2d);
+  --el-color-success-light-5: color-mix(in srgb, #22b573 50%, #131b2d);
+  --el-color-success-light-7: color-mix(in srgb, #22b573 30%, #131b2d);
+  --el-color-success-light-8: color-mix(in srgb, #22b573 20%, #131b2d);
+  --el-color-success-light-9: color-mix(in srgb, #22b573 12%, #131b2d);
+  --el-color-success-dark-2: #49c98e;
+  --el-color-warning: #e0981f;
+  --el-color-warning-light-3: color-mix(in srgb, #e0981f 70%, #131b2d);
+  --el-color-warning-light-5: color-mix(in srgb, #e0981f 50%, #131b2d);
+  --el-color-warning-light-7: color-mix(in srgb, #e0981f 30%, #131b2d);
+  --el-color-warning-light-8: color-mix(in srgb, #e0981f 20%, #131b2d);
+  --el-color-warning-light-9: color-mix(in srgb, #e0981f 12%, #131b2d);
+  --el-color-warning-dark-2: #f0b144;
+  --el-color-danger: #ea4e54;
+  --el-color-danger-light-3: color-mix(in srgb, #ea4e54 70%, #131b2d);
+  --el-color-danger-light-5: color-mix(in srgb, #ea4e54 50%, #131b2d);
+  --el-color-danger-light-7: color-mix(in srgb, #ea4e54 30%, #131b2d);
+  --el-color-danger-light-8: color-mix(in srgb, #ea4e54 20%, #131b2d);
+  --el-color-danger-light-9: color-mix(in srgb, #ea4e54 13%, #131b2d);
+  --el-color-danger-dark-2: #f27479;
+  --el-color-error: var(--el-color-danger);
+  --el-color-error-light-3: var(--el-color-danger-light-3);
+  --el-color-error-light-5: var(--el-color-danger-light-5);
+  --el-color-error-light-7: var(--el-color-danger-light-7);
+  --el-color-error-light-8: var(--el-color-danger-light-8);
+  --el-color-error-light-9: var(--el-color-danger-light-9);
+  --el-color-error-dark-2: var(--el-color-danger-dark-2);
+  --el-color-info: #7888a4;
+  --el-color-info-light-3: color-mix(in srgb, #7888a4 70%, #131b2d);
+  --el-color-info-light-5: color-mix(in srgb, #7888a4 50%, #131b2d);
+  --el-color-info-light-7: color-mix(in srgb, #7888a4 30%, #131b2d);
+  --el-color-info-light-8: color-mix(in srgb, #7888a4 20%, #131b2d);
+  --el-color-info-light-9: color-mix(in srgb, #7888a4 14%, #131b2d);
+  --el-color-info-dark-2: #98a7c0;
+  --el-bg-color-page: var(--page);
+  --el-bg-color: #131b2d;
+  --el-bg-color-overlay: #19233a;
+  --el-text-color-primary: var(--ink);
+  --el-text-color-regular: var(--ink-2);
+  --el-text-color-secondary: #94a2ba;
+  --el-text-color-placeholder: #6f7d96;
+  --el-text-color-disabled: #57647c;
+  --el-border-color-darker: #4d5c7c;
+  --el-border-color-dark: #445270;
+  --el-border-color: #37445f;
+  --el-border-color-light: #2e3a53;
+  --el-border-color-lighter: #263148;
+  --el-border-color-extra-light: #1f293d;
+  --el-fill-color-darker: #344260;
+  --el-fill-color-dark: #2e3b57;
+  --el-fill-color: #28344e;
+  --el-fill-color-light: #222d45;
+  --el-fill-color-lighter: #1c263b;
+  --el-fill-color-extra-light: #182135;
+  --el-fill-color-blank: #162036;
+  --el-mask-color: rgba(4, 8, 16, 0.8);
+}
+
 html,
 body,
 #app {
@@ -54,7 +198,7 @@ body {
   color: var(--ink);
   /* Long unbroken strings (map/scene/run names with underscores, paths) wrap instead of overflowing their box */
   overflow-wrap: break-word;
-  background: #eef2f8;
+  background: var(--page);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -65,11 +209,7 @@ body::before {
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(900px 620px at 8% -10%, rgba(56, 189, 248, 0.3), transparent 60%),
-    radial-gradient(820px 620px at 105% 112%, rgba(129, 140, 248, 0.26), transparent 60%),
-    radial-gradient(640px 420px at 68% 18%, rgba(255, 255, 255, 0.95), transparent 70%),
-    linear-gradient(180deg, #f7f9fd, #e8edf6);
+  background: var(--bg-glow);
 }
 /* 背景第二层：细网格，越往边缘越淡 */
 body::after {
@@ -79,8 +219,8 @@ body::after {
   z-index: -1;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(15, 40, 80, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(15, 40, 80, 0.055) 1px, transparent 1px);
+    linear-gradient(var(--bg-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
   background-size: 32px 32px;
   mask-image: radial-gradient(ellipse at 50% 40%, #000 25%, transparent 80%);
 }
@@ -112,7 +252,7 @@ body::after {
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
-  color: color-mix(in srgb, var(--chip) 85%, #000);
+  color: color-mix(in srgb, var(--chip) 85%, var(--deepen));
   background: color-mix(in srgb, var(--chip) 10%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip) 24%, transparent);
 }
@@ -144,7 +284,7 @@ body::after {
   --el-table-bg-color: transparent;
   --el-table-tr-bg-color: transparent;
   --el-table-header-bg-color: transparent;
-  --el-table-row-hover-bg-color: rgba(8, 145, 178, 0.06);
+  --el-table-row-hover-bg-color: rgba(var(--accent-rgb), 0.06);
   --el-table-border-color: var(--hairline);
   --el-table-header-text-color: var(--ink-3);
   --el-table-text-color: var(--ink);
@@ -178,16 +318,16 @@ body::after {
   filter: brightness(1.08);
 }
 .el-button--default:not(.is-link):not(.is-text) {
-  --el-button-bg-color: rgba(255, 255, 255, 0.75);
-  --el-button-disabled-bg-color: rgba(255, 255, 255, 0.45);
+  --el-button-bg-color: rgba(var(--paper-rgb), 0.75);
+  --el-button-disabled-bg-color: rgba(var(--paper-rgb), 0.45);
 }
 
 .el-overlay {
-  background-color: rgba(15, 23, 42, 0.16);
+  background-color: var(--overlay);
   backdrop-filter: blur(2px);
 }
 .el-drawer {
-  --el-drawer-bg-color: rgba(247, 250, 253, 0.84);
+  --el-drawer-bg-color: var(--drawer-bg);
   backdrop-filter: var(--blur);
   -webkit-backdrop-filter: var(--blur);
   border-left: 1px solid var(--glass-edge);
@@ -289,13 +429,43 @@ body::after {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(15, 30, 60, 0.16);
+  background: rgba(var(--tint-rgb), 0.18);
   border: 2px solid transparent;
   border-radius: 8px;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ---------------- Switching between the light and the dark look (theme.ts) ---------------- */
+
+/* The new look spreads as a growing circle over a still image of the old one; theme.ts animates the clip path.
+   While capturing the new image (`theme-capturing`), CSS transitions pause so thumbs and controls land on their
+   final colors immediately instead of mid-slide. */
+html.theme-capturing *,
+html.theme-capturing *::before,
+html.theme-capturing *::after {
+  transition: none !important;
+}
+html.theme-reveal::view-transition-old(root),
+html.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+html.theme-reveal::view-transition-old(root) {
+  z-index: 1;
+}
+html.theme-reveal::view-transition-new(root) {
+  z-index: 2;
+}
+/* Browsers without view transitions: every color eases over instead */
+html.theme-fade,
+html.theme-fade *,
+html.theme-fade *::before,
+html.theme-fade *::after {
+  transition: background-color 0.35s ease, color 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease,
+    fill 0.35s ease, stroke 0.35s ease !important;
 }
 
 /* 系统设置了"减少动画"时关掉所有动画 */

@@ -15,15 +15,19 @@ const el = ref<HTMLDivElement | null>(null)
 let chart: echarts.ECharts | null = null
 let observer: ResizeObserver | null = null
 
+const resize = () => chart?.resize()
+
 onMounted(() => {
   if (!el.value) return
   chart = echarts.init(el.value, undefined, { renderer: 'canvas' })
   chart.setOption(props.option)
-  observer = new ResizeObserver(() => chart?.resize())
+  observer = new ResizeObserver(resize)
   observer.observe(el.value)
+  window.addEventListener('console:layout-resize', resize)
 })
 watch(() => props.option, (o) => chart?.setOption(o, { notMerge: true }))
 onBeforeUnmount(() => {
+  window.removeEventListener('console:layout-resize', resize)
   observer?.disconnect()
   chart?.dispose()
   chart = null

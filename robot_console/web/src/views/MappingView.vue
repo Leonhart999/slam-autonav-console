@@ -2,6 +2,7 @@
      ①选场景预设并启动仿真，②开始建图，③自动航点（显示进度）或遥控（摇杆、键盘），④保存到地图库（MapSaveStep）。
      录好的数据包在「数据回放」页（PlaybackView）建图 -->
 <script setup lang="ts">
+import { Delete, Upload } from '@element-plus/icons-vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -16,6 +17,8 @@ import { baseOf, savedOptions, useSlamChoice } from '@/mapping/slamChoice'
 import type { MappingPreset, StackInfo, StackState } from '@/types'
 import TeleopPad from '@/components/TeleopPad.vue'
 import MappingImportDialog from '@/components/MappingImportDialog.vue'
+import SlamConfigDialog from '@/components/SlamConfigDialog.vue'
+import { useSlamConfigCount } from '@/mapping/slamConfig'
 import InfoTip from '@/components/InfoTip.vue'
 import MappingStage from '@/components/MappingStage.vue'
 import MapSaveStep from '@/components/MapSaveStep.vue'
@@ -68,6 +71,11 @@ const slamOptions = choice.bases
 const selectedBase = choice.selectedBase
 const selectedSlam = choice.selectedSlam
 const slam = computed(() => stackOf(selectedSlam.value?.name ?? names.value.slam))
+// Parameters of the selected SLAM (SlamConfigDialog): stored per variant, here for the simulated robot
+const paramsOpen = ref(false)
+const slamCfg = useSlamConfigCount(
+  () => (selectedSlam.value?.config ? selectedSlam.value.name : null), () => null, () => store.connected,
+)
 const waypoints = computed(() => stackOf(names.value.waypoints))
 const running = (s: StackInfo | null) => s?.state === 'running'
 
@@ -405,6 +413,12 @@ const imuState = computed<[string, TagType]>(() => {
             @update:model-value="(v: string | number | boolean) => choice.setOption(k, !!v)"
           />
         </div>
+        <div v-if="selectedSlam?.config" class="field">
+          <span class="k">{{ t('mapping.steps.params') }}<InfoTip :content="t('mapping.tips.params')" /></span>
+          <el-button size="small" :disabled="!store.connected" @click="paramsOpen = true">
+            {{ slamCfg.count.value ? t('mapping.steps.paramsChanged', { n: slamCfg.count.value }) : t('mapping.steps.paramsDefault') }}
+          </el-button>
+        </div>
         <p v-if="selectedSlam?.save_mode === 'dump'" class="note">{{ t('mapping.steps.dumpNote') }}</p>
         <p v-if="!running(sim) && !running(slam)" class="note">{{ t('mapping.steps.needSim') }}</p>
         <el-button
@@ -484,6 +498,10 @@ const imuState = computed<[string, TagType]>(() => {
       <!-- ④ 保存 -->
       <MapSaveStep :ms="ms" :current="currentStep === 4" :name-base="selectedPreset || 'map'" />
     </aside>
+    <SlamConfigDialog
+      v-model="paramsOpen" :stack="selectedSlam?.name ?? null" :running="running(slam)"
+      :disabled="!store.connected" @saved="slamCfg.reload"
+    />
     <MappingImportDialog
       v-model="importOpen" :disabled="presetLocked || !store.connected || (!!sim && !!busy[sim.name])"
       @imported="onImported"
@@ -524,17 +542,17 @@ const imuState = computed<[string, TagType]>(() => {
   font: inherit;
   text-align: left;
   color: inherit;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(var(--paper-rgb), 0.55);
   box-shadow: inset 0 0 0 1px var(--hairline);
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s;
 }
 .preset:hover:not(:disabled):not(.upload) {
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(var(--paper-rgb), 0.9);
 }
 .preset.on {
-  background: #fff;
-  box-shadow: inset 0 0 0 1.5px rgba(8, 145, 178, 0.55), 0 6px 16px -10px rgba(8, 145, 178, 0.7);
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px rgba(var(--accent-rgb), 0.55), 0 6px 16px -10px rgba(var(--accent-rgb), 0.7);
 }
 .preset:disabled {
   cursor: not-allowed;
@@ -603,7 +621,7 @@ const imuState = computed<[string, TagType]>(() => {
   color: var(--ink-3);
 }
 .preset.upload:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(var(--paper-rgb), 0.7);
 }
 .seg button:disabled {
   cursor: not-allowed;
@@ -647,9 +665,9 @@ const imuState = computed<[string, TagType]>(() => {
   padding: 8px 10px;
   border-radius: 10px;
   font-size: 12.5px;
-  color: #92400e;
-  background: rgba(254, 243, 199, 0.7);
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.3);
+  color: var(--note-ink);
+  background: var(--note-bg);
+  box-shadow: inset 0 0 0 1px var(--note-edge);
 }
 .teleop {
   display: flex;
@@ -746,8 +764,8 @@ kbd {
   font-size: 11px;
   text-align: center;
   color: var(--ink-2);
-  background: #fff;
-  box-shadow: inset 0 -1.5px 0 rgba(15, 30, 60, 0.12), inset 0 0 0 1px var(--hairline);
+  background: var(--paper);
+  box-shadow: inset 0 -1.5px 0 rgba(var(--tint-rgb), 0.12), inset 0 0 0 1px var(--hairline);
 }
 .slash {
   margin: 0 2px;

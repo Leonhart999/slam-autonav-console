@@ -91,8 +91,13 @@ def read_cloud(path):
     return xyz
 
 
-def import_navigation(root, name, yaml_path, image_path, image_filename, cloud_path=None, preset=None):
-    """Normalize uploads; publish map.yaml (2D) or meta.json (cloud-only) last."""
+def import_navigation(root, name, yaml_path, image_path, image_filename, cloud_path=None, preset=None,
+                      auto_grid=None):
+    """Normalize uploads; publish map.yaml (2D) or meta.json (cloud-only) last.
+
+    auto_grid: for a cloud without a YAML/image pair, callable(cloud, out_dir, (dx, dy)) that projects the cloud
+    into out_dir/map.pgm + map.yaml and returns the projection record (map_regrid.run_worker). The map then has a
+    2D grid right away; when the projection fails the cloud is still imported and meta.json keeps the error."""
     has_grid = yaml_path is not None
     if has_grid != (image_path is not None):
         invalid('Map YAML and image must be supplied together')
@@ -169,10 +174,35 @@ def import_navigation(root, name, yaml_path, image_path, image_filename, cloud_p
                 preview_cloud = xyz[::max(1, math.ceil(len(xyz) / 200000))]
                 preview_points = len(preview_cloud)
                 write_xyz_pcd(stage / 'map_voxel.pcd', preview_cloud)
+            auto = None
+            if cloud_path is not None and not has_grid and auto_grid is not None:
+                auto = {'ok': False, 'error': None, 'warnings': [], 'resolution': None}
+                out = stage / '.grid'
+                out.mkdir()
+                try:
+                    extent = (xyz[:, 0].max() - xyz[:, 0].min(), xyz[:, 1].max() - xyz[:, 1].min())
+                    record = auto_grid(stage / 'map.pcd', out, extent)
+                    os.rename(out / 'map.pgm', stage / 'map.pgm')
+                    os.rename(out / 'map.yaml', stage / 'map.yaml')
+                    with Image.open(stage / 'map.pgm') as im:
+                        im.save(stage / 'map_preview.png')
+                    grid = record['grid']
+                    auto.update(ok=True, warnings=list(record.get('warnings') or []),
+                                resolution=grid['resolution'])
+                    files.update({'map.pgm': 'Occupancy grid projected from the cloud (pcd2grid)',
+                                  'map.yaml': 'Nav2 map metadata', 'map_preview.png': 'Map preview'})
+                except Exception as exc:        # the cloud is still imported; the Maps page offers a regrid
+                    record = None
+                    auto['error'] = str(exc) or type(exc).__name__
+                shutil.rmtree(out, ignore_errors=True)
             meta = {'name': name, 'created': time.strftime('%Y-%m-%d %H:%M:%S'), 'source': 'upload',
                     'algorithm': None, 'frame': 'map', 'preset': preset, 'grid': grid,
                     'points': points, 'voxels': None, 'preview_points': preview_points,
                     'files': files}
+            if auto is not None:
+                meta['project_error'] = auto['error']
+                if record is not None:
+                    meta['regrid'] = {**record, 'auto': True}
             if cloud_path is not None:
                 meta['files'].update({'map.pcd': 'Imported XYZ cloud', 'map_voxel.pcd': 'Sampled cloud preview'})
             (stage / 'meta.json').write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding='utf-8')
@@ -182,13 +212,14 @@ def import_navigation(root, name, yaml_path, image_path, image_filename, cloud_p
             except FileExistsError:
                 raise MapImportError('import_exists', name=name)
             published = True
-            marker = 'map.yaml' if has_grid else 'meta.json'
+            marker = 'map.yaml' if (stage / 'map.yaml').exists() else 'meta.json'
             for file in stage.iterdir():
                 if file.name != marker:
                     os.rename(file, dest / file.name)
             os.rename(stage / marker, dest / marker)
         return {'name': name, 'has_cloud': cloud_path is not None, 'has_solid': False, 'preset': preset,
-                'grid': {k: v for k, v in grid.items() if k != 'size_m'} if grid is not None else None}
+                'grid': {k: v for k, v in grid.items() if k != 'size_m'} if grid is not None else None,
+                'auto_grid': auto}
     except MapImportError:
         if published:
             shutil.rmtree(dest, ignore_errors=True)

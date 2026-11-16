@@ -2,10 +2,12 @@
 // Runs with Windows Node (WSL's NAT network cannot reach a Windows debugging port); tools/ui_smoke.sh starts the
 // console instance and calls this file. Usage:
 //   node ui_smoke.mjs --base http://localhost:8010 --out <Windows dir> --src <web/src dir> [--edge <msedge.exe>]
-//                     [--viewport 1440x1000]
+//                     [--viewport 1440x1000] [--theme light|dark]
 // Checks per page: uncaught exceptions, console.error, vue-i18n / Vue warnings, failed requests (4xx/5xx and
 // network errors, minus EXPECTED), raw i18n keys visible in the page text or in title/aria-label/placeholder, and layout problems (text or
-// controls clipped by their box, table headers wrapping, unwanted horizontal scrollbars, content past the window).
+// controls clipped by their box, table headers wrapping, unwanted horizontal scrollbars, content past the window),
+// and text that is lost against what is behind it (contrast below 2.2:1; catches a color left over from the
+// other look, e.g. dark ink on a dark panel).
 // Before each screenshot it waits for page requests to finish and finite animations (page fade-in) to end.
 // Writes <out>/<lang>_<page>.png, summary.json and summary.md; exit code 1 when anything failed.
 import { spawn } from 'node:child_process'
@@ -24,7 +26,8 @@ const [VW, VH] = arg('viewport', '1440x1000').split('x').map(Number)
 // --pages: comma-separated routes, optionally with a query (e.g. "navigation?map=office"), to check pages in a
 // state prepared beforehand; --tag: prefix for the screenshot names
 const PAGES = arg('pages', 'mapping,playback,maps,navigation,evaluation,monitor').split(',')
-const TAG = arg('tag', '')
+const THEME = arg('theme', 'light')   // look of the console: light | dark (screenshots of dark get a "dark_" prefix)
+const TAG = arg('tag', THEME === 'dark' ? 'dark_' : '')
 const LANGS = ['zh-CN', 'en']
 // Requests that fail by design when no simulation is running; each entry says why.
 const EXPECTED = [
@@ -129,6 +132,84 @@ function layoutCheck() {
   return [...out].slice(0, 40)
 }
 
+// ---------- contrast check, runs inside the page ----------
+// Text against the colors painted behind it (WCAG contrast ratio). Backgrounds are composited from the page color
+// up through every translucent ancestor; a gradient or image is replaced by the average of its color stops.
+// Skipped: text on canvases, disabled or faded controls (opacity < 0.9), and placeholder-like empty text.
+function contrastCheck() {
+  // Secondary text (hints, slider marks, idle tags) sits at 2.3-2.8:1 by design; below this a text is lost
+  const LOW = 2.2
+  const parse = (s) => {
+    const m = /rgba?\(([^)]+)\)/.exec(s)
+    if (m) {
+      const p = m[1].split(/[,\s/]+/).filter(Boolean).map(Number)
+      return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1]
+    }
+    const c = /color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)(?: \/ ([\d.e-]+))?\)/.exec(s)
+    return c ? [c[1] * 255, c[2] * 255, c[3] * 255, c[4] === undefined ? 1 : Number(c[4])] : null
+  }
+  const over = (top, base) => top.slice(0, 3).map((v, i) => v * top[3] + base[i] * (1 - top[3]))
+  const lum = (c) => {
+    const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+  }
+  const ratio = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05) }
+  // Paint of one element, bottom to top: its background color, then every gradient layer as the average of its
+  // color stops (the first layer of background-image is the topmost one)
+  const paints = (cs) => {
+    const out = []
+    const bg = parse(cs.backgroundColor)
+    if (bg && bg[3] > 0) out.push(bg)
+    const layers = []
+    let depth = 0, start = 0
+    const img = cs.backgroundImage
+    for (let i = 0; i <= img.length; i++) {
+      if (img[i] === '(') depth++
+      else if (img[i] === ')') depth--
+      else if (i === img.length || (img[i] === ',' && depth === 0)) { layers.push(img.slice(start, i)); start = i + 1 }
+    }
+    for (const layer of layers.reverse()) {
+      if (!layer.includes('gradient')) continue
+      const stops = [...layer.matchAll(/rgba?\([^)]+\)|color\(srgb [^)]+\)/g)].map((m) => parse(m[0])).filter(Boolean)
+      const alpha = stops.reduce((s, c) => s + c[3], 0)
+      if (alpha > 0) out.push([...[0, 1, 2].map((i) => stops.reduce((s, c) => s + c[i] * c[3], 0) / alpha), alpha / stops.length])
+    }
+    return out
+  }
+  const backdrop = (el) => {
+    const chain = []
+    for (let p = el; p; p = p.parentElement) chain.unshift(p)
+    let base = [255, 255, 255]
+    for (const p of chain) for (const c of paints(getComputedStyle(p))) base = over(c, base)
+    return base
+  }
+  const out = new Map()
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  while (walker.nextNode()) {
+    const node = walker.currentNode
+    const el = node.parentElement
+    if (!node.nodeValue.trim() || !el ||
+        el.closest('canvas, svg, script, style, [disabled], .is-disabled, .el-select__placeholder.is-transparent')) continue
+    const box = el.getBoundingClientRect()
+    const cs = getComputedStyle(el)
+    if (box.width < 1 || box.height < 1 || cs.visibility === 'hidden') continue
+    let opacity = 1
+    for (let p = el; p; p = p.parentElement) opacity *= parseFloat(getComputedStyle(p).opacity)
+    if (opacity < 0.9) continue
+    const ink = parse(cs.color)
+    if (!ink || ink[3] < 0.5 || cs.webkitTextFillColor === 'rgba(0, 0, 0, 0)' ||
+        cs.backgroundClip === 'text' || cs.webkitBackgroundClip === 'text') continue
+    const behind = backdrop(el)
+    const r = ratio(over(ink, behind), behind)
+    if (r < LOW) {
+      const cls = [...el.classList].slice(0, 2).join('.')
+      const key = `${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}`
+      if (!out.has(key)) out.set(key, `contrast ${r.toFixed(1)}:1 ${key} "${node.nodeValue.trim().slice(0, 30)}"`)
+    }
+  }
+  return [...out.values()].slice(0, 30)
+}
+
 // ---------- Edge + CDP ----------
 const profile = mkdtempSync(join(tmpdir(), 'ui_smoke_'))
 // The renderer-backgrounding switches keep headless Edge producing frames: without them the animation timeline
@@ -170,8 +251,9 @@ for (const lang of LANGS) {
   await send('Page.navigate', { url: `${BASE}/#/monitor` })
   await sleep(1500)
   await evaluate(`localStorage.setItem('robot_console.lang', ${JSON.stringify(lang)})`)
+  await evaluate(`localStorage.setItem('robot_console.theme', ${JSON.stringify(THEME)})`)
   for (const page of PAGES) {
-    const r = { lang, page, exceptions: [], errors: [], warnings: [], requests: [], keys: [], layout: [] }
+    const r = { lang, page, exceptions: [], errors: [], warnings: [], requests: [], keys: [], layout: [], contrast: [] }
     const urls = new Map()
     const inflight = new Set()
     sink = (method, p) => {
@@ -225,6 +307,9 @@ for (const lang of LANGS) {
     })()`)
     r.keys = found ?? []
     r.layout = (await evaluate(`(${layoutCheck.toString()})()`)) ?? ['__layout_check_failed__']
+    r.contrast = (await evaluate(`(${contrastCheck.toString()})()`)) ?? ['__contrast_check_failed__']
+    const dark = await evaluate(`document.documentElement.classList.contains('dark')`)
+    if (dark !== (THEME === 'dark')) r.contrast.push(`page is ${dark ? 'dark' : 'light'}, expected ${THEME}`)
     const metrics = await send('Page.getLayoutMetrics')
     const size = metrics.result.cssContentSize ?? metrics.result.contentSize
     const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true,
@@ -233,7 +318,7 @@ for (const lang of LANGS) {
     writeFileSync(join(OUT, file), Buffer.from(shot.result.data, 'base64'))
     r.screenshot = file
     r.ok = !r.exceptions.length && !r.errors.length && !r.warnings.length && !r.requests.length && !r.keys.length &&
-      !r.layout.length
+      !r.layout.length && !r.contrast.length
     sink = null
     results.push(r)
   }
@@ -244,12 +329,12 @@ await sleep(500)
 try { rmSync(profile, { recursive: true, force: true }) } catch {}
 
 // ---------- report ----------
-const cols = ['exceptions', 'errors', 'warnings', 'requests', 'keys', 'layout']
+const cols = ['exceptions', 'errors', 'warnings', 'requests', 'keys', 'layout', 'contrast']
 const lines = ['| lang | page | result | ' + cols.join(' | ') + ' |', '|' + '---|'.repeat(cols.length + 3)]
 for (const r of results) lines.push(`| ${r.lang} | ${r.page} | ${r.ok ? 'PASS' : 'FAIL'} | ${cols.map((c) => r[c].length).join(' | ')} |`)
 const details = results.filter((r) => !r.ok).flatMap((r) =>
   [`\n### ${r.lang} ${r.page}`, ...cols.flatMap((c) => r[c].map((x) => `- ${c}: ${x}`))])
-const md = ['# UI smoke', '', `base ${BASE}, viewport ${VW}x${VH}, ${new Date().toISOString()}`, '', ...lines, ...details].join('\n')
+const md = ['# UI smoke', '', `base ${BASE}, viewport ${VW}x${VH}, ${THEME} look, ${new Date().toISOString()}`, '', ...lines, ...details].join('\n')
 writeFileSync(join(OUT, 'summary.md'), md + '\n')
 writeFileSync(join(OUT, 'summary.json'), JSON.stringify(results, null, 2))
 console.log(lines.join('\n'))

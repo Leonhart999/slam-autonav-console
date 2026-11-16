@@ -60,6 +60,25 @@ def pgm_size(path):
     return int(tokens[1]), int(tokens[2])
 
 
+def write_scan_poses(recording, path):
+    """Poses of the scans recorded so far (fastlio_loop_record.py index.csv) as a TUM file, one row per scan;
+    returns the number of scans. The recorder may still be writing: an unfinished last line is skipped."""
+    import numpy as np
+    rows = []
+    with open(os.path.join(recording, 'index.csv'), encoding='ascii') as f:
+        for line in f:
+            parts = line.split()
+            if line.endswith('\n') and len(parts) == 10:
+                rows.append([float(v) for v in parts])
+    if not rows:
+        return 0
+    a = np.array(rows)
+    a = a[np.argsort(a[:, 0], kind='stable')]
+    a = a[np.sort(np.unique(a[:, 0], return_index=True)[1])]
+    np.savetxt(path, a[:, [0, 3, 4, 5, 6, 7, 8, 9]], fmt=['%.6f'] + ['%.6f'] * 7)
+    return len(a)
+
+
 class MapLibrary:
 
     def __init__(self, cfg, node, mapping, info_fn, procs=None):
@@ -147,6 +166,7 @@ class MapLibrary:
         if s is None or s.started_at is None:
             raise SaveError('slam_not_running', name=slam)
         if s.state() == 'running':
+            self._mapping.keep_run()
             self._procs.stop(slam)
         dump = prof['dump_dir']
         if not glim_dump.fresh(dump, s.started_at):
@@ -179,7 +199,21 @@ class MapLibrary:
         voxels = self._mapping.voxel_points()
         write_xyz_pcd(os.path.join(d, 'map_voxel.pcd'), voxels)
         st = self._mapping.status()
-        self._mapping.export_run(os.path.join(d, 'data'))
+        st['run'] = self._mapping.export_run(os.path.join(d, 'data'))
+        # Raw scans recorded with the playback ("Save raw scans"): keep their poses with the map and mark the
+        # recording as used, so it is not deleted when the SLAM stops
+        recording = self._info_fn().get('input_recording')
+        if recording:
+            try:
+                os.makedirs(os.path.join(d, 'data'), exist_ok=True)
+                scans = write_scan_poses(recording, os.path.join(d, 'data', 'scan_poses.tum'))
+            except (OSError, ValueError):
+                scans = 0
+            if scans:
+                with open(os.path.join(recording, 'used_by_maps.txt'), 'a', encoding='utf-8') as f:
+                    f.write(name + '\n')
+            else:
+                recording = None
 
         # 3. 投影成 2D 栅格（失败时 3D 地图仍然保留，meta 里 grid 为 null）
         self._step('project')
@@ -234,6 +268,11 @@ class MapLibrary:
                       'data/': '保存时刻轨迹快照、CSV 和统计数据'
                                + ('；data/glim/ 为 GLIM 输出的轨迹' if dump else '')},
         }
+        # only a recording whose poses were stored with the map counts (see step 2)
+        meta.pop('input_recording', None)
+        if recording:
+            meta['input_recording'] = recording
+            meta['files']['data/'] += '; data/scan_poses.tum: pose of every recorded raw scan'
         with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
         self._mapping.add_map_to_run(name)
