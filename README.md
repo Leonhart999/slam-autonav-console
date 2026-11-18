@@ -88,10 +88,19 @@ page, start the simulation and navigation there, and click a goal on the 2D grid
 - **GLIM** (factor-graph SLAM with loop closure): install `ros-humble-glim-ros` from the author's PPA, see
   <https://koide3.github.io/glim/installation.html>. The base configuration for the simulated 16-line lidar is
   in `sim_robot/config/glim`; the console applies layered overrides on top of it (`robot_console/config/slam/glim.yaml`).
-- **HKUST 4F west world** (long corridors, built from the SLABIM BIM): download the
-  [SLABIM dataset](https://github.com/HKUST-Aerial-Robotics/SLABIM), then
-  `bash sim_robot/tools/make_hkust_models.sh /path/to/SLABIM` and
-  `colcon build --packages-select sim_robot`. The scene appears on the Mapping page afterwards.
+- **HKUST 4F west world** (long corridors, built from the BIM of the
+  [SLABIM dataset](https://github.com/HKUST-Aerial-Robotics/SLABIM)): only `BIM.zip` (96 MB) of the dataset is
+  needed. The SharePoint links in the SLABIM GitHub README no longer work; take it from the dataset's
+  Hugging Face page instead (in mainland China use the mirror `https://hf-mirror.com/datasets/BobH62/SLABIM/resolve/main/BIM.zip`):
+
+  ```bash
+  wget https://huggingface.co/datasets/BobH62/SLABIM/resolve/main/BIM.zip
+  python3 -m zipfile -e BIM.zip SLABIM        # gives SLABIM/BIM/4F/mesh/*.ply
+  bash sim_robot/tools/make_hkust_models.sh SLABIM
+  colcon build --packages-select sim_robot
+  ```
+
+  The scene appears on the Mapping page afterwards.
 - **Offline planar loop back-end** (post-processing for FAST-LIO2 recordings on flat single-floor maps):
   install `robot_console/install/requirements-loop.txt` into a separate Python environment so system GLIM / GTSAM
   stays untouched, then use `fastlio_loop_record`, `fastlio_loop` and `fastlio_loop_export`. See

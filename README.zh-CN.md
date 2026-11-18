@@ -72,10 +72,18 @@ bash slam-autonav-console/robot_console/install/start_console.sh    # 启动控�
 
 - **GLIM**（带回环的因子图 SLAM）：从作者的 PPA 安装 `ros-humble-glim-ros`，见
   <https://koide3.github.io/glim/installation.html>。针对仿真 16 线激光雷达的基础配置在 `sim_robot/config/glim`，控制台会在其上按 `robot_console/config/slam/glim.yaml` 分层覆盖。
-- **港科大 4 楼西侧场景**（长走廊，由 SLABIM 的 BIM 模型生成）：先下载
-  [SLABIM 数据集](https://github.com/HKUST-Aerial-Robotics/SLABIM)，然后运行
-  `bash sim_robot/tools/make_hkust_models.sh /path/to/SLABIM` 和 `colcon build --packages-select sim_robot`，
-  建图页就会出现这个场景。
+- **港科大 4 楼西侧场景**（长走廊，由 [SLABIM 数据集](https://github.com/HKUST-Aerial-Robotics/SLABIM)的 BIM 模型生成）：
+  只需要数据集里的 `BIM.zip`（96 MB）。SLABIM GitHub 主页上的 SharePoint 下载链接已经失效，请从数据集的
+  Hugging Face 页面下载；国内网络把下面的地址换成镜像 `https://hf-mirror.com/datasets/BobH62/SLABIM/resolve/main/BIM.zip`：
+
+  ```bash
+  wget https://huggingface.co/datasets/BobH62/SLABIM/resolve/main/BIM.zip
+  python3 -m zipfile -e BIM.zip SLABIM        # 得到 SLABIM/BIM/4F/mesh/*.ply
+  bash sim_robot/tools/make_hkust_models.sh SLABIM
+  colcon build --packages-select sim_robot
+  ```
+
+  之后建图页就会出现这个场景。
 - **离线平面回环优化后端**（针对单层水平地面 FAST-LIO2 录制数据的离线闭环与重建）：将 `robot_console/install/requirements-loop.txt` 装进单独的 Python 虚拟环境（避免与系统 GLIM / GTSAM 冲突），即可运行 `fastlio_loop_record`、`fastlio_loop` 和 `fastlio_loop_export`，详见 [robot_console/docs/fastlio-loop-backend.md](robot_console/docs/fastlio-loop-backend.md)（英文）。
 
 ### 配置

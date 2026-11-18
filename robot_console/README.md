@@ -65,10 +65,11 @@ failure you can fix the cause and run it again.
    licences do not allow shipping them in the repository. If the download fails the installer goes on;
    only the warehouse world is affected.
    The HKUST 4F west world is optional: its building model is derived from the SLABIM dataset, which states
-   no licence for its BIM files, so it is not shipped either. Download SLABIM
-   (https://github.com/HKUST-Aerial-Robotics/SLABIM) and run `sim_robot/tools/make_hkust_models.sh
-   /path/to/SLABIM`, or run the installer with `SLABIM_DIR` set. Until then the Mapping page does not list
-   that scene.
+   no licence for its BIM files, so it is not shipped either. Only `BIM.zip` of SLABIM is needed:
+   download https://huggingface.co/datasets/BobH62/SLABIM/resolve/main/BIM.zip (the SharePoint links in the SLABIM GitHub README no longer work; mainland China mirror:
+   https://hf-mirror.com/datasets/BobH62/SLABIM/resolve/main/BIM.zip), extract it with `python3 -m zipfile -e BIM.zip SLABIM` and run
+   `sim_robot/tools/make_hkust_models.sh SLABIM`, or run the installer with `SLABIM_DIR` set. Until then the
+   Mapping page does not list that scene.
 4. FAST-LIO cannot expand `~`, so the configs need an absolute path. The script rewrites `map_file_path` in
    `sim_robot/config/fastlio_sim_vlp16.yaml` to your home directory.
 5. A `colcon build` of the workspace.

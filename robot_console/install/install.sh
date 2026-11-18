@@ -199,8 +199,11 @@ if [ -f "$SIM_DIR/models/bim_hkust_4f_west/model.sdf" ]; then
 elif [ -n "${SLABIM_DIR:-}" ]; then
     bash "$SIM_DIR/tools/make_hkust_models.sh" "$SLABIM_DIR" || info "WARNING: HKUST model could not be built"
 else
-    info "HKUST 4F west scene skipped (optional). To add it: download SLABIM, then"
-    info "  bash $SIM_DIR/tools/make_hkust_models.sh /path/to/SLABIM   (or run this installer with SLABIM_DIR set)"
+    info "HKUST 4F west scene skipped (optional). To add it, download BIM.zip of SLABIM (96 MB):"
+    info "  https://huggingface.co/datasets/BobH62/SLABIM/resolve/main/BIM.zip"
+    info "  (mainland China: https://hf-mirror.com/datasets/BobH62/SLABIM/resolve/main/BIM.zip)"
+    info "  python3 -m zipfile -e BIM.zip SLABIM && bash $SIM_DIR/tools/make_hkust_models.sh SLABIM"
+    info "  (or run this installer with SLABIM_DIR set to the extracted folder)"
 fi
 
 for f in "$SIM_DIR/config/fastlio_sim_vlp16.yaml" "$SIM_DIR/config/fastlio_lidar_only.yaml" \

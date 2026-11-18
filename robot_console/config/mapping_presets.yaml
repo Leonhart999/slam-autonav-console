@@ -34,4 +34,4 @@ hkust_4f_west:
     waypoints: [--params-file, '${pkg:sim_robot}/config/route_hkust_4f_west.yaml']
   # The building model is generated from the SLABIM dataset by each user (no licence to ship it)
   requires: ['${pkg:sim_robot}/models/bim_hkust_4f_west/model.sdf']
-  requires_hint: 'download SLABIM, then: bash <sim_robot>/tools/make_hkust_models.sh /path/to/SLABIM && colcon build --packages-select sim_robot'
+  requires_hint: 'download https://huggingface.co/datasets/BobH62/SLABIM/resolve/main/BIM.zip (mirror: hf-mirror.com), python3 -m zipfile -e BIM.zip SLABIM, then: bash <sim_robot>/tools/make_hkust_models.sh SLABIM && colcon build --packages-select sim_robot'

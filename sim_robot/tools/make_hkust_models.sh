@@ -3,15 +3,19 @@
 #
 # The model is derived from the HKUST main building BIM of the SLABIM dataset (Huang et al., ICRA 2025,
 # https://github.com/HKUST-Aerial-Robotics/SLABIM). The dataset states no licence for its BIM files, so the
-# model is not shipped: download SLABIM yourself (BIM/4F/mesh/{walls,columns}.ply is enough) and run
-#   bash tools/make_hkust_models.sh /path/to/SLABIM        (or set SLABIM_DIR)
+# model is not shipped: download BIM.zip of SLABIM yourself (96 MB; the SharePoint links in the SLABIM README
+# no longer work) and run
+#   wget https://huggingface.co/datasets/BobH62/SLABIM/resolve/main/BIM.zip
+#     (mainland China: https://hf-mirror.com/datasets/BobH62/SLABIM/resolve/main/BIM.zip)
+#   python3 -m zipfile -e BIM.zip SLABIM                  # gives SLABIM/BIM/4F/mesh/{walls,columns}.ply
+#   bash tools/make_hkust_models.sh SLABIM                 (or set SLABIM_DIR)
 #   colcon build --packages-select sim_robot
 # The world file worlds/hkust_4f_west.sdf is shipped; only the building mesh is generated. The result is
 # checked against the SHA-256 of the mesh used in the thesis experiments.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SLABIM=${1:-${SLABIM_DIR:-}}
-[ -n "$SLABIM" ] || { sed -n '2,11p' "$0"; exit 2; }
+[ -n "$SLABIM" ] || { sed -n '2,14p' "$0"; exit 2; }
 for f in walls columns; do
     [ -f "$SLABIM/BIM/4F/mesh/$f.ply" ] || { echo "missing $SLABIM/BIM/4F/mesh/$f.ply" >&2; exit 1; }
 done
