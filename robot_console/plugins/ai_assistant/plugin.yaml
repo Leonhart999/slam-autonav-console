@@ -1,0 +1,43 @@
+# AI assistant: a chat drawer in the console header that answers questions about maps, runs, evaluation results,
+# SLAM parameters, logs and sensor profiles. The access menu under the input decides what it may do: chat only, read
+# data (default), or also start / cancel batch experiments and compute evaluations (after asking, or automatically).
+# Each user connects their own model service: any OpenAI-compatible Chat Completions endpoint, or the Anthropic
+# Messages API.
+id: ai_assistant
+api: 1
+version: 0.3.0
+name: {zh: AI 助手, en: AI assistant}
+description:
+  zh: 在页头打开一个聊天抽屉，用你自己配置的大模型（在“AI 模型服务”页添加，可保存多个并随时切换）回答关于地图、运行记录、评估结果、SLAM 参数、日志和传感器配置的问题。输入框下方可以选模型和推理强度，并选择权限：仅对话、只读（默认）、运行前询问或自动运行；后两种允许它启动或取消批量实验、计算评估。它不会删除数据或修改设置。对话内容和工具读取到的数据会发送给你配置的模型服务。
+  en: 'Opens a chat drawer in the header that answers questions about maps, run records, evaluation results, SLAM parameters, logs and sensor profiles with the model service you configure (add several on the AI model services page and switch any time). Under the input you pick the model, its reasoning effort and the access: chat only, read only (default), ask before running, or run automatically; the last two let it start or cancel batch experiments and compute evaluations. It never deletes data or changes settings. The conversation and the data the tools read are sent to that model service.'
+author: Leonhart999
+license: MIT
+backend:
+  module: backend
+frontend:
+  dir: ui
+  script: plugin.js
+  style: plugin.css
+settings:
+  - key: timeout
+    type: integer
+    label: {zh: 单次请求超时（秒）, en: Request timeout (s)}
+    min: 10
+    max: 900
+    default: 180
+  - key: max_tool_rounds
+    type: integer
+    label: {zh: 每个问题最多调用工具轮数, en: Tool rounds per question}
+    help:
+      zh: 模型每读一次数据算一轮；超过后要求它直接根据已有数据回答。
+      en: Every time the model reads data counts as a round; after the limit it has to answer with what it has.
+    min: 1
+    max: 30
+    default: 12
+  - key: instructions
+    type: text
+    label: {zh: 补充说明, en: Extra instructions}
+    help:
+      zh: 可选，附加给模型的说明，例如回答风格或你的实验背景。
+      en: Optional instructions added for the model, such as answer style or the background of your experiments.
+    max_length: 4000

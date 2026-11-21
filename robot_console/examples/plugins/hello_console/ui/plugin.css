@@ -1,0 +1,34 @@
+/* Styles of the example plugin. Use the console's CSS variables (--ink, --accent, ...) so light and dark themes
+   both work, and prefix every class with the plugin id so nothing leaks into other pages. */
+.hello-console {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.hello-console__text {
+  margin: 4px 0 8px;
+  font-size: 22px;
+  font-weight: 600;
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hello-console__hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+.hello-console__kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.hello-console__token {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}

@@ -26,6 +26,7 @@ from .upload_routes import register_import_routes
 from .map_catalog import register_map_routes
 from .evaluation import register_evaluation_routes
 from .batch import register_batch_routes
+from .nav_batch import register_nav_batch_routes
 from .run_trash import register_run_trash_routes
 from .map_edit import register_map_edit_routes
 from .playback import register_playback_routes
@@ -35,6 +36,7 @@ from .slam_config import register_slam_config_routes
 from .open_folder import register_open_folder_routes
 from .map_scene import register_map_scene_routes
 from .stream_cache import SharedSnapshot
+from .plugins import register_plugin_routes
 
 STREAMS = {'mapping'}       # 网页可以订阅的数据流；不订阅就不发（监控页不需要点云）
 STREAM_PERIOD = 0.2         # 订阅的数据流多久推送一次（s）
@@ -53,7 +55,8 @@ class WebFiles(StaticFiles):
         return response
 
 
-def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs=None):
+def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs=None,
+               plugins=None):
     app = FastAPI(title='robot_console')
     period = 1.0 / float(cfg['server'].get('status_rate', 2.0))
     psutil.cpu_percent()            # 第一次调用只是开始计时，返回值无意义
@@ -94,7 +97,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
     register_map_routes(app, cfg, nav_maps.solids, library, procs)
     evaluation = register_evaluation_routes(app, cfg, mapping)
     batch = register_batch_routes(app, cfg, node, procs, mapping, library, evaluation)
-    register_run_trash_routes(app, cfg, mapping, batch)
+    batch_runners = [batch]
+    register_run_trash_routes(app, cfg, mapping, type('AnyBatch', (), {'running': staticmethod(lambda: any(b.running() for b in batch_runners))})())
     register_map_edit_routes(app, cfg)
     register_playback_routes(app, playback, procs)
     register_bag_file_routes(app, cfg, playback)
@@ -181,6 +185,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         s = stack_or_404(name)
         if s.page_only:
             raise error(409, 'stack_page_only', name=name)
+        if nav_batch.running() and name in (sim_name, 'sim_gui', nav_name, mapping.stacks.get('waypoints'), *mapping.profiles):
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         # the simulation and bag playback both drive /clock and the SLAM inputs: only one at a time
         if name in playback.sim_stacks and playback.player_active():
             raise error(409, 'playback_running', name=playback.stack)
@@ -233,7 +239,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
 
     @app.post('/api/estop')
     def estop():
-        batch.abort('estop')          # a running batch stops starting new processes and cleans up
+        for _b in batch_runners:
+            _b.abort('estop')          # a running batch stops starting new processes and cleans up
         teleop.lock()                 # 急停后遥控锁定，网页上解除后才能再遥控
         cancelled = node.estop()
         stopped = procs.estop_names()
@@ -303,7 +310,7 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         found.setdefault(variant_name(nav_params_src), nav_params_src)
         return found
     default_variant = variant_name(nav_params_src)
-    nav_run = {'variant': default_variant, 'params_file': nav_params_src}   # what the running Nav2 uses
+    nav_run = {'variant': default_variant, 'params_file': nav_params_src, 'localizer': 'amcl'}   # what the running Nav2 uses
 
     def prepare_nav_params(src=nav_params_src):
         """(Re)write the derived params file; returns the launch argument, or [] when it cannot be made."""
@@ -390,7 +397,9 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         return {'variants': sorted(nav_variants()), 'default': default_variant}
 
     @app.post('/api/navigation/start')
-    def navigation_start(name: str, variant: str | None = None):
+    def navigation_start(name: str, variant: str | None = None, localizer: str = 'amcl'):
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         s = stack_or_404(nav_name)
         try:
             asset = nav_maps.assets(name)
@@ -400,6 +409,9 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         src = nav_variants().get(variant)
         if src is None:
             raise error(400, 'navigation_variant_unknown', name=variant)
+        localizer = (localizer or 'amcl').strip().lower()
+        if localizer not in ('amcl', 'gt'):
+            raise error(400, 'navigation_localizer_unknown', name=localizer)
         sim = procs.get(sim_name)
         if sim is None or sim.state() != 'running':
             raise error(409, 'navigation_needs_sim')
@@ -407,13 +419,18 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
             raise error(409, 'navigation_scene_mismatch', name=name, map=asset['preset'], sim=sim.preset)
         if s.state() in ('running', 'stopping'):
             raise error(409, 'stack_running', name=s.name)
+        args = [f"map:={asset['_yaml']}", *prepare_nav_params(src), f'localizer:={localizer}']
+        if localizer == 'gt':
+            origin, _ = map_origin(map_meta(asset), cfg['mapping'].get('runs_dir', '~/runs'), sim_cmd())
+            if origin:
+                args += [f'start_x:={origin[0]}', f'start_y:={origin[1]}', f'start_yaw:={origin[2]}']
         try:
-            info = procs.start(nav_name, [f"map:={asset['_yaml']}", *prepare_nav_params(src)], sim.preset)
+            info = procs.start(nav_name, args, sim.preset)
         except StackRunning:
             raise error(409, 'stack_running', name=s.name)
         except OSError as e:
             raise error(500, 'start_failed', name=s.name, reason=str(e))
-        nav_run.update(variant=variant, params_file=src)
+        nav_run.update(variant=variant, params_file=src, localizer=localizer)
         return info
 
     def running_variant(s):
@@ -427,8 +444,15 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
             return nav_run['variant'], nav_run['params_file']
         return variant_name(path), path
 
+    def running_localizer(s):
+        cmd = s.run_cmd or s.cmd
+        arg = next((a for a in cmd if a.startswith('localizer:=')), None)
+        return arg.split(':=', 1)[1] if arg else 'amcl'
+
     @app.post('/api/navigation/stop')
     def navigation_stop():
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         mission.stop()
         return stop_stack(nav_name)
 
@@ -470,6 +494,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
 
     @app.post('/api/navigation/sim/start')
     def navigation_sim_start(name: str):
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         preset = nav_sim_preset(name)
         if nav_sim_job['state'] != 'idle':
             raise error(409, 'navigation_sim_busy')
@@ -482,10 +508,14 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
 
     @app.post('/api/navigation/sim/stop')
     def navigation_sim_stop():
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         return launch_sim_job('stopping')
 
     @app.post('/api/navigation/sim/restart')
     def navigation_sim_restart(name: str):
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         return launch_sim_job('restarting', nav_sim_preset(name))
 
     def inside(g, x, y):
@@ -514,6 +544,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
     @app.post('/api/navigation/initial_pose')
     def navigation_initial_pose(x: float, y: float, yaw: float):
         x, y, yaw = checked_pose(x, y, yaw)
+        if running_localizer(stack_or_404(nav_name)) == 'gt':
+            raise error(409, 'navigation_gt_no_initial_pose')
         navdata.set_initial_pose(x, y, yaw)
         return {'x': x, 'y': y, 'yaw': yaw}
 
@@ -582,7 +614,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         variant, params_file = running_variant(s)
         sim = procs.get(sim_name)
         ctx = {'map': name, 'map_yaml': str(asset['_yaml']), 'preset': sim.preset if sim else None,
-               'variant': variant, 'params_file': params_file, 'nav_cmd': ' '.join(s.run_cmd or s.cmd),
+               'variant': variant, 'localizer': running_localizer(s),
+               'params_file': params_file, 'nav_cmd': ' '.join(s.run_cmd or s.cmd),
                'sim_cmd': ' '.join(sim_cmd() or []), 'origin': origin, 'origin_source': source}
         try:
             return mission.start(goals, ctx, lambda: nav_speed['scale'])
@@ -591,11 +624,15 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
 
     @app.post('/api/navigation/goal')
     def navigation_goal(x: float, y: float, yaw: float):
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         x, y, yaw = checked_pose(x, y, yaw)
         return run_mission([(x, y, yaw)])
 
     @app.post('/api/navigation/mission')
     def navigation_mission(body: dict):
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         s = stack_or_404(nav_name)
         if s.state() != 'running':
             raise error(409, 'navigation_not_running')
@@ -674,6 +711,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
 
     @app.post('/api/navigation/speed')
     def navigation_speed(scale: float):
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         if not (math.isfinite(scale) and scale_lo <= scale <= scale_hi):
             raise error(400, 'navigation_speed_invalid', lo=scale_lo, hi=scale_hi)
         if nav_speed['base_v'] is None:
@@ -684,6 +723,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
 
     @app.post('/api/navigation/cancel')
     def navigation_cancel():
+        if nav_batch.running():
+            raise error(409, 'batch_running', id=nav_batch.batch['id'])
         # Cancelling stops a waypoint mission too (it does not move on to the next goal)
         if not mission.cancel() and not navdata.cancel_goal():
             raise error(409, 'navigation_no_goal')
@@ -704,6 +745,7 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         data['speed'] = speed_status(state == 'running')
         data['mission'] = mission.status()
         data['variant'] = running_variant(s)[0] if active else None
+        data['localizer'] = running_localizer(s) if active else None
         sim = procs.get(sim_name)
         return {'type': 'navigation', 'state': state, 'map': nav_map_name(s) if active else None,
                 'sim_running': sim is not None and sim.state() == 'running',
@@ -711,6 +753,43 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
                 'sim': {'state': sim.state() if sim else 'idle', 'origin': sim.origin if sim else None,
                         'job': nav_sim_job['state'], 'error': nav_sim_job['error']},
                 'exit_code': s.exit_code if state == 'exited' else None, **data}
+
+
+    def _nav_batch_prepare(src, scale):
+        args = prepare_nav_params(src)
+        if nav_speed['base_v'] is not None:
+            nav_speed['scale'] = scale
+            navdata.set_speed_limit(nav_speed['base_v'] * scale)
+        return args
+
+    def _nav_batch_set_active(variant, src, localizer):
+        nav_run.update(variant=variant, params_file=src, localizer=localizer)
+        sync_nav_epoch(stack_or_404(nav_name))
+
+    def _nav_batch_other_busy():
+        guards = sorted({
+            n for n in ('sim_gui', mapping.stacks.get('waypoints'),
+                        (cfg.get('playback') or {}).get('stack', 'playback'), *mapping.profiles)
+            if n and procs.get(n)
+        })
+        return [s for s in guards if procs.get(s).state() in ('running', 'stopping')]
+
+    nav_batch = register_nav_batch_routes(app, cfg, node, procs, nav_maps, navdata, mission, {
+        'nav_name': nav_name,
+        'sim_name': sim_name,
+        'variants': nav_variants,
+        'default_variant': default_variant,
+        'scale_range': (scale_lo, scale_hi),
+        'goal_timeout': float(nav_cfg.get('goal_timeout', 240.0)),
+        'parse_goals': parse_goals,
+        'map_meta': map_meta,
+        'prepare_params': _nav_batch_prepare,
+        'set_active_run': _nav_batch_set_active,
+        'speed_fn': lambda: nav_speed['scale'],
+        'mapping_batch_running': batch.running,
+        'other_busy': _nav_batch_other_busy,
+    })
+    batch_runners.append(nav_batch)
 
     # ---------------- WebSocket ----------------
 
@@ -776,6 +855,11 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
                 await sender
             except asyncio.CancelledError:
                 pass
+
+    # ---------------- 插件 ----------------
+    # After every core route (a plugin's in-process API calls reach them) and before the page is mounted at '/'
+    if plugins is not None:
+        register_plugin_routes(app, plugins)
 
     # ---------------- 前端页面 ----------------
     # 开发时用 npm run dev（端口 5173）；打包后（npm run build）由这里直接提供页面

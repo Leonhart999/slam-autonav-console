@@ -1,19 +1,21 @@
-<!-- 公共框架：左侧导航栏（品牌、页面菜单、语言切换），右侧页头 + 页面内容 + 底部状态栏。
-     视觉风格是白色磨砂玻璃 + 科幻 HUD，颜色等变量在 style.css -->
+<!-- 公共框架：左侧导航栏（品牌、流程页面菜单、插件页面、底部工具组 系统监控/插件、外观与语言切换），
+     右侧页头 + 页面内容 + 底部状态栏。视觉风格是白色磨砂玻璃 + 科幻 HUD，颜色等变量在 style.css -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Moon, Sunny } from '@element-plus/icons-vue'
+import { Grid, Moon, Sunny } from '@element-plus/icons-vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import enLocale from 'element-plus/es/locale/lang/en'
-import { pages } from './router'
-import { LANGS, setLang } from './i18n'
+import { footPages, mainPages } from './router'
+import { LANGS, pick, setLang } from './i18n'
+import { pagePath, registry } from './plugins/host'
 import { THEMES, setTheme, theme, type Theme } from './theme'
 import { useStatusStore } from './stores/status'
 import StatusBar from './components/StatusBar.vue'
 import RadarMark from './components/RadarMark.vue'
 import TaskCenter from './components/TaskCenter.vue'
+import PluginSlot from './components/PluginSlot.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -33,10 +35,20 @@ function pickTheme(next: Theme, e: MouseEvent) {
 }
 
 const no = (i: number) => String(i + 1).padStart(2, '0')
-// 页头：当前页面在菜单里的序号和标题
+// Pages added by plugins: their own group under the workflow pages, numbered on from them
+const pluginPages = computed(() => registry.pages.map((p) => ({
+  path: pagePath(p), title: pick(p.title), icon: p.icon ?? Grid,
+})))
+// Badges of the bottom tool entries: backend link on Monitor, plugin load problems on Plugins
+const pluginIssues = computed(() => Object.keys(registry.issues).length)
+// 页头：当前页面在菜单里的序号和标题（底部工具页没有序号，显示图标）
 const current = computed(() => {
-  const i = pages.findIndex((p) => p.path === route.path)
-  return i < 0 ? null : { no: no(i), title: t(pages[i].meta.titleKey) }
+  const i = mainPages.findIndex((p) => p.path === route.path)
+  if (i >= 0) return { no: no(i), title: t(mainPages[i].meta.titleKey) }
+  const j = pluginPages.value.findIndex((p) => p.path === route.path)
+  if (j >= 0) return { no: no(mainPages.length + j), title: pluginPages.value[j].title }
+  const f = footPages.find((p) => p.path === route.path)
+  return f ? { icon: f.meta.icon, title: t(f.meta.titleKey) } : null
 })
 
 // 页头右侧的本地时钟（24 小时制，和语言无关）
@@ -65,7 +77,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
 
         <nav class="nav">
           <router-link
-            v-for="(p, i) in pages" :key="p.path" :to="p.path" class="nav-item"
+            v-for="(p, i) in mainPages" :key="p.path" :to="p.path" class="nav-item"
             active-class="active" :class="{ planned: p.meta.step }" :title="t(p.meta.titleKey)"
           >
             <span class="nav-no mono">{{ no(i) }}</span>
@@ -73,25 +85,59 @@ onUnmounted(() => window.clearInterval(clockTimer))
             <span class="nav-label">{{ t(p.meta.titleKey) }}</span>
             <span v-if="p.meta.step" class="nav-soon">{{ t('planned.badge') }}</span>
           </router-link>
+          <template v-if="pluginPages.length">
+            <div class="nav-group">
+              <span class="nav-group-label">{{ t('app.extensions') }}</span>
+            </div>
+            <router-link
+              v-for="(p, i) in pluginPages" :key="p.path" :to="p.path" class="nav-item" active-class="active"
+              :title="p.title"
+            >
+              <span class="nav-no mono">{{ no(mainPages.length + i) }}</span>
+              <el-icon class="nav-icon" :size="17"><component :is="p.icon" /></el-icon>
+              <span class="nav-label">{{ p.title }}</span>
+            </router-link>
+          </template>
+        </nav>
+
+        <!-- Tool pages: a compact group at the bottom, apart from the numbered workflow above -->
+        <nav class="tools">
+          <router-link
+            v-for="p in footPages" :key="p.path" :to="p.path" class="nav-item tool"
+            active-class="active" :title="t(p.meta.titleKey)"
+          >
+            <el-icon class="nav-icon" :size="16"><component :is="p.meta.icon" /></el-icon>
+            <span class="nav-label">{{ t(p.meta.titleKey) }}</span>
+            <span
+              v-if="p.name === 'monitor'" class="tool-dot" :class="store.connected ? 'ok' : 'down'"
+              :title="t(store.connected ? 'app.linkUp' : 'app.linkDown')"
+            />
+            <span
+              v-else-if="p.name === 'plugins' && pluginIssues" class="tool-badge mono"
+              :title="t('app.pluginIssues', { n: pluginIssues })"
+            >{{ pluginIssues }}</span>
+          </router-link>
         </nav>
 
         <div class="rail-foot">
-          <div class="lang" role="group" :aria-label="t('app.theme')" :style="{ '--i': THEMES.indexOf(theme) }">
-            <span class="thumb" />
-            <button
-              v-for="th in THEMES" :key="th" :class="{ on: theme === th }" :aria-pressed="theme === th"
-              :title="t(THEME_LABEL[th])" :data-theme="th" @click="pickTheme(th, $event)"
-            >
-              <el-icon :size="14"><component :is="THEME_ICON[th]" /></el-icon>
-              <span class="seg-text">{{ t(THEME_LABEL[th]) }}</span>
-            </button>
-          </div>
-          <div class="lang" role="group" :aria-label="t('app.language')" :style="{ '--i': langIndex }">
-            <span class="thumb" />
-            <button
-              v-for="l in LANGS" :key="l.value" :class="{ on: locale === l.value }"
-              :aria-pressed="locale === l.value" @click="setLang(l.value)"
-            >{{ l.label }}</button>
+          <div class="prefs">
+            <div class="seg seg-theme" role="group" :aria-label="t('app.theme')" :style="{ '--i': THEMES.indexOf(theme) }">
+              <span class="thumb" />
+              <button
+                v-for="th in THEMES" :key="th" :class="{ on: theme === th }" :aria-pressed="theme === th"
+                :title="t(THEME_LABEL[th])" :aria-label="t(THEME_LABEL[th])" :data-theme="th"
+                @click="pickTheme(th, $event)"
+              >
+                <el-icon :size="14"><component :is="THEME_ICON[th]" /></el-icon>
+              </button>
+            </div>
+            <div class="seg" role="group" :aria-label="t('app.language')" :style="{ '--i': langIndex }">
+              <span class="thumb" />
+              <button
+                v-for="l in LANGS" :key="l.value" :class="{ on: locale === l.value }"
+                :aria-pressed="locale === l.value" @click="setLang(l.value)"
+              >{{ l.label }}</button>
+            </div>
           </div>
           <div class="stamp mono">ROS 2 · Humble</div>
         </div>
@@ -100,10 +146,12 @@ onUnmounted(() => window.clearInterval(clockTimer))
       <div class="stage">
         <header class="topbar">
           <div v-if="current" class="crumb">
-            <span class="crumb-no mono">{{ current.no }}</span>
+            <span v-if="current.no" class="crumb-no mono">{{ current.no }}</span>
+            <el-icon v-else class="crumb-icon" :size="18"><component :is="current.icon" /></el-icon>
             <h1>{{ current.title }}</h1>
             <span class="crumb-path mono">{{ route.path }}</span>
           </div>
+          <PluginSlot v-for="h in registry.header" :key="h.key" :plugin-id="h.pluginId" :component="h.component" />
           <TaskCenter />
           <div class="clock">
             <span class="clock-label">{{ t('app.localTime') }}</span>
@@ -171,8 +219,32 @@ onUnmounted(() => window.clearInterval(clockTimer))
   flex-direction: column;
   gap: 4px;
   flex: 1;
+  /* Plugin pages can make the menu longer than a short window: scroll it. The negative margin + padding keep
+     the active marker (left of the item) inside the scroll box */
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  margin: 0 -12px;
+  padding: 0 12px;
+}
+.nav-group {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 10px 2px;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+/* hairline after the label, running to the right edge of the menu */
+.nav-group::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--hairline);
 }
 .nav-item {
+  flex: none;
   position: relative;
   display: flex;
   align-items: center;
@@ -240,21 +312,78 @@ onUnmounted(() => window.clearInterval(clockTimer))
   opacity: 1;
 }
 
+/* 底部工具组：系统监控、插件。比上面的流程菜单矮一些、没有序号 */
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 10px;
+  margin: 8px -12px 0;
+  padding-inline: 12px;
+  border-top: 1px solid var(--hairline);
+}
+.nav-item.tool {
+  height: 36px;
+  font-size: 13.5px;
+}
+.nav-item.tool.active::before {
+  top: 8px;
+  bottom: 8px;
+}
+/* backend link: green when the status socket is up, red while it reconnects */
+.tool-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 3px;
+  border-radius: 50%;
+}
+.tool-dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+}
+.tool-dot.down {
+  background: var(--bad);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent);
+}
+.tool-badge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  box-sizing: border-box;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+
 .rail-foot {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  margin-top: 10px;
   padding-top: 12px;
   border-top: 1px solid var(--hairline);
 }
-/* 语言切换：分段按钮，滑块滑到当前语言 */
-.lang {
+/* 外观 + 语言：一行两个分段按钮，滑块滑到当前选项 */
+.prefs {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+}
+.seg {
   position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   padding: 3px;
   border-radius: 11px;
   background: rgba(var(--tint-rgb), 0.06);
+}
+.seg-theme {
+  grid-template-columns: 30px 30px;
 }
 .thumb {
   position: absolute;
@@ -268,13 +397,14 @@ onUnmounted(() => window.clearInterval(clockTimer))
   transform: translateX(calc(var(--i) * 100%));
   transition: transform 0.25s cubic-bezier(0.3, 0.7, 0.4, 1);
 }
-.lang button {
+.seg button {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
   height: 28px;
+  padding: 0;
   border: none;
   background: none;
   font: inherit;
@@ -283,11 +413,11 @@ onUnmounted(() => window.clearInterval(clockTimer))
   cursor: pointer;
   transition: color 0.2s;
 }
-.lang button.on {
+.seg button.on {
   color: var(--accent);
   font-weight: 600;
 }
-.lang button:focus-visible {
+.seg button:focus-visible {
   outline: 2px solid var(--accent);
   border-radius: 8px;
 }
@@ -320,6 +450,10 @@ onUnmounted(() => window.clearInterval(clockTimer))
 .crumb-no {
   font-size: 13px;
   font-weight: 600;
+  color: var(--accent);
+}
+.crumb-icon {
+  align-self: center;
   color: var(--accent);
 }
 .crumb h1 {
@@ -385,9 +519,12 @@ onUnmounted(() => window.clearInterval(clockTimer))
   .nav-no,
   .nav-label,
   .nav-soon,
-  .seg-text,
+  .nav-group-label,
   .stamp {
     display: none;
+  }
+  .nav-group {
+    margin-inline: 8px;
   }
   .nav-item {
     justify-content: center;
@@ -396,7 +533,26 @@ onUnmounted(() => window.clearInterval(clockTimer))
   .nav-item.active::before {
     left: -8px;
   }
-  .lang {
+  /* icon-only rail: the status dot and the issue count sit on the icon's corner */
+  .tool-dot,
+  .tool-badge {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    margin: 0;
+  }
+  .tool-badge {
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    font-size: 10px;
+    line-height: 15px;
+    top: 3px;
+    right: 4px;
+  }
+  .prefs,
+  .seg,
+  .seg-theme {
     grid-template-columns: 1fr;
   }
   .thumb {

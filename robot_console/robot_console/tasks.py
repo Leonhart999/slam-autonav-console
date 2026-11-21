@@ -2,6 +2,7 @@
 
 Browser cancellation only stops observing a job. On a backend restart unfinished jobs become
 interrupted; retry explicitly creates a new job, preserving the previous attempt and its error.
+Finished records can be removed one by one or all at once; only the newest KEEP_FINISHED are kept.
 """
 import copy
 import hashlib
@@ -19,6 +20,8 @@ from contextlib import asynccontextmanager
 from fastapi import HTTPException
 
 ACTIVE = {'queued', 'running'}
+# Finished records kept on disk; equal to the list size, so every stored record is visible in the UI.
+KEEP_FINISHED = 100
 LOG = logging.getLogger(__name__)
 
 
@@ -27,9 +30,9 @@ def task_error(reason, status=400):
 
 
 class Tasks:
-    def __init__(self, root, workers=2, limit=32):
+    def __init__(self, root, workers=2, limit=32, keep=KEEP_FINISHED):
         self.root = Path(root).expanduser()
-        self.workers, self.limit = workers, limit
+        self.workers, self.limit, self.keep = workers, limit, keep
         self._lock = threading.RLock()
         self._jobs, self._handlers, self._resources = {}, {}, {}
         self._queue = queue.Queue()
@@ -57,6 +60,13 @@ class Tasks:
                     self._jobs[job['id']] = job
                 except (OSError, ValueError, KeyError, TypeError):
                     continue
+            # Leftovers of an earlier crash: half-written files and results whose record is gone.
+            for path in self.root.glob('*.tmp'):
+                path.unlink(missing_ok=True)
+            for path in self.root.glob('*.result.json'):
+                if not (self.root / (path.name[:-len('.result.json')] + '.json')).exists():
+                    path.unlink(missing_ok=True)
+            self._prune()
 
     def register(self, kind, handler, resource=None):
         self._handlers[kind] = (handler, resource or kind)
@@ -142,6 +152,24 @@ class Tasks:
                     # Keep the worker available even if persisting the failure also fails.
                     # The durable running record will become interrupted on the next start.
                     LOG.exception('Cannot persist task failure %s', ident)
+            with self._lock:
+                self._prune()
+
+    def _discard(self, ident):
+        """Forget a finished job. The record goes first, so a crash in between leaves only an orphan result."""
+        for suffix in ('.json', '.result.json'):
+            (self.root / (ident + suffix)).unlink(missing_ok=True)
+        self._jobs.pop(ident, None)
+
+    def _prune(self):
+        """Keep the newest `keep` finished records; older ones are deleted with their results."""
+        done = sorted((j for j in self._jobs.values() if j['state'] not in ACTIVE),
+                      key=lambda j: j.get('finished') or j['updated'], reverse=True)
+        for job in done[self.keep:]:
+            try:
+                self._discard(job['id'])
+            except OSError:
+                LOG.warning('Cannot delete old task record %s', job['id'], exc_info=True)
 
     def mark_saved_preview(self, token, name):
         """Keep the recovery entry useful after saving consumes the disposable preview."""
@@ -178,6 +206,32 @@ class Tasks:
                 raise task_error('Only failed or interrupted tasks can be retried', 409)
             return self.submit(job['kind'], job['target'], job['params'], retry_of=ident)
 
+    def remove(self, ident):
+        """Delete one finished record and its result. Queued or running jobs cannot be removed."""
+        with self._lock:
+            job = self._jobs.get(ident)
+            if job is None:
+                raise task_error('Task not found', 404)
+            if job['state'] in ACTIVE:
+                raise HTTPException(409, detail={'code': 'task_active', 'params': {}})
+            try:
+                self._discard(ident)
+            except OSError as exc:
+                raise task_error(f'Cannot delete the task record: {exc}', 500)
+
+    def clear(self):
+        """Delete every finished record; queued and running jobs stay. Returns (removed, failed)."""
+        removed = failed = 0
+        with self._lock:
+            for job in [j for j in self._jobs.values() if j['state'] not in ACTIVE]:
+                try:
+                    self._discard(job['id'])
+                    removed += 1
+                except OSError:
+                    failed += 1
+                    LOG.warning('Cannot delete task record %s', job['id'], exc_info=True)
+        return removed, failed
+
     def close(self, wait=False):
         with self._lock:
             self._closed = True
@@ -206,6 +260,17 @@ def tasks_for(app, cfg):
     @app.post('/api/tasks/{ident}/retry')
     def task_retry(ident: str):
         return tasks.retry(ident)
+
+    # Both deletions answer with the remaining list, so the task center redraws from one response.
+    @app.delete('/api/tasks')
+    def task_clear():
+        removed, failed = tasks.clear()
+        return {'removed': removed, 'failed': failed, 'tasks': tasks.list()}
+
+    @app.delete('/api/tasks/{ident}')
+    def task_remove(ident: str):
+        tasks.remove(ident)
+        return {'removed': 1, 'failed': 0, 'tasks': tasks.list()}
 
     original_lifespan = app.router.lifespan_context
     @asynccontextmanager

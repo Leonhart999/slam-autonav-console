@@ -1,0 +1,44 @@
+# Example plugin for the robot_console plugin interface v1 (docs/plugins.md).
+# Copy this folder into a plugins folder (default ~/robot_console_data/plugins), enable it on the Plugins page
+# and restart the console.
+id: hello_console
+api: 1
+version: 0.1.0
+name: {zh: 示例插件, en: Hello plugin}
+description:
+  zh: 插件接口的最小示例：一个后端接口、一个页面和几个设置项。
+  en: 'Minimal example of the plugin interface: one backend route, one page and a few settings.'
+author: Leonhart999
+license: MIT
+backend:
+  module: backend
+frontend:
+  dir: ui
+  script: plugin.js
+  style: plugin.css
+settings:
+  - key: greeting
+    type: string
+    label: {zh: 问候语, en: Greeting}
+    default: Hello
+    max_length: 80
+  - key: repeat
+    type: integer
+    label: {zh: 重复次数, en: Repeat}
+    help: {zh: 问候语重复几次（1–5）, en: How often the greeting is repeated (1–5)}
+    min: 1
+    max: 5
+    default: 1
+  - key: tone
+    type: select
+    label: {zh: 语气, en: Tone}
+    options:
+      - {value: plain, label: {zh: 平静, en: Plain}}
+      - {value: excited, label: {zh: 兴奋, en: Excited}}
+    default: plain
+  - key: token
+    type: secret
+    label: {zh: 示例密钥, en: Example secret}
+    help:
+      zh: 演示密钥类设置：值只保存在后端，页面上只显示是否已设置。
+      en: Shows how secret settings work; the value stays in the backend, the page only shows whether it is set.

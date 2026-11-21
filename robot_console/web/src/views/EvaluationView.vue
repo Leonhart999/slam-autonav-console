@@ -30,8 +30,10 @@ import GlassPanel from '@/components/GlassPanel.vue'
 import KpiTile from '@/components/KpiTile.vue'
 import EvalChart from '@/components/EvalChart.vue'
 import BatchPanel from '@/components/BatchPanel.vue'
+import NavBatchPanel from '@/components/NavBatchPanel.vue'
 import TrashBin, { type TrashItem } from '@/components/TrashBin.vue'
 import BatchCompare, { type BatchCompareItem } from '@/components/BatchCompare.vue'
+import NavBatchCompare, { type NavBatchCompareItem } from '@/components/NavBatchCompare.vue'
 import PlaybackDetail from '@/components/PlaybackDetail.vue'
 import PlaybackCompare from '@/components/PlaybackCompare.vue'
 import { partText } from '@/evaluation/charts'
@@ -207,8 +209,9 @@ function pickRun(id: string, on: boolean) {
   if (row?.evaluable && selection.value.includes(id) !== on) runTable.value?.toggleRowSelection(row, on)
 }
 const batchItems = ref<BatchCompareItem[]>([])
+const navBatchItems = ref<NavBatchCompareItem[]>([])
 const compareCount = computed(() => compareRows.value.length + navCompareRows.value.length + batchItems.value.length
-  + playbackRows.value.filter((r) => r.ape_rmse == null).length)
+  + navBatchItems.value.length + playbackRows.value.filter((r) => r.ape_rmse == null).length)
 // Ticked playback runs (PlaybackCompare); ones with ground truth are also in the ATE comparison above it
 const playbackRows = computed(() => selection.value.map((id) => runs.value.find((r) => r.id === id))
   .filter((r): r is RunEntry => !!r?.playback))
@@ -223,17 +226,21 @@ const navCompareRows = computed(() => selection.value
 
 /** Pooled per variant, same definitions as nav_eval.by_variant (means weighted by goal counts) */
 const variantRows = computed(() => {
-  const groups = new Map<string, NavMetrics[]>()
+  const groups = new Map<string, { variant: string; localizer: string; ms: NavMetrics[] }>()
   for (const r of navCompareRows.value) {
-    const k = r.entry.nav.variant ?? '—'
-    groups.set(k, [...(groups.get(k) ?? []), r.entry.nav])
+    const v = r.entry.nav.variant ?? '—'
+    const l = r.entry.nav.localizer ?? 'amcl'
+    const k = `${v}\0${l}`
+    const g = groups.get(k) ?? { variant: v, localizer: l, ms: [] }
+    g.ms.push(r.entry.nav)
+    groups.set(k, g)
   }
   const wmean = (ms: NavMetrics[], key: 'mean_time_s' | 'mean_path_m' | 'mean_goal_error_m', w: 'succeeded') => {
     const pairs = ms.filter((m) => m[key] != null && m[w] > 0)
     const n = pairs.reduce((a, m) => a + m[w], 0)
     return n ? pairs.reduce((a, m) => a + (m[key] as number) * m[w], 0) / n : null
   }
-  return [...groups.entries()].map(([variant, ms]) => {
+  return [...groups.values()].map(({ variant, localizer, ms }) => {
     const finished = ms.reduce((a, m) => a + m.finished, 0)
     const ok = ms.reduce((a, m) => a + m.succeeded, 0)
     const withAmcl = ms.filter((m) => m.amcl_rmse_m != null && m.amcl_samples)
@@ -241,7 +248,7 @@ const variantRows = computed(() => {
     const locs = ms.filter((m) => m.mean_loc_error_m != null && m.finished > 0)
     const nl = locs.reduce((a, m) => a + m.finished, 0)
     return {
-      variant, runs: ms.length, goals: finished, succeeded: ok,
+      key: `${variant}__${localizer}`, variant, localizer, runs: ms.length, goals: finished, succeeded: ok,
       success_rate: finished ? ok / finished : null,
       mean_time_s: wmean(ms, 'mean_time_s', 'succeeded'),
       mean_path_m: wmean(ms, 'mean_path_m', 'succeeded'),
@@ -250,7 +257,7 @@ const variantRows = computed(() => {
       amcl_rmse_m: n ? Math.sqrt(withAmcl.reduce((a, m) => a + (m.amcl_samples as number) * (m.amcl_rmse_m as number) ** 2, 0) / n) : null,
       recoveries: ms.reduce((a, m) => a + m.recoveries, 0),
     }
-  }).sort((a, b) => a.variant.localeCompare(b.variant))
+  }).sort((a, b) => a.variant.localeCompare(b.variant) || a.localizer.localeCompare(b.localizer))
 })
 
 // ---------------- Two views of the page, chosen with the switch in the list header ----------------
@@ -327,7 +334,10 @@ onBeforeUnmount(() => {
   clearLayoutClasses()
 })
 type Pane = 'detail' | 'compare' | 'batch'
-const pane = ref<Pane>('detail')
+const pane = ref<Pane>(route.query.pane === 'batch' ? 'batch' : route.query.pane === 'compare' ? 'compare' : 'detail')
+watch(() => route.query.pane, (q) => {
+  if (q === 'batch' || q === 'compare' || q === 'detail') pane.value = q
+})
 const panes = computed<{ id: Pane; label: string; n: number }[]>(() => [
   { id: 'detail', label: t('evalPage.detail'), n: 0 },
   { id: 'compare', label: t('evalPage.compare'), n: compareCount.value },
@@ -811,6 +821,7 @@ const { trajOption, apeOption, rpeOption, compareOption, amclOption, navCompareO
               </div>
               <p class="method">
                 {{ t('evalPage.nav.variant') }}: <b class="mono">{{ currentNav.variant ?? '—' }}</b> ·
+                {{ t('evalPage.nav.localizer') }}: <b>{{ t(`evalPage.nav.localizers.${currentNav.localizer ?? 'amcl'}`) }}</b> ·
                 {{ t('evalPage.nav.recoveries') }} {{ currentNav.recoveries }} ·
                 {{ t('evalPage.nav.clearance') }} {{ m3(currentNav.min_clearance_m) }} m ·
                 {{ t('evalPage.nav.locErr') }} {{ m3(currentNav.mean_loc_error_m) }} m
@@ -851,6 +862,8 @@ const { trajOption, apeOption, rpeOption, compareOption, amclOption, navCompareO
         <!-- Batch mapping experiments (batch.py); its ticks feed the comparison below -->
         <BatchPanel v-show="!split || pane === 'batch'" :selected-runs="selection" :run-color="colorOf" @finished="loadList" @focus="focusRun"
           @pick-run="pickRun" @batches="(b: BatchCompareItem[]) => (batchItems = b)" />
+        <NavBatchPanel v-show="!split || pane === 'batch'" :selected-runs="selection" :run-color="colorOf" @finished="loadList" @focus="focusRun"
+          @pick-run="pickRun" @batches="(b: NavBatchCompareItem[]) => (navBatchItems = b)" />
 
         <!-- Comparison of the ticked runs and batches -->
         <GlassPanel v-show="!split || pane === 'compare'" :title="compareCount ? `${t('evalPage.compare')} · ${compareCount}` : t('evalPage.compare')">
@@ -864,8 +877,9 @@ const { trajOption, apeOption, rpeOption, compareOption, amclOption, navCompareO
             </span>
             <el-button size="small" link type="primary" @click="runTable?.clearSelection()">{{ t('evalPage.clearPicked') }}</el-button>
           </div>
-          <p v-if="compareRows.length < 2 && navCompareRows.length < 2 && batchItems.length < 2 && !playbackRows.length" class="hint">{{ t('evalPage.compareHint') }}</p>
+          <p v-if="compareRows.length < 2 && navCompareRows.length < 2 && batchItems.length < 2 && navBatchItems.length < 2 && !playbackRows.length" class="hint">{{ t('evalPage.compareHint') }}</p>
           <BatchCompare v-if="batchItems.length >= 2" :items="batchItems" />
+          <NavBatchCompare v-if="navBatchItems.length >= 2" :items="navBatchItems" />
           <template v-if="compareRows.length >= 2">
             <h4 v-if="batchItems.length >= 2" class="sub-title">{{ t('evalPage.compareMapRuns') }}</h4>
             <el-table :data="compareRows" size="small" :row-key="(r: { id: string }) => r.id">
@@ -920,6 +934,9 @@ const { trajOption, apeOption, rpeOption, compareOption, amclOption, navCompareO
               <el-table-column :label="t('evalPage.nav.variant')" width="110">
                 <template #default="{ row }"><span class="mono">{{ row.entry.nav.variant ?? '—' }}</span></template>
               </el-table-column>
+              <el-table-column :label="t('evalPage.nav.localizer')" width="96">
+                <template #default="{ row }"><span class="mono">{{ t(`evalPage.nav.localizers.${row.entry.nav.localizer ?? 'amcl'}`) }}</span></template>
+              </el-table-column>
               <el-table-column :label="t('evalPage.nav.map')" min-width="130">
                 <template #default="{ row }"><span class="mono">{{ row.entry.nav.map ?? '—' }}</span></template>
               </el-table-column>
@@ -950,9 +967,12 @@ const { trajOption, apeOption, rpeOption, compareOption, amclOption, navCompareO
             </el-table>
 
             <h4 class="sub-title">{{ t('evalPage.nav.compareVariant') }}</h4>
-            <el-table :data="variantRows" size="small" :row-key="(r: { variant: string }) => r.variant">
-              <el-table-column :label="t('evalPage.nav.variant')" min-width="130">
+            <el-table :data="variantRows" size="small" :row-key="(r: { key: string }) => r.key">
+              <el-table-column :label="t('evalPage.nav.variant')" min-width="120">
                 <template #default="{ row }"><span class="name mono">{{ row.variant }}</span></template>
+              </el-table-column>
+              <el-table-column :label="t('evalPage.nav.localizer')" width="96">
+                <template #default="{ row }"><span class="mono">{{ t(`evalPage.nav.localizers.${row.localizer}`) }}</span></template>
               </el-table-column>
               <el-table-column :label="t('evalPage.nav.runs')" width="80" align="right">
                 <template #default="{ row }"><span class="num">{{ row.runs }}</span></template>

@@ -104,6 +104,11 @@ class RunTrashTests(unittest.TestCase):
         self.assertEqual([e['type'] for e in entries], ['batch'])
         self.assertEqual(self.trash.restore(entries[0]['entry']), {'restored': 'batch_2'})
         self.assertTrue((self.runs / 'batch_2' / 'batch.json').is_file())
+        (self.runs / 'nav_batch_1').mkdir()
+        (self.runs / 'nav_batch_1' / 'batch.json').write_text('{"state":"finished"}')
+        self.trash.move(['nav_batch_1'])
+        self.assertEqual([e['type'] for e in self.trash.list()['entries']], ['nav_batch'])
+        self.assertEqual(self.trash.empty('nav_batch'), {'deleted': 1})
         with self.assertRaises(RunTrashError):
             self.trash.empty('maps')
 

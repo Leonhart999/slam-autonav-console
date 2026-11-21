@@ -42,6 +42,7 @@ test('overlapping task-center refreshes keep one polling timer', async t => {
     '@/tasks': { tasksApi: { list: () => (++calls === 1 ? a : b).promise } },
     '@/taskMessages': { taskMessages: {} }, '@/composables/useQuery': query,
     '@/messages': messages, '@/openFolder': { openFolder() {} }, '@/http': http,
+    '@/format': { fmtDuration: () => '' },
   }, {
     window: { addEventListener() {}, removeEventListener() {} },
     setTimeout: (fn, ms) => { timers.set(++nextTimer, { fn, ms }); return nextTimer }, clearTimeout: id => timers.delete(id),

@@ -248,6 +248,33 @@ robot-specific extrinsic.
 `base_link`, per-point time kept. It writes about 26 MB per second of recording; convert a time window first
 (`--start`, `--duration`).
 
+## Plugins
+
+Plugins add backend routes, pages, header items, isolated Python environments, background jobs and settings
+without changing the console (developer guide: [docs/plugins.md](docs/plugins.md), rules & UI guidelines:
+[docs/plugin-guidelines.md](docs/plugin-guidelines.md), example:
+[examples/plugins/hello_console](examples/plugins/hello_console)).
+A plugin is a folder with a `plugin.yaml` inside a plugin folder (`plugins.dirs`, default
+`${data_root}/plugins`). Additional plugins can be installed directly from the **Plugin market**
+([`Leonhart999/slam-console-plugins`](https://github.com/Leonhart999/slam-console-plugins) index) or from a
+local `.zip` archive on the **Plugins** page. The console only reads manifests when scanning; new plugins
+start disabled, and enabling one takes effect at the next console start. Plugin code runs with the console's
+rights, so only enable plugins you trust. `ROBOT_CONSOLE_NO_PLUGINS=1` starts the console without any plugin.
+
+The console ships four plugins (all disabled until you enable them):
+
+- **AI assistant** (`ai_assistant`): a resizable header chat drawer with a dedicated model-service profiles
+  page (OpenAI-compatible Chat Completions or Anthropic Messages API), inline model / reasoning-effort /
+  access pickers, read-only tools for maps, runs, ATE/RPE, batch experiments, SLAM parameters, logs and
+  sensor profiles, and optional approval-gated action tools for starting/cancelling batch experiments and
+  running evaluations. See [docs/plugins.md](docs/plugins.md#the-ai-assistant-plugin).
+- **Bag converter** (`bag_convert`): converts ROS 1 `.bag` files to ROS 2 bags (sqlite3 or MCAP) via
+  `rosbags`, including optional Livox `CustomMsg` to `PointCloud2` conversion.
+- **Dynamic object removal** (`dynamic_removal`): removes traces of moving objects from maps saved with raw
+  scans using DUFOMap, and saves a cleaned map version.
+- **Ground segmentation** (`ground_seg`): splits map point clouds into ground / non-ground with Patchwork++
+  and rebuilds the 2D occupancy grid from height above local ground.
+
 ## Notes on the simulation
 
 - In `sim_robot/launch/sim.launch.py` the sensors render with `ogre2` plus `LIBGL_ALWAYS_SOFTWARE=1`.

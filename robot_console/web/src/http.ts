@@ -38,6 +38,8 @@ const evaluation = (v: unknown) => v === null || (isRecord(v) && stats(v.ape) &&
 /** Core response contracts checked before data enters page state. Additional endpoints can supply a validator. */
 export function validResponse(path: string, v: unknown, method = 'GET'): boolean {
   const p = path.split('?')[0]
+  if (method === 'DELETE' && /^\/api\/tasks(?:\/[^/]+)?$/.test(p)) return isRecord(v) && number(v.removed)
+    && number(v.failed) && rows(v.tasks, validTask)
   if (p === '/api/tasks') return isRecord(v) && rows(v.tasks, validTask)
   if (/^\/api\/tasks\//.test(p) || path.includes('background=true')) return isRecord(v) && validTask(v)
   if (p === '/api/navigation/maps') return rows(v, row => string(row.name) && typeof row.has_cloud === 'boolean' && grid(row.grid))

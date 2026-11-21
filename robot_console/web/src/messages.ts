@@ -19,7 +19,9 @@ export function resultText(m: CodedMsg): string {
 export function errorText(e: unknown): string {
   const t = i18n.global.t
   if (e instanceof ApiError) {
-    const key = `error.${e.coded.code}`
+    // Plugin errors (ctx.error in a plugin backend) are plugin.<id>.<code>, translated by the plugin's messages
+    const plugin = /^plugin\.([a-z][a-z0-9_]*)\.([A-Za-z0-9_]+)$/.exec(e.coded.code)
+    const key = plugin ? `plugins.${plugin[1]}.errors.${plugin[2]}` : `error.${e.coded.code}`
     // 导入参数中的 name 是用户文件名称，不能误替换成同名进程的标签。
     const params = e.coded.code.startsWith('import_') ? e.coded.params : withLabels(e.coded.params)
     return i18n.global.te(key) ? t(key, params) : t('error.unknown', { reason: e.coded.code })

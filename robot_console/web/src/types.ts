@@ -161,6 +161,8 @@ export interface NavStatus {
   mission: NavMission | null
   /** Nav2 parameter variant of the running navigation (nav2_params_<variant>.yaml) */
   variant: string | null
+  /** Localization source of the running navigation: 'amcl' | 'gt' */
+  localizer?: 'amcl' | 'gt' | null
 }
 
 export type NavGoalResult = NavGoalState | 'timeout' | 'stopped' | 'preempted'
@@ -189,6 +191,8 @@ export interface NavMission {
   index: number
   total: number
   has_gt: boolean
+  localizer?: 'amcl' | 'gt'
+  batch?: string | null
   goals: NavMissionGoal[]
   summary: {
     goals: number

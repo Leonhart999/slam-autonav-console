@@ -161,6 +161,12 @@ class ConsoleNode(Node):
         self._cmd_pub.publish(Twist())
         return cancelled
 
+    def stop_motion(self, duration=0.4):
+        """Publish zero velocity briefly (e.g. before resetting a simulated robot)."""
+        with self._lock:
+            self._zero_until = max(self._zero_until, time.monotonic() + float(duration))
+        self._cmd_pub.publish(Twist())
+
     def _zero_tick(self):
         with self._lock:
             active = time.monotonic() < self._zero_until

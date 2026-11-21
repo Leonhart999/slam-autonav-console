@@ -69,6 +69,8 @@ def _record(d):
     """('run' | 'batch', its JSON file) of a run or batch folder, (None, None) for anything else."""
     if (d / 'run.json').is_file():
         return 'run', d / 'run.json'
+    if d.name.startswith('nav_batch_') and (d / 'batch.json').is_file():
+        return 'nav_batch', d / 'batch.json'
     if d.name.startswith('batch_') and (d / 'batch.json').is_file():
         return 'batch', d / 'batch.json'
     return None, None
@@ -166,7 +168,7 @@ class RunTrash:
                 info = _read_json(record) if record else None
                 if isinstance(info, dict):
                     run_id = d.name[:m.start()] if m else d.name
-                    rtype = 'batch' if kind == 'batch' else run_kind(info)
+                    rtype = kind if kind in ('batch', 'nav_batch') else run_kind(info)
                     entries.append({'entry': d.name, 'run': run_id, 'type': rtype,
                                     'preset': info.get('preset'), 'started': info.get('started') or info.get('created'),
                                     'deleted': deleted, 'runs': 1, 'size': _size(d), 'restorable': True})
@@ -195,11 +197,13 @@ class RunTrash:
         return {'deleted': entry}
 
     def empty(self, kind=None):
-        """Delete every entry for good; kind 'batch' = only batch records, 'runs' = everything else."""
-        if kind not in (None, 'batch', 'runs'):
+        """Delete every entry for good; kind 'batch' / 'nav_batch' = only that batch kind, 'runs' = run records."""
+        if kind not in (None, 'batch', 'nav_batch', 'runs'):
             raise RunTrashError('run_trash_invalid', 400, n=MAX_IDS)
         names = [e['entry'] for e in self.list()['entries']
-                 if kind is None or (e['type'] == 'batch') == (kind == 'batch')]
+                 if kind is None
+                 or (kind in ('batch', 'nav_batch') and e['type'] == kind)
+                 or (kind == 'runs' and e['type'] not in ('batch', 'nav_batch'))]
         for name in names:
             shutil.rmtree(self._entry_dir(name))
         return {'deleted': len(names)}

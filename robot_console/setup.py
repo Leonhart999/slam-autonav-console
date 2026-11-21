@@ -9,6 +9,17 @@ def files(pattern):
     return [f for f in glob(pattern) if os.path.isfile(f)]
 
 
+def plugin_files():
+    """Plugins shipped with the console (plugins/<id>/...) -> share/robot_console/plugins/<id>/..., without their
+    frontend sources (web/: the built ui/ is installed) and caches."""
+    out = {}
+    for root, dirs, names in os.walk('plugins'):
+        dirs[:] = [d for d in dirs if d not in ('web', '__pycache__', 'node_modules')]
+        for n in names:
+            out.setdefault(os.path.join('share', package_name, root), []).append(os.path.join(root, n))
+    return sorted(out.items())
+
+
 setup(
     name=package_name,
     version='0.1.0',
@@ -20,6 +31,7 @@ setup(
         (os.path.join('share', package_name, 'config'), files('config/*.yaml')),
         (os.path.join('share', package_name, 'config', 'slam'), files('config/slam/*.yaml')),
         (os.path.join('share', package_name, 'config', 'glim_lidar_only'), files('config/glim_lidar_only/*.json')),
+        *plugin_files(),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

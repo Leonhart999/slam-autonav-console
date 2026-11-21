@@ -125,7 +125,8 @@ def main():
                 f'origin: [{xmin:.3f}, {ymin:.3f}, 0.0]\n'
                 f'negate: 0\n'
                 f'occupied_thresh: 0.65\n'
-                f'free_thresh: 0.25\n')
+                # 0.15 < (255 - 205)/255 = 0.196: 让 map_server 正确把 205 读成未知区而不是空闲区
+                f'free_thresh: 0.15\n')
     total = w * hgt
     print(f'栅格 {w} × {hgt}（{w * args.res:.1f} m × {hgt * args.res:.1f} m），'
           f'占据 {occupied.sum() / total:.1%}，空闲 {free.sum() / total:.1%}')

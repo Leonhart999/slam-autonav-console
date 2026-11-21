@@ -92,16 +92,28 @@ def origin_from_run(run_dir):
     return x, y, yaw
 
 
-def origin_from_world(world_file):
-    """Spawn pose of the robot (<include> of model://sim_robot) in a world SDF."""
+def world_spawn_info(world_file):
+    """{'world': world_name, 'model': model_name, 'pose': (x, y, z, roll, pitch, yaw)} from a world SDF."""
     root = ET.parse(world_file).getroot()
+    world_el = root if root.tag == 'world' else root.find('world')
+    world_name = (world_el.attrib.get('name') if world_el is not None else None) or ''
     for inc in root.iter('include'):
         uri = (inc.findtext('uri') or '').strip()
         if uri.rstrip('/').endswith('sim_robot'):
             v = [float(t) for t in (inc.findtext('pose') or '0 0 0 0 0 0').split()]
             v += [0.0] * (6 - len(v))
-            return v[0], v[1], v[5]
+            model_name = (inc.findtext('name') or '').strip() or 'sim_robot'
+            return {'world': world_name, 'model': model_name, 'pose': tuple(v[:6])}
     return None
+
+
+def origin_from_world(world_file):
+    """Spawn pose of the robot (<include> of model://sim_robot) in a world SDF."""
+    info = world_spawn_info(world_file)
+    if info is None:
+        return None
+    v = info['pose']
+    return v[0], v[1], v[5]
 
 
 def world_file(sim_cmd):
@@ -153,6 +165,7 @@ class NavMission:
         self.token = 0
         self.origin = None             # world pose of the map frame for the running mission
         self.gt = deque(maxlen=400)    # (t, x, y, yaw) in the map frame, ~4 s at 100 Hz
+        self.last_gt_world = None      # (wall_t, x, y, z, qx, qy, qz, qw) latest world pose
         self.files = {}
         self.ticks = 0
         gt_qos = QoSProfile(depth=50, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -313,12 +326,17 @@ class NavMission:
 
     # ---------------- Samples ----------------
 
-    def _on_gt(self, msg):
+    def latest_gt_world(self):
         with self.lock:
+            return self.last_gt_world
+
+    def _on_gt(self, msg):
+        p, q = msg.pose.pose.position, msg.pose.pose.orientation
+        with self.lock:
+            self.last_gt_world = (time.monotonic(), p.x, p.y, p.z, q.x, q.y, q.z, q.w)
             if not self._running() or self.origin is None:
                 return
             sx, sy, syaw = self.origin
-            p, q = msg.pose.pose.position, msg.pose.pose.orientation
             c, s = math.cos(-syaw), math.sin(-syaw)
             dx, dy = p.x - sx, p.y - sy
             x, y = c * dx - s * dy, s * dx + c * dy
@@ -438,6 +456,8 @@ class NavMission:
                 return None
             out = {'id': m['id'], 'state': m['state'], 'index': m['index'], 'total': len(m['goals']),
                    'has_gt': bool(m['info']['ground_truth']),
+                   'localizer': m['info'].get('localizer', 'amcl'),
+                   'batch': m['info'].get('batch'),
                    'goals': [self._public(g) for g in m['goals']], 'summary': self._summary()}
             g = m['goals'][m['index']]
             if m['state'] == 'running' and g['state'] == 'active':

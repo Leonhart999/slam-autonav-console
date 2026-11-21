@@ -16,6 +16,8 @@ export interface ConsoleTask<T = unknown> {
   input: Record<string, unknown>
   saved_map?: string
 }
+export interface TaskRemoval { removed: number, failed: number, tasks: ConsoleTask[] }
+
 export const tasksApi = {
   list: (signal?: AbortSignal, kind?: string, target?: string) => {
     const q = new URLSearchParams()
@@ -26,6 +28,9 @@ export const tasksApi = {
   get: <T = unknown>(id: string, signal?: AbortSignal) =>
     request<ConsoleTask<T>>('GET', `/api/tasks/${encodeURIComponent(id)}`, undefined, { signal }),
   retry: (id: string) => request<ConsoleTask>('POST', `/api/tasks/${encodeURIComponent(id)}/retry`),
+  /** Finished records only; the backend refuses queued or running jobs. Both answer with the remaining list. */
+  remove: (id: string) => request<TaskRemoval>('DELETE', `/api/tasks/${encodeURIComponent(id)}`),
+  clear: () => request<TaskRemoval>('DELETE', '/api/tasks'),
 }
 
 export function delay(ms: number, signal?: AbortSignal): Promise<void> {

@@ -55,6 +55,8 @@ export interface RunTrajectory {
 /** Navigation run metrics (robot_console/nav_eval.py nav_metrics) */
 export interface NavMetrics {
   variant: string | null
+  localizer?: 'amcl' | 'gt'
+  batch?: string | null
   map: string | null
   state: string | null
   goals: number
@@ -178,7 +180,7 @@ export interface RunTrashRefusal {
 export interface RunTrashEntry {
   entry: string
   run: string | null
-  type: RunType | 'group' | 'batch'
+  type: RunType | 'group' | 'batch' | 'nav_batch'
   preset: string | null
   started: string | null
   deleted: string
@@ -212,5 +214,5 @@ export const evalApi = {
   trashRestore: (entry: string) => request<{ restored: string }>('POST', `/api/run-trash/${enc(entry)}/restore`),
   trashPurge: (entry: string) => request<{ deleted: string }>('DELETE', `/api/run-trash/${enc(entry)}`),
   /** kind 'batch' empties only batch records, 'runs' everything else (the two pages' recycle bins) */
-  trashEmpty: (kind: 'runs' | 'batch') => request<{ deleted: number }>('DELETE', `/api/run-trash?kind=${kind}`),
+  trashEmpty: (kind: 'runs' | 'batch' | 'nav_batch') => request<{ deleted: number }>('DELETE', `/api/run-trash?kind=${kind}`),
 }

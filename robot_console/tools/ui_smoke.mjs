@@ -25,7 +25,7 @@ const SETTLE = Number(arg('settle', 4000))
 const [VW, VH] = arg('viewport', '1440x1000').split('x').map(Number)
 // --pages: comma-separated routes, optionally with a query (e.g. "navigation?map=office"), to check pages in a
 // state prepared beforehand; --tag: prefix for the screenshot names
-const PAGES = arg('pages', 'mapping,playback,maps,navigation,evaluation,monitor').split(',')
+const PAGES = arg('pages', 'mapping,playback,maps,navigation,evaluation,monitor,plugins').split(',')
 const THEME = arg('theme', 'light')   // look of the console: light | dark (screenshots of dark get a "dark_" prefix)
 const TAG = arg('tag', THEME === 'dark' ? 'dark_' : '')
 const LANGS = ['zh-CN', 'en']

@@ -136,7 +136,9 @@ def main():
     nav_maps = NavigationMaps(cfg['mapping'].get('maps_dir', '~/maps'), SolidModels(cfg['presets']))
     navdata = NavigationData(node)
 
-    app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs)
+    from .plugins import PluginManager
+    plugins = PluginManager(cfg, node.get_logger())
+    app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs, plugins)
     node.get_logger().info(f'网页控制台：http://localhost:{port}（监听 {host}）')
     # Uvicorn replays shutdown signals after restoring the original handlers. SIGTERM's
     # default action terminates Python immediately, skipping this finally block. Convert
@@ -150,6 +152,7 @@ def main():
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        plugins.shutdown()            # plugins stop their own threads before the console's processes go
         node.get_logger().info('正在停止从网页启动的进程（存地图可能要十几秒，请不要关闭窗口）……')
         procs.stop_all()
         executor.shutdown()

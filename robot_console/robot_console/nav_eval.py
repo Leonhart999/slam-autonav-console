@@ -32,7 +32,11 @@ def nav_metrics(info):
     amcl = summary.get('amcl_error') or {}
     clear = [g.get('min_clearance_m') for g in done if g.get('min_clearance_m') is not None]
     return {
-        'variant': info.get('variant'), 'map': info.get('map'), 'state': info.get('state'),
+        'variant': info.get('variant'),
+        'localizer': info.get('localizer') or 'amcl',
+        'batch': info.get('batch'),
+        'map': info.get('map'),
+        'state': info.get('state'),
         'goals': len(goals), 'finished': len(done), 'succeeded': len(ok),
         'success_rate': round(len(ok) / len(done), 3) if done else None,
         'mean_time_s': _mean([g.get('time_s') for g in ok]),
@@ -50,19 +54,21 @@ def nav_metrics(info):
 
 
 def by_variant(runs):
-    """runs: [(info, metrics)] -> one pooled row per Nav2 parameter variant (goals pooled across runs)."""
+    """runs: [(info, metrics)] -> one pooled row per (Nav2 parameter variant, localizer)."""
     groups = {}
     for info, m in runs:
-        groups.setdefault(m['variant'] or '—', []).append((info, m))
+        key = (m['variant'] or '—', m.get('localizer') or 'amcl')
+        groups.setdefault(key, []).append((info, m))
     rows = []
-    for variant, items in groups.items():
+    for (variant, localizer), items in groups.items():
         goals = [g for info, _ in items for g in (info.get('goals') or []) if g.get('result')]
         ok = [g for g in goals if g['result'] == 'succeeded']
         n = sum(m['amcl_samples'] or 0 for _, m in items if m['amcl_rmse_m'] is not None)
         sq = sum((m['amcl_samples'] or 0) * m['amcl_rmse_m'] ** 2 for _, m in items if m['amcl_rmse_m'] is not None)
         mean = sum((m['amcl_samples'] or 0) * m['amcl_mean_m'] for _, m in items if m['amcl_mean_m'] is not None)
         rows.append({
-            'variant': variant, 'runs': len(items), 'goals': len(goals), 'succeeded': len(ok),
+            'variant': variant, 'localizer': localizer,
+            'runs': len(items), 'goals': len(goals), 'succeeded': len(ok),
             'success_rate': round(len(ok) / len(goals), 3) if goals else None,
             'mean_time_s': _mean([g.get('time_s') for g in ok]),
             'mean_path_m': _mean([g.get('path_m') for g in ok]),
@@ -72,7 +78,7 @@ def by_variant(runs):
             'amcl_mean_m': round(mean / n, 3) if n else None,
             'recoveries': sum(g.get('recoveries') or 0 for g in goals),
         })
-    rows.sort(key=lambda r: r['variant'])
+    rows.sort(key=lambda r: (r['variant'], r['localizer']))
     return rows
 
 
@@ -104,11 +110,11 @@ def amcl_series(path):
 
 GOAL_FIELDS = ['run_id', 'variant', 'index', 'x', 'y', 'yaw', 'result', 'time_s', 'path_m', 'goal_error_m',
                'goal_yaw_error_deg', 'loc_error_m', 'recoveries', 'min_clearance_m', 'speed_scale']
-RUN_FIELDS = ['run_id', 'scene', 'map', 'variant', 'started', 'state', 'goals', 'finished', 'succeeded',
+RUN_FIELDS = ['run_id', 'scene', 'map', 'variant', 'localizer', 'started', 'state', 'goals', 'finished', 'succeeded',
               'success_rate', 'mean_time_s', 'mean_path_m', 'mean_goal_error_m', 'mean_loc_error_m',
               'amcl_rmse_m', 'amcl_mean_m', 'amcl_max_m', 'amcl_samples', 'recoveries', 'min_clearance_m',
               'total_time_s', 'total_path_m']
-VARIANT_FIELDS = ['variant', 'runs', 'goals', 'succeeded', 'success_rate', 'mean_time_s', 'mean_path_m',
+VARIANT_FIELDS = ['variant', 'localizer', 'runs', 'goals', 'succeeded', 'success_rate', 'mean_time_s', 'mean_path_m',
                   'mean_goal_error_m', 'mean_loc_error_m', 'amcl_rmse_m', 'amcl_mean_m', 'recoveries']
 
 

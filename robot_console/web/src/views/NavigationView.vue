@@ -19,6 +19,7 @@ import type {
   MappingPreset,
   MapTool, NavGoalState, NavMap, NavMission, NavStatus, PickedPose, StackState, WaypointMark,
 } from '@/types'
+import type { NavLocalizer } from '@/evaluation/navBatch'
 import type { ViewMode } from '@/mapping/stream'
 import NavGrid2D from '@/components/NavGrid2D.vue'
 import NavScene3D from '@/components/NavScene3D.vue'
@@ -54,13 +55,15 @@ const VIEW_MODES: ViewMode[] = ['follow', 'free', 'top']
 const view3d = ref<ViewMode>(VIEW_MODES.find((m) => m === route.query.view) ?? (VIEW_MODES.includes(saved.view) ? saved.view : 'free'))
 const showCost = reactive({ global: saved.costGlobal === true, local: saved.costLocal !== false })
 const variant = ref<string>(typeof saved.variant === 'string' ? saved.variant : '')
-watch([chosen, showCloud, showGrid, model3d, view3d, () => showCost.global, () => showCost.local, variant], () => {
+const localizer = ref<NavLocalizer>(saved.localizer === 'gt' ? 'gt' : 'amcl')
+const navBatchRunning = ref(false)
+watch([chosen, showCloud, showGrid, model3d, view3d, () => showCost.global, () => showCost.local, variant, localizer], () => {
   try {
     localStorage.setItem(
       PREF_KEY,
       JSON.stringify({
         map: chosen.value, cloud: showCloud.value, grid: showGrid.value, model: model3d.value, view: view3d.value,
-        costGlobal: showCost.global, costLocal: showCost.local, variant: variant.value,
+        costGlobal: showCost.global, costLocal: showCost.local, variant: variant.value, localizer: localizer.value,
       }),
     )
   } catch {
@@ -131,7 +134,7 @@ const effectiveMap = computed(() => maps.value.find((m) => m.name === effectiveN
 const selectValue = computed({
   get: () => effectiveName.value,
   set: (v: string) => {
-    if (!active.value && !busy.value) chosen.value = v
+    if (!active.value && !busy.value && !navBatchRunning.value) chosen.value = v
   },
 })
 
@@ -230,7 +233,7 @@ async function start() {
   if (!m) return
   busy.value = true
   try {
-    await api.startNavigation(m.name, variant.value || undefined)
+    await api.startNavigation(m.name, variant.value || undefined, localizer.value)
     ElMessage.success(t('navigation.started', { name: m.name }))
   } catch (e) {
     ElMessage.error(errorText(e))
@@ -286,7 +289,8 @@ const tool = ref<MapTool>('pan')
 const sending = ref(false)
 const goal = computed(() => nav.value?.goal ?? null)
 const goalActive = computed(() => !!goal.value && ['pending', 'active', 'canceling'].includes(goal.value.state))
-const canPick = computed(() => running.value && !!nav.value?.tf_ok)
+const canPick = computed(() => running.value && !!nav.value?.tf_ok && !navBatchRunning.value)
+const canPickWaypoints = computed(() => !!effectiveMap.value && !!image.value && !navBatchRunning.value)
 const canGoal = computed(() => canPick.value && nav2Ready.value)
 
 function toggleTool(next: Exclude<MapTool, 'pan'>) {
@@ -294,7 +298,7 @@ function toggleTool(next: Exclude<MapTool, 'pan'>) {
 }
 // Leave picking mode when navigation stops, or with Esc
 watch(running, (r) => {
-  if (!r) tool.value = 'pan'
+  if (!r && tool.value !== 'waypoint') tool.value = 'pan'
 })
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') tool.value = 'pan'
@@ -438,7 +442,7 @@ watch(
   () => [mission.value?.id, mission.value?.state] as const,
   ([id, st], old) => {
     const m = mission.value
-    if (!m || !old || id !== old[0] || old[1] !== 'running' || st === 'running' || m.total < 2) return
+    if (navBatchRunning.value || !m || !old || id !== old[0] || old[1] !== 'running' || st === 'running' || m.total < 2) return
     ElMessage({
       type: m.summary.succeeded === m.total ? 'success' : 'warning',
       message: t('navMission.ended', { ok: m.summary.succeeded, n: m.total, id: m.id, runs: store.paths.runs }),
@@ -534,7 +538,7 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
     <aside class="side glass">
       <section class="block">
         <h3>{{ t('navigation.steps.map') }}</h3>
-        <el-select v-model="selectValue" class="wide" :disabled="active || busy || !maps.length" filterable>
+        <el-select v-model="selectValue" class="wide" :disabled="active || busy || navBatchRunning || !maps.length" filterable>
           <el-option v-for="m in maps" :key="m.name" :label="m.name" :value="m.name">
             <span>{{ m.name }}</span>
             <span class="opt-tag">{{ m.has_cloud ? '2D + 3D' : '2D' }}</span>
@@ -542,7 +546,7 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
         </el-select>
         <p v-if="active" class="muted">{{ t('navigation.mapLocked') }}</p>
         <el-button
-          class="wide import-btn" size="small" plain :disabled="active || busy || !store.connected"
+          class="wide import-btn" size="small" plain :disabled="active || busy || navBatchRunning || !store.connected"
           @click="importOpen = true"
         >{{ t('navigation.import.button') }}</el-button>
         <dl v-if="effectiveMap" class="facts">
@@ -579,7 +583,7 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
         <MapScenePanel
           v-if="effectiveMap"
           :map="effectiveMap"
-          :disabled="active || busy || simBusy || !store.connected"
+          :disabled="active || busy || simBusy || navBatchRunning || !store.connected"
           @changed="loadMaps(); loadPresets()"
         />
         <el-button
@@ -587,7 +591,7 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
           :type="simOn ? 'danger' : 'primary'"
           :plain="simOn"
           :loading="simBusy || simJob !== 'idle' || simState === 'stopping'"
-          :disabled="!!simSwitchBlock || simBusy || simJob !== 'idle' || simState === 'stopping'"
+          :disabled="!!simSwitchBlock || simBusy || navBatchRunning || simJob !== 'idle' || simState === 'stopping'"
           @click="simOn = !simOn"
         >
           {{ simOn ? t('navigation.sim.stop') : t('navigation.sim.start') }}
@@ -616,23 +620,31 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
         <div v-if="variants.length" class="variant">
           <span>{{ t('navigation.variant.label') }}<InfoTip :content="t('navigation.tips.variant')" /></span>
           <el-select
-            v-if="!active" v-model="variant" size="small" class="variant-select" :disabled="busy"
+            v-if="!active" v-model="variant" size="small" class="variant-select" :disabled="busy || navBatchRunning"
           >
             <el-option v-for="v in variants" :key="v" :label="v" :value="v" />
           </el-select>
           <b v-else class="mono">{{ nav?.variant ?? '—' }}</b>
+        </div>
+        <div class="variant">
+          <span>{{ t('navigation.localizer.label') }}<InfoTip :content="t('navigation.tips.localizer')" /></span>
+          <el-radio-group v-if="!active" v-model="localizer" size="small" :disabled="busy || navBatchRunning">
+            <el-radio-button value="amcl">{{ t('navigation.localizer.amcl') }}</el-radio-button>
+            <el-radio-button value="gt">{{ t('navigation.localizer.gt') }}</el-radio-button>
+          </el-radio-group>
+          <b v-else>{{ t(`navigation.localizer.${nav?.localizer === 'gt' ? 'gt' : 'amcl'}`) }}</b>
         </div>
         <el-button
           v-if="!active"
           class="wide"
           type="primary"
           :loading="busy"
-          :disabled="!!startBlock || busy"
+          :disabled="!!startBlock || busy || navBatchRunning"
           @click="start"
         >
           {{ t('navigation.start') }}
         </el-button>
-        <el-button v-else class="wide" type="danger" plain :loading="busy || state === 'stopping'" @click="stop">
+        <el-button v-else class="wide" type="danger" plain :loading="busy || state === 'stopping'" :disabled="navBatchRunning" @click="stop">
           {{ t('navigation.stop') }}
         </el-button>
         <p v-if="!active && startBlock" class="warn">{{ startBlock }}</p>
@@ -654,7 +666,7 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
           <el-button
             size="small"
             :type="tool === 'pose' ? 'primary' : 'default'"
-            :disabled="!canPick || sending"
+            :disabled="!canPick || sending || nav?.localizer === 'gt'"
             @click="toggleTool('pose')"
           >
             <i class="dot pose" />{{ t('navigation.goal.setPose') }}
@@ -698,6 +710,7 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
           <p v-if="speedNote" class="muted">{{ speedNote }}</p>
           <p v-if="speedInfo?.error" class="warn mono">{{ speedInfo.error }}</p>
         </div>
+        <p v-if="running && nav?.localizer === 'gt'" class="muted">{{ t('navigation.goal.gtPoseDisabled') }}</p>
         <p v-if="!running" class="muted">{{ t('navigation.goal.needNav') }}</p>
         <p v-else-if="!canPick" class="muted">{{ t('navigation.goal.needLoc') }}</p>
         <p v-else-if="tool !== 'pan'" class="hint">{{ t(`navigation.goal.how.${tool}`) }}</p>
@@ -727,9 +740,15 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
           :map-name="effectiveMap?.name ?? ''"
           :mission="mission"
           :picking="tool === 'waypoint'"
-          :can-pick="canPick"
+          :can-pick="canPickWaypoints"
           :can-run="canGoal"
+          :variant="variant"
+          :localizer="localizer"
+          :speed-scale="speedScale"
+          :has-scene="!!effectiveMap?.preset"
+          :nav-busy="active || busy || simBusy || !store.connected"
           @toggle-pick="toggleTool('waypoint')"
+          @batch-running="navBatchRunning = $event"
         />
       </section>
 
@@ -738,7 +757,8 @@ const costmaps = useCostmaps(nav, showCost, running, effectiveName)
         <ul class="kv">
           <li>
             <span>{{ t('navigation.amcl.label') }}<InfoTip :content="t('navigation.tips.amcl')" /></span>
-            <b v-if="amclText" :class="{ ok: amclText.good, bad: !amclText.good }">
+            <b v-if="running && nav?.localizer === 'gt'" class="ok">{{ t('navigation.amcl.gtMode') }}</b>
+            <b v-else-if="amclText" :class="{ ok: amclText.good, bad: !amclText.good }">
               ±{{ amclText.xy }} m · ±{{ amclText.yaw }}°
             </b>
             <b v-else>—</b>

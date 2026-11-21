@@ -189,6 +189,57 @@ class TaskTests(unittest.TestCase):
             self.assertEqual(finished(self.tasks, good['id'])['state'], 'succeeded')
         self.assertEqual(failures, ['running', 'failed'])
 
+    def test_remove_and_clear_delete_finished_records_but_keep_active_work(self):
+        release = threading.Event()
+        self.tasks.register('evaluate', lambda target, *args: {'target': target})
+        self.tasks.register('regrid', lambda *args: release.wait(5) and {'ok': True})
+        done = [finished(self.tasks, self.tasks.submit('evaluate', t, {})['id']) for t in ('a', 'b', 'c')]
+        try:
+            busy = self.tasks.submit('regrid', 'map', {})
+            deadline = time.monotonic() + 5
+            while self.tasks.get(busy['id'])['state'] != 'running' and time.monotonic() < deadline:
+                time.sleep(0.005)
+            self.tasks.remove(done[0]['id'])
+            self.assertFalse((self.tasks.root / (done[0]['id'] + '.json')).exists())
+            self.assertFalse((self.tasks.root / (done[0]['id'] + '.result.json')).exists())
+            with self.assertRaises(HTTPException) as caught:
+                self.tasks.remove(busy['id'])
+            self.assertEqual(caught.exception.status_code, 409)
+            self.assertEqual(caught.exception.detail['code'], 'task_active')
+            self.assertEqual(self.tasks.clear(), (2, 0))
+            self.assertEqual([j['id'] for j in self.tasks.list()], [busy['id']])
+            self.assertEqual(sorted(p.name for p in self.tasks.root.iterdir()), [busy['id'] + '.json'])
+            with self.assertRaises(HTTPException) as caught:
+                self.tasks.remove(done[1]['id'])
+            self.assertEqual(caught.exception.status_code, 404)
+        finally:
+            release.set()
+        self.assertEqual(finished(self.tasks, busy['id'])['state'], 'succeeded')
+        self.assertEqual(Tasks(self.tasks.root).list()[0]['id'], busy['id'])
+
+    def test_only_the_newest_finished_records_are_kept(self):
+        tasks = Tasks(self.root / 'bounded', keep=2)
+        tasks.register('evaluate', lambda target, *args: {'target': target})
+        try:
+            ids = [finished(tasks, tasks.submit('evaluate', str(i), {})['id'])['id'] for i in range(4)]
+            deadline = time.monotonic() + 5
+            while len(tasks.list()) > 2 and time.monotonic() < deadline:
+                time.sleep(0.005)
+            self.assertEqual({j['id'] for j in tasks.list()}, set(ids[2:]))
+            self.assertEqual(len(list(tasks.root.glob('*.result.json'))), 2)
+        finally:
+            tasks.close(wait=True)
+        self.assertEqual(len(Tasks(tasks.root, keep=1).list()), 1)
+        self.assertEqual(len(list(tasks.root.glob('*.json'))), 2)  # one record + its result
+
+    def test_startup_removes_crash_leftovers(self):
+        folder = self.root / 'leftovers'
+        folder.mkdir()
+        (folder / ('c' * 32 + '.result.json')).write_text('{}')
+        (folder / ('d' * 32 + '.tmp')).write_text('{')
+        Tasks(folder)
+        self.assertEqual(list(folder.iterdir()), [])
+
 
 class TaskHttpTests(unittest.TestCase):
     def setUp(self):
@@ -275,3 +326,13 @@ class TaskHttpTests(unittest.TestCase):
             self.assertEqual(finished(self.tasks, ident)['result']['parent'], 'map-a')
             self.assertEqual(self.request('GET', '/api/tasks').json()['tasks'][0]['kind'], 'regrid')
             self.assertEqual(worker.call_count, 1)
+
+    def test_delete_routes_return_the_remaining_list(self):
+        self.tasks.register('evaluate', lambda target, *args: {'target': target})
+        first, second = (finished(self.tasks, self.tasks.submit('evaluate', t, {})['id']) for t in ('a', 'b'))
+        one = self.request('DELETE', f"/api/tasks/{first['id']}")
+        self.assertEqual(one.status_code, 200, one.text)
+        self.assertEqual([j['id'] for j in one.json()['tasks']], [second['id']])
+        self.assertEqual(self.request('DELETE', f"/api/tasks/{first['id']}").status_code, 404)
+        cleared = self.request('DELETE', '/api/tasks').json()
+        self.assertEqual((cleared['removed'], cleared['failed'], cleared['tasks']), (1, 0, []))

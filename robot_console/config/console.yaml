@@ -223,6 +223,26 @@ navigation:
   speed_scale_range: [0.5, 4.0]
   goal_timeout: 240.0          # 航点任务里单个目标的超时（s，仿真时间），超时取消并记为 timeout，继续下一个
 
+# Plugins (robot_console/plugins.py, docs/plugins.md): each plugin is a sub-folder with a plugin.yaml.
+# New plugins start disabled; enable them on the Plugins page, the change applies at the next console start.
+# ROBOT_CONSOLE_NO_PLUGINS=1 starts the console without loading any plugin.
+plugins:
+  dirs:                                      # searched in order; the first one is created when missing
+    - ${data_root}/plugins                   # plugins you add (a plugin here overrides a shipped one of the same id)
+  shipped: true                              # also list the plugins shipped with the console (AI assistant), after dirs
+  state_file: ${data_root}/plugin_state.json # enabled flags and settings (secrets too, file mode 0600)
+  data_dir: ${data_root}/plugin_data         # each plugin gets <data_dir>/<id> for its own files
+  envs_dir: ${data_root}/plugin_envs         # one Python venv per plugin for the packages its plugin.yaml lists
+  python: ''                                 # interpreter the venvs are made from (empty = the console's own)
+  pip: {index_url: '', extra_index_url: '', proxy: '', timeout: 60}   # pip options for those installs
+  market:                                    # plugin market (Plugins page → Market): a plugin index on GitHub
+    index_urls:                              # tried in order; https URLs, file:// URLs or local paths
+      - https://raw.githubusercontent.com/Leonhart999/slam-console-plugins/main/index.json
+      - https://api.github.com/repos/Leonhart999/slam-console-plugins/contents/index.json?ref=main
+    proxy: ''                                # HTTP proxy for the index and downloads (empty = pip.proxy, then the environment)
+    timeout: 30                              # s per request
+    max_size_mb: 64                          # largest plugin zip accepted
+
 estop:
   cmd_vel_topic: /cmd_vel
   zero_duration: 1.0           # 急停后连续发零速度的时长（s）

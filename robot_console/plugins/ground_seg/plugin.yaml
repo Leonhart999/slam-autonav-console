@@ -1,0 +1,20 @@
+# Ground segmentation: Patchwork++ (https://github.com/url-kaist/patchwork-plusplus, BSD-2-Clause) splits the map
+# into ground and non-ground points; the 2D grid is rebuilt from each point's height above the local ground.
+id: ground_seg
+api: 1
+version: 0.1.0
+name: {zh: 地面分割, en: Ground segmentation}
+description:
+  zh: 用 Patchwork++ 把地图点云分成地面和非地面，再按每个点离当地地面的高度重新生成 2D 栅格（尺寸、分辨率、原点不变）。适合坡道、不平的地面和有倾斜或高度漂移的地图。结果先预览，确认后另存为新版本地图。基于 Patchwork++（BSD-2）。
+  en: 'Splits the map cloud into ground and non-ground points with Patchwork++, then rebuilds the 2D grid from each point''s height above the local ground (same size, resolution and origin). Helps on ramps, uneven floors and maps that are tilted or drift in height. Preview first, then save as a new map version. Uses Patchwork++ (BSD-2).'
+author: Leonhart999
+license: MIT
+homepage: https://github.com/url-kaist/patchwork-plusplus
+backend:
+  module: backend
+frontend:
+  dir: ui
+  script: plugin.js
+  style: plugin.css
+python:
+  requirements: ['pypatchworkpp==1.4.1', 'numpy>=1.23,<3', 'pillow>=9', 'pyyaml>=6']

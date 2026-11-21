@@ -72,6 +72,13 @@ def scan_source(folder, meta):
     return recording, trajectory
 
 
+def has_trajectory(folder):
+    if not folder:
+        return False
+    data = Path(folder) / 'data'
+    return any((data / name).is_file() and not (data / name).is_symlink() for name in ('scan_poses.tum', 'est.tum'))
+
+
 class MapCatalog:
 
     def __init__(self, root, solids=None):
@@ -175,6 +182,7 @@ class MapCatalog:
             'bag': (meta.get('bag_name') or os.path.basename(str(meta['bag']).rstrip('/'))) if meta.get('bag') else None,
             'algorithm': meta.get('algorithm'), 'preset': preset, 'points': points,
             'voxels': meta.get('voxels'), 'has_grid': grid is not None, 'has_cloud': cloud is not None,
+            'has_scans': scan_source(folder, meta) is not None, 'has_trajectory': has_trajectory(folder),
             'has_solid': bool(self.solids and grid and kind == 'folder' and self.solids.get(preset)),
             'grid': grid, 'extent': meta.get('extent'), 'navigable': grid is not None,
             'issues': issues,
@@ -227,8 +235,11 @@ class MapCatalog:
                                   'grid_preview' if n.endswith('_preview.png') else 'grid_image'})
         info = {k: meta.get(k) for k in ('frame', 'run', 'duration', 'length', 'voxel_size', 'sim_cmd',
                                          'slam_cmd')}
+        scans = scan_source(s['_folder'], meta)
         return {**self._public(s), **info,
-                'has_scans': scan_source(s['_folder'], meta) is not None,
+                'has_scans': scans is not None,
+                # recording folder (scans.bin + index.csv) and the per-scan trajectory, for tools that read scans
+                'scans': {'recording': str(scans[0]), 'trajectory': str(scans[1])} if scans else None,
                 'location': str(location), 'location_win': windows_path(location),
                 'yaml_path': str(s['_folder'] / 'map.yaml' if s['_folder'] else path) if s['has_grid'] else None,
                 'files': files, 'total_size': sum(f['size'] for f in files)}
@@ -254,8 +265,10 @@ def register_map_routes(app, cfg, solids=None, library=None, procs=None):
     catalog = MapCatalog(cfg['mapping'].get('maps_dir', '~/maps'), solids)
     from .map_trash import register_trash_routes
     from .map_regrid import register_regrid_routes
+    from .map_derive import register_derive_routes
     register_trash_routes(app, catalog, library, procs, cfg)
     register_regrid_routes(app, catalog, cfg)
+    register_derive_routes(app, catalog, cfg)
 
     def fail(e):
         status = 404 if e.code in ('map_not_found', 'navigation_cloud_missing') else 400

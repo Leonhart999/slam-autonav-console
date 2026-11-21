@@ -1,0 +1,36 @@
+# Bag converter: ROS1 .bag -> ROS2 bag (sqlite3 or MCAP) that the console's Playback page can play, with
+# rosbags (https://gitlab.com/ternaris/rosbags, Apache-2.0). Livox CustomMsg point clouds (ROS1 Livox drivers)
+# can be turned into sensor_msgs/PointCloud2 with per-point time and line, which the SLAM adapters read.
+id: bag_convert
+api: 1
+version: 0.1.0
+name: {zh: 数据包转换, en: Bag converter}
+description:
+  zh: 把 ROS1 的 .bag 转成 ROS2 数据包（sqlite3 或 MCAP），转好的包直接出现在“回放”页。可以只转选中的话题；Livox 的 CustomMsg 点云可以转成带逐点时间和线号的 PointCloud2。基于 rosbags（Apache-2.0）。
+  en: 'Converts ROS1 .bag files into ROS2 bags (sqlite3 or MCAP) that show up on the Playback page. You can pick the topics to keep; Livox CustomMsg point clouds can become PointCloud2 with per-point time and line. Uses rosbags (Apache-2.0).'
+author: Leonhart999
+license: MIT
+homepage: https://gitlab.com/ternaris/rosbags
+backend:
+  module: backend
+frontend:
+  dir: ui
+  script: plugin.js
+  style: plugin.css
+python:
+  requirements: ['rosbags==0.11.9', 'numpy>=1.23,<3']
+settings:
+  - key: search_dirs
+    type: text
+    label: {zh: 额外查找的文件夹, en: Extra folders to search}
+    help:
+      zh: 每行一个文件夹（可以用 ~）。控制台的数据包文件夹和上传文件夹总是会查找，最多查到 4 层子文件夹。
+      en: One folder per line (~ allowed). The console's bag folders and upload folder are always searched, at most 4 levels deep.
+    max_length: 4000
+  - key: storage
+    type: select
+    label: {zh: 默认输出格式, en: Default output format}
+    options:
+      - {value: sqlite3, label: {zh: sqlite3（ROS2 默认）, en: sqlite3 (ROS2 default)}}
+      - {value: mcap, label: MCAP}
+    default: sqlite3

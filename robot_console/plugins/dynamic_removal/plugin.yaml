@@ -1,0 +1,21 @@
+# Dynamic object removal: DUFOMap (https://github.com/KTH-RPL/dufomap, BSD-3-Clause; Python package `dufomap`
+# from https://github.com/Kin-Zhang/dufomap) finds the points that moving objects left in the map, using the
+# free space seen by the raw scans.
+id: dynamic_removal
+api: 1
+version: 0.1.0
+name: {zh: 动态物体去除, en: Dynamic object removal}
+description:
+  zh: 用 DUFOMap 根据每一帧原始扫描看到的空闲空间，找出地图里行人、车辆等移动物体留下的点，生成去掉这些点的点云，并可重新投影 2D 栅格，另存为新版本地图。需要带原始扫描的地图（回放时打开“保存原始扫描”）。基于 DUFOMap（BSD-3）。
+  en: 'Uses DUFOMap and the free space seen by every raw scan to find the points that people, vehicles and other moving objects left in the map, writes the cloud without them and can project the 2D grid again, saved as a new map version. Needs a map with raw scans (turn on Save raw scans when playing back). Uses DUFOMap (BSD-3).'
+author: Leonhart999
+license: MIT
+homepage: https://github.com/KTH-RPL/dufomap
+backend:
+  module: backend
+frontend:
+  dir: ui
+  script: plugin.js
+  style: plugin.css
+python:
+  requirements: ['dufomap==1.1.1', 'numpy>=1.23,<3', 'pillow>=9', 'pyyaml>=6']

@@ -9,6 +9,7 @@ import App from './App.vue'
 import { router } from './router'
 import { applyDocumentLang, i18n } from './i18n'
 import { initTheme } from './theme'
+import { startPlugins } from './plugins/start'
 
 const app = createApp(App)
 app.use(createPinia())
@@ -17,3 +18,4 @@ app.use(i18n)
 applyDocumentLang()
 initTheme()
 app.mount('#app')
+startPlugins()

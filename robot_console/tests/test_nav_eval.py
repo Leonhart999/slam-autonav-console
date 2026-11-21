@@ -64,6 +64,15 @@ class NavMetricsTests(unittest.TestCase):
         self.assertAlmostEqual(ra['amcl_rmse_m'], round(math.sqrt((100 * 0.01 + 300 * 0.04) / 400), 3))
         self.assertAlmostEqual(ra['amcl_mean_m'], 0.175)
         self.assertIsNone(rows[1]['amcl_rmse_m'])
+        self.assertEqual(rows[0]['localizer'], 'amcl')
+
+    def test_by_variant_splits_localizers(self):
+        amcl = {**run('smac_mppi', [goal('succeeded', loc=0.12)]), 'localizer': 'amcl'}
+        gt = {**run('smac_mppi', [goal('succeeded', loc=0.01)]), 'localizer': 'gt'}
+        rows = nav_eval.by_variant([(i, nav_eval.nav_metrics(i)) for i in (amcl, gt)])
+        self.assertEqual([(r['variant'], r['localizer']) for r in rows], [('smac_mppi', 'amcl'), ('smac_mppi', 'gt')])
+        self.assertEqual(rows[0]['mean_loc_error_m'], 0.12)
+        self.assertEqual(rows[1]['mean_loc_error_m'], 0.01)
 
 
 class AmclSeriesTests(unittest.TestCase):

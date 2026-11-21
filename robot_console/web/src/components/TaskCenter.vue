@@ -2,14 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { tasksApi, waitTask, type ConsoleTask } from '@/tasks'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { tasksApi, waitTask, type ConsoleTask, type TaskRemoval } from '@/tasks'
 import type { RelativeResult } from '@/evaluation/api'
 import { taskMessages } from '@/taskMessages'
 import { useQuery } from '@/composables/useQuery'
 import { errorText } from '@/messages'
 import { openFolder } from '@/openFolder'
 import { ApiError } from '@/http'
+import { fmtDuration } from '@/format'
 
 const { t } = useI18n({ messages: taskMessages })
 const router = useRouter()
@@ -20,7 +21,21 @@ const resultOpen = ref(false)
 const relative = ref<RelativeResult | null>(null)
 const resultTask = ref<ConsoleTask<RelativeResult> | null>(null)
 function closeResult() { resultQuery.cancel(); relative.value = null; resultTask.value = null }
-const active = computed(() => tasks.value.filter(task => ['queued', 'running'].includes(task.state)).length)
+const isActive = (task: ConsoleTask) => task.state === 'queued' || task.state === 'running'
+const active = computed(() => tasks.value.filter(isActive).length)
+const finishedCount = computed(() => tasks.value.length - active.value)
+const failedCount = computed(() => tasks.value.filter(task => task.state === 'failed' || task.state === 'interrupted').length)
+const removing = ref('') // task id being removed, '*' while clearing
+const pad = (n: number) => String(n).padStart(2, '0')
+function submitted(task: ConsoleTask) {
+  const d = new Date(task.created * 1000)
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+// Running tasks count up with each 1 s refresh; finished ones show their final duration.
+function took(task: ConsoleTask) {
+  const sec = Math.max(0, (task.finished ?? Date.now() / 1000) - task.created)
+  return sec < 60 ? `${sec.toFixed(1)} s` : fmtDuration(sec)
+}
 let timer: ReturnType<typeof setTimeout> | undefined
 let alive = true
 let refreshSequence = 0
@@ -37,6 +52,33 @@ async function retry(task: ConsoleTask) {
   try { await tasksApi.retry(task.id); ElMessage.success(t('tasks.retrySent')); await refresh() }
   catch (e) { ElMessage.error(errorText(e)) }
   finally { retrying.value = '' }
+}
+function absorbRemoval(r: TaskRemoval) {
+  tasks.value = r.tasks
+  if (r.failed) ElMessage.warning(t('tasks.clearPartial', { n: r.removed, failed: r.failed }))
+}
+async function remove(task: ConsoleTask) {
+  removing.value = task.id
+  try { absorbRemoval(await tasksApi.remove(task.id)) }
+  catch (e) { ElMessage.error(errorText(e)); void refresh() }
+  finally { removing.value = '' }
+}
+async function clearAll() {
+  if (!finishedCount.value) return
+  try {
+    const ask = [t('tasks.clearAsk', { n: finishedCount.value }),
+      failedCount.value ? t('tasks.clearAskFailed', { n: failedCount.value }) : '',
+      active.value ? t('tasks.clearAskActive', { n: active.value }) : ''].filter(Boolean).join(' ')
+    await ElMessageBox.confirm(ask,
+      t('tasks.clear'), { type: 'warning', confirmButtonText: t('tasks.clearConfirm'), cancelButtonText: t('tasks.cancel') })
+  } catch { return }
+  removing.value = '*'
+  try {
+    const r = await tasksApi.clear()
+    absorbRemoval(r)
+    if (!r.failed) ElMessage.success(t('tasks.cleared', { n: r.removed }))
+  } catch (e) { ElMessage.error(errorText(e)); void refresh() }
+  finally { removing.value = '' }
 }
 async function show(task: ConsoleTask) {
   if (task.kind === 'eval_relative') {
@@ -66,7 +108,13 @@ async function show(task: ConsoleTask) {
   </el-button>
   <el-drawer v-model="open" :title="t('tasks.title')" size="min(760px, 100vw)">
     <p>{{ t('tasks.background') }}</p>
-    <el-button :loading="query.loading.value" @click="refresh">{{ t('tasks.refresh') }}</el-button>
+    <div class="toolbar">
+      <el-button :loading="query.loading.value" @click="refresh">{{ t('tasks.refresh') }}</el-button>
+      <el-button type="danger" plain :disabled="!finishedCount || !!removing" :loading="removing === '*'" @click="clearAll">
+        {{ t('tasks.clear') }}<span v-if="finishedCount" class="mono-n">&nbsp;· {{ finishedCount }}</span>
+      </el-button>
+      <span class="hint">{{ t('tasks.clearHint') }}</span>
+    </div>
     <el-alert v-if="query.error.value" :title="query.error.value" type="error" :closable="false" />
     <p v-if="!tasks.length">{{ t('tasks.empty') }}</p>
     <article v-for="task in tasks" :key="task.id" class="task">
@@ -76,11 +124,12 @@ async function show(task: ConsoleTask) {
           {{ t(`tasks.states.${task.state}`) }}
         </el-tag>
       </div>
-      <p class="mono">{{ t('tasks.id') }}: {{ task.id }}</p>
+      <p class="mono">{{ t('tasks.submitted') }} {{ submitted(task) }} · {{ t(task.finished ? 'tasks.took' : 'tasks.elapsed') }} {{ took(task) }} · {{ t('tasks.id') }}: {{ task.id }}</p>
       <p role="status">{{ t('tasks.phase') }}: {{ t(`tasks.phases.${task.phase}`) }}</p>
       <el-alert v-if="task.error" :title="errorText(new ApiError(task.error))" type="error" :closable="false" />
       <el-button v-if="task.state !== 'failed' && task.state !== 'interrupted' && (task.kind !== 'eval_export' || task.state === 'succeeded')" @click="show(task)">{{ t('tasks.open') }}</el-button>
       <el-button v-if="task.state === 'failed' || task.state === 'interrupted'" :loading="retrying === task.id" @click="retry(task)">{{ t('tasks.retry') }}</el-button>
+      <el-button v-if="!isActive(task)" text :disabled="!!removing" :loading="removing === task.id" @click="remove(task)">{{ t('tasks.remove') }}</el-button>
     </article>
   </el-drawer>
   <el-dialog v-model="resultOpen" :title="t('tasks.kind.eval_relative')" width="min(800px, 96vw)" @closed="closeResult">
@@ -103,5 +152,9 @@ async function show(task: ConsoleTask) {
 .task { padding: 18px 0; border-bottom: 1px solid var(--hairline); overflow-wrap: anywhere; }
 .task-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .task p { margin: 8px 0; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 4px; }
+.toolbar .el-button + .el-button { margin-left: 0; }
+.hint { font-size: 12px; color: var(--ink-3); }
+.mono-n { font-variant-numeric: tabular-nums; }
 .mono { font-size: 12px; color: var(--ink-3); }
 </style>

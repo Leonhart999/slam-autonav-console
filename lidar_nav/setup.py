@@ -29,6 +29,7 @@ setup(
         'console_scripts': [
             'pcd_to_grid = lidar_nav.pcd_to_grid:main',
             'nav_goals = lidar_nav.nav_goals:main',
+            'gt_localizer = lidar_nav.gt_localizer:main',
         ],
     },
 )

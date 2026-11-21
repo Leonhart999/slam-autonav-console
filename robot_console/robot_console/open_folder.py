@@ -5,7 +5,7 @@ opens on that machine's desktop: under WSL with Windows Explorer (explorer.exe <
 the Linux file system open as \\\\wsl.localhost\\<distro>\\...), on a Linux desktop with xdg-open.
 
 Only folders inside the console's own data folders can be opened (maps, run records, evaluation exports,
-bag folders); the path must exist and be a directory. `~` is expanded, so the page can pass the paths it shows.
+bag folders, plugin folders); the path must exist and be a directory. `~` is expanded, so the page can pass the paths it shows.
 The recycle bin dialogs open <data folder>/.trash, which only exists after the first delete: that one folder is
 created when it is missing.
 """
@@ -49,7 +49,7 @@ def allowed_roots(cfg):
     m = cfg.get('mapping') or {}
     p = cfg.get('playback') or {}
     roots = [m.get('maps_dir'), m.get('runs_dir'), (cfg.get('evaluation') or {}).get('results_dir'),
-             *(p.get('bag_dirs') or []), p.get('upload_dir')]
+             *(p.get('bag_dirs') or []), p.get('upload_dir'), *((cfg.get('plugins') or {}).get('dirs') or [])]
     return [os.path.realpath(os.path.expanduser(r)) for r in roots if r]
 
 

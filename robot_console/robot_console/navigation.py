@@ -12,7 +12,9 @@ from PIL import Image
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import OccupancyGrid, Path as NavPath
+from lifecycle_msgs.srv import GetState
 from nav2_msgs.action import NavigateToPose
+from nav2_msgs.srv import ClearEntireCostmap
 from nav2_msgs.msg import SpeedLimit
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
@@ -153,6 +155,11 @@ class NavigationData:
         self.buffer = Buffer(cache_time=Duration(seconds=10))
         self.listener = TransformListener(self.buffer, node, spin_thread=False)
         self.action = ActionClient(node, NavigateToPose, '/navigate_to_pose')
+        self.bt_state_client = node.create_client(GetState, '/bt_navigator/get_state')
+        self.clear_costmap_clients = (
+            node.create_client(ClearEntireCostmap, '/local_costmap/clear_entirely_local_costmap'),
+            node.create_client(ClearEntireCostmap, '/global_costmap/clear_entirely_global_costmap'),
+        )
         self.scan = None
         self.paths = {'global_path': None, 'local_path': None}
         self.epoch = 0
@@ -206,6 +213,42 @@ class NavigationData:
             if self.enabled:
                 self.amcl = ({'std_x': math.sqrt(max(c[0], 0)), 'std_y': math.sqrt(max(c[7], 0)),
                               'std_yaw': math.sqrt(max(c[35], 0))}, time.monotonic())
+
+    def nav2_active(self, timeout=1.5):
+        """True when NavigateToPose is ready AND bt_navigator lifecycle state is ACTIVE (id=3).
+        Must not be called from the rclpy executor thread."""
+        if not self.action.server_is_ready():
+            return False
+        if not self.bt_state_client.wait_for_service(timeout_sec=min(0.5, timeout)):
+            return False
+        done = threading.Event()
+        fut = self.bt_state_client.call_async(GetState.Request())
+        fut.add_done_callback(lambda _f: done.set())
+        if not done.wait(timeout):
+            return False
+        try:
+            res = fut.result()
+            return res is not None and res.current_state.id == 3
+        except Exception:
+            return False
+
+    def clear_costmaps(self, timeout=3.0):
+        """Clear local and global costmaps (for reset between batch repetitions)."""
+        ok = True
+        for client in self.clear_costmap_clients:
+            if not client.wait_for_service(timeout_sec=min(1.0, timeout)):
+                ok = False
+                continue
+            done = threading.Event()
+            fut = client.call_async(ClearEntireCostmap.Request())
+            fut.add_done_callback(lambda _f: done.set())
+            if not done.wait(timeout):
+                ok = False
+        return ok
+
+    def amcl_stamp(self):
+        with self.lock:
+            return self.amcl[1] if self.amcl else None
 
     def set_initial_pose(self, x, y, yaw):
         """Publish /initialpose in the map frame (what rviz2's "2D Pose Estimate" does)."""

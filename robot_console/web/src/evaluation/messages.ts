@@ -91,6 +91,8 @@ const zh = {
     method: '方法：evo {evo}，SE(3) Umeyama 对齐（不估尺度），只算平移误差；时间匹配容差 {diff} s；RPE 段长 {d} m。数值与命令行 evo_ape tum gt.tum est.tum -a 相同。',
     nav: {
       variant: '参数变体',
+      localizer: '定位',
+      localizers: { amcl: 'AMCL', gt: '真值' },
       success: '成功率',
       meanTime: '平均用时',
       meanPath: '平均路径',
@@ -300,6 +302,8 @@ const en: EvalMessages = {
     method: 'Method: evo {evo}, SE(3) Umeyama alignment (no scale), translation error only; timestamp tolerance {diff} s; RPE segment {d} m. Same numbers as evo_ape tum gt.tum est.tum -a on the command line.',
     nav: {
       variant: 'Variant',
+      localizer: 'Localizer',
+      localizers: { amcl: 'AMCL', gt: 'GT' },
       success: 'Success',
       meanTime: 'Mean time',
       meanPath: 'Mean path',

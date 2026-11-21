@@ -120,6 +120,22 @@ class CatalogTests(unittest.TestCase):
     def test_missing_root_is_empty(self):
         self.assertEqual(MapCatalog(self.root / 'nope').list(), [])
 
+    def test_list_reports_has_scans_and_has_trajectory(self):
+        folder = self.root / 'traj_map'
+        write_grid(folder)
+        write_cloud(folder)
+        (folder / 'data').mkdir()
+        (folder / 'data' / 'est.tum').write_text('0 0 0 0 0 0 0 1\n', encoding='utf-8')
+        rec = self.root / 'rec'
+        rec.mkdir()
+        (rec / 'scans.bin').write_bytes(b'\x00' * 16)
+        (rec / 'index.csv').write_text('0 0 1 0 0 0 0 0 0 1\n', encoding='utf-8')
+        (folder / 'data' / 'scan_poses.tum').write_text('0 0 0 0 0 0 0 1\n', encoding='utf-8')
+        (folder / 'meta.json').write_text(json.dumps({'preset': 'office', 'input_recording': str(rec)}))
+        _, m = self.codes('traj_map')
+        self.assertTrue(m['has_scans'])
+        self.assertTrue(m['has_trajectory'])
+
 
 if __name__ == '__main__':
     unittest.main()

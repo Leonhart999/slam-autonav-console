@@ -583,8 +583,8 @@ class Evaluation:
         return 'playback_summary.csv'
 
     def _write_batch(self, out, batch_id):
-        """batch.json of a batch experiment (batch.py) -> batch_summary.csv (mean ± std) + batch_runs.csv."""
-        if not re.fullmatch(r'batch_[0-9_]{8,40}', batch_id):
+        """batch.json of a mapping or navigation batch -> summary + per-run CSVs."""
+        if not re.fullmatch(r'(?:nav_)?batch_[0-9_]{8,40}', batch_id):
             raise EvalError('batch_not_found', 404, id=batch_id)
         src = self.runs_dir / batch_id / 'batch.json'
         try:
@@ -593,6 +593,39 @@ class Evaluation:
             raise EvalError('batch_not_found', 404, id=batch_id)
         shutil.copy2(src, out / f'{batch_id}.json')
         s = b.get('summary') or {}
+        if batch_id.startswith('nav_batch_'):
+            with open(out / 'nav_batch_summary.csv', 'w', newline='', encoding='utf-8-sig') as f:
+                w = csv.writer(f)
+                w.writerow(['batch_id', 'map', 'scene', 'variant', 'localizer', 'speed_scale',
+                            'runs', 'completed', 'all_goals_runs', 'total_goals', 'total_succeeded',
+                            'pooled_success_rate', 'metric', 'mean', 'std', 'min', 'max', 'n'])
+                for key in ('success_rate', 'total_time_s', 'mean_time_s', 'total_path_m', 'mean_path_m',
+                            'recoveries', 'goal_error_m', 'loc_error_m', 'amcl_rmse_m', 'min_clearance_m', 'wall_s'):
+                    m = s.get(key) or {}
+                    w.writerow([batch_id, b.get('map'), b.get('preset'), b.get('variant'),
+                                b.get('localizer') or 'amcl', b.get('speed_scale', 1.0),
+                                s.get('runs'), s.get('completed'), s.get('all_goals_runs'),
+                                s.get('total_goals'), s.get('total_succeeded'), s.get('pooled_success_rate', ''),
+                                key, m.get('mean', ''), m.get('std', ''), m.get('min', ''), m.get('max', ''),
+                                m.get('n', 0)])
+            with open(out / 'nav_batch_runs.csv', 'w', newline='', encoding='utf-8-sig') as f:
+                w = csv.writer(f)
+                w.writerow(['batch_id', 'index', 'run_id', 'ok', 'all_succeeded', 'failure', 'reset_kind',
+                            'goals', 'finished', 'succeeded', 'success_rate', 'total_time_s', 'mean_time_s',
+                            'total_path_m', 'mean_path_m', 'mean_goal_error_m', 'mean_loc_error_m',
+                            'amcl_rmse_m', 'recoveries', 'min_clearance_m', 'wall_s', 'started', 'ended'])
+                for r in b.get('runs') or []:
+                    w.writerow([batch_id, r.get('index'), r.get('run_id') or '', r.get('ok'),
+                                r.get('all_succeeded', ''), r.get('code') or '', r.get('reset_kind') or '',
+                                r.get('goals', ''), r.get('finished', ''), r.get('succeeded', ''),
+                                r.get('success_rate', ''), r.get('total_time_s', ''), r.get('mean_time_s', ''),
+                                r.get('total_path_m', ''), r.get('mean_path_m', ''),
+                                r.get('mean_goal_error_m', ''), r.get('mean_loc_error_m', ''),
+                                r.get('amcl_rmse_m', ''), r.get('recoveries', ''),
+                                r.get('min_clearance_m', ''), r.get('wall_s', ''),
+                                r.get('started'), r.get('ended')])
+            return ['nav_batch_summary.csv', 'nav_batch_runs.csv', f'{batch_id}.json']
+
         with open(out / 'batch_summary.csv', 'w', newline='', encoding='utf-8-sig') as f:
             w = csv.writer(f)
             w.writerow(['batch_id', 'scene', 'slam', 'runs', 'succeeded', 'metric', 'mean', 'std', 'min', 'max', 'n'])

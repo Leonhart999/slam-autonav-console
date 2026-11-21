@@ -158,6 +158,18 @@ def resolve_packaged(name, config_path):
     return next((c for c in candidates if os.path.isfile(c)), candidates[0])
 
 
+def shipped_plugins_dir():
+    """Folder of the plugins shipped with the console: share/robot_console/plugins when installed, else plugins/ of
+    the source tree (tests). None when neither exists."""
+    candidates = []
+    try:
+        candidates.append(os.path.join(get_package_share_directory('robot_console'), 'plugins'))
+    except PackageNotFoundError:
+        pass
+    candidates.append(str(Path(__file__).resolve().parents[1] / 'plugins'))
+    return next((c for c in candidates if os.path.isdir(c)), None)
+
+
 def load(path=None):
     explicit = path is not None
     path = path or default_config_path()
@@ -243,6 +255,16 @@ def load(path=None):
     ev.setdefault('evo_python', '~/venvs/evo/bin/python')
     for key in ('results_dir', 'evo_python'):
         ev[key] = expand(ev[key])
+    plugins = cfg['plugins'] = cfg.get('plugins') or {}
+    plugins['dirs'] = [expand(d) for d in (plugins.get('dirs') or ['${data_root}/plugins'])]
+    shipped = shipped_plugins_dir()
+    if plugins.get('shipped', True) and shipped and shipped not in plugins['dirs']:
+        plugins['dirs'].append(shipped)
+    plugins['state_file'] = expand(plugins.get('state_file') or '${data_root}/plugin_state.json')
+    plugins['data_dir'] = expand(plugins.get('data_dir') or '${data_root}/plugin_data')
+    plugins['envs_dir'] = expand(plugins.get('envs_dir') or '${data_root}/plugin_envs')
+    if plugins.get('python'):
+        plugins['python'] = expand(plugins['python'])
     nav = cfg['navigation'] = cfg.get('navigation') or {}
     for key in ('params_file', 'default_map'):
         if nav.get(key):

@@ -15,3 +15,12 @@ h11==0.16.0
 uvicorn==0.54.0
 websockets==16.1.1
 python-multipart==0.0.32
+# AI assistant plugin (plugins/ai_assistant), Anthropic provider: official SDK and its dependencies
+anthropic==2.9.0
+httpx2==2.14.0
+httpcore2==2.14.0
+jiter==0.18.0
+sniffio==1.3.1
+truststore==0.10.5
+docstring_parser==0.18.0
+idna==3.20

@@ -24,13 +24,15 @@ mission in the warehouse, the monitor and evaluation pages. Captions in Chinese 
 | **Mapping** | Start a world (office, warehouse, or your own uploaded SDF / ZIP), run FAST-LIO2 (with optional LiDAR-only and ground-vehicle constraint switches) or GLIM, inspect and tune parameters in the **Parameters** dialog, watch the voxel map grow in 3D, drive with an on-screen joystick / WASD or a waypoint route, save the map |
 | **Playback** | Play a rosbag2 bag (or a chosen part of it, 0.5–8×) into FAST-LIO2, GLIM or GLIM (LiDAR only); auto-probe and configure real-robot topics, per-point time fields, acceleration units and extrinsics in the browser (**Sensor setup**), skip shaking starts (`start_offset`), record raw scans (**Save raw scans**), tune derived / user SLAM parameters, upload and trash bags |
 | **Maps** | Browse saved maps (3D point cloud + 2D grid side by side), auto-generate a navigable 2D grid when importing a cloud-only `.pcd`, regenerate the 2D grid by cloud projection or **Scan evidence** (filtering moving objects), edit the grid with a brush, trash and restore |
-| **Navigation** | Load a map, start the simulation and Nav2 (with selectable parameter variants), set the initial pose and goals on the map, run multi-waypoint missions, overlay global / local costmaps, change the speed factor, switch between point cloud and solid world model, and link or generate a world for maps built from bags |
+| **Navigation** | Load a map, start the simulation and Nav2 (NavFn / Smac / Theta* planners and DWB / MPPI controller variants, AMCL or ground-truth localizer switch), set the initial pose and goals on the map, run single or batch repeated multi-waypoint missions, overlay global / local costmaps, change the speed factor, switch between point cloud and solid world model, and link or generate a world for maps built from bags |
 | **Evaluation** | Separate records for mapping, navigation and playback; evo ATE / RPE, navigation metrics, start-to-end / closure / reference-odometry deviation and SLAM lag for playback; **Side by side** or **Stacked** view; multi-run and batch comparisons with mean ± std, user-parameter badges, CSV / PNG export |
 | **Monitor** | Processes started from the console, topic rates against expected rates, TF chain, node list, how each process was stopped |
+| **Plugins** | Manage installed plugins (enable / disable on next start, manifest-driven settings, per-plugin isolated Python environments and background jobs) and install extensions from the **Plugin market** ([`slam-console-plugins`](https://github.com/Leonhart999/slam-console-plugins) GitHub index or local `.zip`). Developer docs: [robot_console/docs/plugins.md](robot_console/docs/plugins.md), [robot_console/docs/plugin-guidelines.md](robot_console/docs/plugin-guidelines.md) and `robot_console/examples/plugins/hello_console`. Shipped plugins: **AI assistant** (resizable chat drawer, multi-profile model service manager for OpenAI-compatible / Anthropic endpoints, model / reasoning-effort / access pickers, read-only queries and approval-gated experiment / evaluation tools), **Bag converter** (ROS 1 `.bag` to ROS 2 sqlite3 / MCAP with Livox `CustomMsg` conversion via `rosbags`), **Dynamic object removal** (DUFOMap), and **Ground segmentation** (Patchwork++) |
 
 Long-running operations (2D grid regeneration, evo evaluation, relative trajectory comparison, report export)
-run through the **Background tasks** drawer in the header so their progress survives page navigation and can
-be recovered or retried. Light and dark appearances can be switched from the bottom of the sidebar.
+run through the **Background tasks** drawer in the header so their progress survives page navigation, can be
+recovered or retried, and finished records can be removed or cleared. Monitor and Plugins live in a bottom
+tool group of the sidebar alongside the light / dark appearance toggle.
 
 Every run is recorded: mapping and playback runs keep trajectories, lag logs and the effective layered SLAM
 configuration (`slam_config`); navigation runs keep per-goal results, AMCL error over time and figures. A
@@ -116,7 +118,7 @@ sensor profiles, parameter overrides and exports live under `~/robot_console_dat
 
 | Folder | ROS 2 package | Contents |
 |---|---|---|
-| `robot_console/` | `robot_console` | the console: backend, frontend (`web/`), layered SLAM specs, installer, tests |
+| `robot_console/` | `robot_console` | the console: backend, frontend (`web/`), plugin system and shipped plugins (`plugins/`), layered SLAM specs, installer, tests |
 | `sim_robot/` | `sim_robot` | Gazebo worlds, the diff-drive robot (16-line lidar, IMU, ground truth), cloud adapter, waypoint driver, FAST-LIO2 / GLIM configuration |
 | `lidar_nav/` | `lidar_nav` | Nav2 launch and parameter variants, 3D → 2D map projection, navigation test tools |
 | `docker/` | — | Dockerfile, entrypoint, container configuration and offline prefetch guide |
