@@ -8,6 +8,13 @@ import type { StatusMsg } from '@/types'
 type JsonHandler = (msg: { type: string; [k: string]: unknown }) => void
 type BinaryHandler = (buf: ArrayBuffer) => void
 
+type PreviewFeed = {
+  status: StatusMsg
+  stream: (name: string, json: JsonHandler, binary: BinaryHandler) => void
+}
+let preview: PreviewFeed | undefined
+export function setPreviewFeed(feed: PreviewFeed) { preview = feed }
+
 export const useStatusStore = defineStore('status', () => {
   const connected = ref(false)
   const status = ref<StatusMsg | null>(null)
@@ -18,6 +25,12 @@ export const useStatusStore = defineStore('status', () => {
   const binaryHandlers = new Set<BinaryHandler>()
 
   function connect() {
+    if (preview) {
+      status.value = preview.status
+      connected.value = true
+      for (const name of streams) emitPreview(name)
+      return
+    }
     if (sock) return
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     sock = new WebSocket(`${proto}://${location.host}/ws`)
@@ -52,8 +65,15 @@ export const useStatusStore = defineStore('status', () => {
   }
 
   /** 订阅数据流。已经订阅时再调用一次，后端会从头重发（用于重新同步） */
+  function emitPreview(name: string) {
+    preview?.stream(name, msg => jsonHandlers.forEach(h => h(msg)), buf => binaryHandlers.forEach(h => h(buf)))
+  }
   function subscribe(stream: string) {
     streams.add(stream)
+    if (preview) {
+      if (connected.value) emitPreview(stream)
+      return
+    }
     sendStreams()
   }
   function unsubscribe(stream: string) {

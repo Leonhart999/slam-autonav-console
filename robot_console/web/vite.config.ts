@@ -7,8 +7,16 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 const BACKEND = 'http://127.0.0.1:8000'
 
-export default defineConfig({
-  plugins: [vue(), Components({ dirs: [], dts: 'src/element-plus.d.ts', resolvers: [ElementPlusResolver()] })],
+export default defineConfig(({ mode }) => ({
+  plugins: [vue(), Components({ dirs: [], dts: 'src/element-plus.d.ts', resolvers: [ElementPlusResolver()] }),
+    ...(mode === 'console-preview' ? [{
+      name: 'console-preview-csp',
+      transformIndexHtml() {
+        return [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy',
+          content: "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'" }, injectTo: 'head-prepend' as const }]
+      },
+    }] : []),
+  ],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
@@ -25,4 +33,4 @@ export default defineConfig({
     manifest: true,
     chunkSizeWarningLimit: 1000,
   },
-})
+}))

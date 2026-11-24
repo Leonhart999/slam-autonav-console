@@ -4,6 +4,7 @@ export const demoMessages = {
     app: { title: 'SLAM and AutoNav Console 在线演示' },
     header: {
       demo: '在线演示',
+      console: '完整控制台预览',
       github: 'GitHub',
       theme: { light: '浅色', dark: '深色' },
     },
@@ -79,6 +80,7 @@ export const demoMessages = {
     app: { title: 'SLAM and AutoNav Console live demo' },
     header: {
       demo: 'Live demo',
+      console: 'Full console preview',
       github: 'GitHub',
       theme: { light: 'Light', dark: 'Dark' },
     },

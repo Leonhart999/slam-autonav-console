@@ -25,7 +25,7 @@ import { useEvaluationCharts } from '@/evaluation/useEvaluationCharts'
 import { useRunDetails } from '@/evaluation/useRunDetails'
 import { useQuery } from '@/composables/useQuery'
 import { taskMessages } from '@/taskMessages'
-import { isCancelled } from '@/http'
+import { isCancelled, isReadOnlyPreview } from '@/http'
 import GlassPanel from '@/components/GlassPanel.vue'
 import KpiTile from '@/components/KpiTile.vue'
 import EvalChart from '@/components/EvalChart.vue'
@@ -62,6 +62,7 @@ async function loadList() {
   await listQuery.run(signal => evalApi.runs(signal), r => {
     runs.value = r.runs
     params.value = r.params
+    if (isReadOnlyPreview() && !focused.value && !route.query.bag) focused.value = r.runs[0]?.id ?? ''
   })
   try { presets.value = await api.mappingPresets() } catch { /* Fall back to the preset name. */ }
 }

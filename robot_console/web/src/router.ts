@@ -42,5 +42,5 @@ export const router = createRouter({
   // hash 模式：地址形如 /#/monitor，后端只需提供 index.html，刷新页面不会 404
   history: createWebHashHistory(),
   // Pages added by plugins (plugins/host.ts) are not in `pages`: one route shows them all, also before they load
-  routes: [{ path: '/', redirect: '/monitor' }, ...pages, { path: '/ext/:id/:page', name: 'plugin-page', component: PluginPageHost }],
+  routes: [{ path: '/', redirect: import.meta.env.MODE === 'console-preview' ? '/mapping' : '/monitor' }, ...pages, { path: '/ext/:id/:page', name: 'plugin-page', component: PluginPageHost }],
 })

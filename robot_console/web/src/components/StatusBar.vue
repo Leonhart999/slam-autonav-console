@@ -4,12 +4,14 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { api } from '@/api'
+import { isReadOnlyPreview } from '@/http'
 import { pick } from '@/i18n'
 import { errorText } from '@/messages'
 import { useStatusStore } from '@/stores/status'
 
 const { t } = useI18n()
 const store = useStatusStore()
+const preview = isReadOnlyPreview()
 const s = computed(() => store.status)
 
 const simTime = computed(() => {
@@ -52,7 +54,7 @@ async function estop() {
   <footer class="bar glass" :class="{ offline: !store.connected }">
     <div class="link" :class="store.connected ? 'ok' : 'bad'">
       <span class="beacon" />
-      <span>{{ store.connected ? t('status.connected') : t('status.reconnecting') }}</span>
+      <span>{{ preview ? t('app.preview') : store.connected ? t('status.connected') : t('status.reconnecting') }}</span>
     </div>
     <span class="sep" />
     <div class="cell">
@@ -69,7 +71,7 @@ async function estop() {
       <span class="v mono num">{{ m.value.toFixed(0) }}%</span>
     </div>
     <span class="spacer" />
-    <button class="estop" :disabled="!store.connected" @click="estop">
+    <button class="estop" :disabled="preview || !store.connected" @click="estop">
       <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
         <path
           d="M8.1 2h7.8L22 8.1v7.8L15.9 22H8.1L2 15.9V8.1z" fill="none"

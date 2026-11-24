@@ -14,6 +14,10 @@ const zhCN = {
     linkUp: '后端已连接',
     linkDown: '后端未连接，正在重连',
     pluginIssues: '{n} 个插件加载出错',
+    preview: '只读预览',
+    previewHint: '使用已录制的仓库实验和示例数据。不连接 ROS 2，不支持实时控制或上传。',
+    previewReplay: '仓库回放',
+    previewFailed: '无法加载预览数据，请刷新重试。',
   },
   nav: {
     mapping: '建图',
@@ -908,6 +912,7 @@ const zhCN = {
   },
   // 后端返回的错误代码
   error: {
+    preview_read_only: '此操作需要安装完整版控制台，只读预览中不可用。',
     request_timeout: '请求等待超过 {seconds} 秒；请检查后台状态后再重试。',
     request_network: '无法连接控制台：{reason}',
     response_invalid: '接口返回的数据格式不正确：{path}',

@@ -12,6 +12,8 @@ Outputs:
   run.json   run metadata, evo statistics, the estimate and the ground truth in the map frame, APE per pose,
              and a top view of the aligned trajectories (world frame), all numbers rounded for size
   map.bin    the voxel map: voxel indices packed into sorted uint32 keys, stored as deltas, gzip-compressed
+  warehouse-grid.png + warehouse-console.json (--console): the saved grid and original evo series for the
+    full console preview. This option also requires Pillow, PyYAML, map.pgm, map.yaml and the run's run.json.
 
 The ground truth is moved into the map frame with the inverse of evo's SE(3) alignment (est -> gt) from
 eval.json, so the 3D view can draw it over the map. The APE per pose is recomputed here with the same
@@ -96,12 +98,27 @@ def rounded(a: np.ndarray, digits: int) -> list:
     return np.round(a, digits).tolist()
 
 
+def write_console_assets(map_dir: Path, run_dir: Path, out: Path, evaluation: dict) -> None:
+    from PIL import Image
+    import yaml
+
+    info = yaml.safe_load((map_dir / 'map.yaml').read_text(encoding='utf-8'))
+    run = json.loads((run_dir / 'run.json').read_text(encoding='utf-8'))
+    with Image.open(map_dir / 'map.pgm') as image:
+        image.save(out / 'warehouse-grid.png', optimize=True)
+        grid = dict(width=image.width, height=image.height, resolution=info['resolution'], origin=info['origin'])
+    keys = ['evo', 'created', 'params', 'matched_poses', 'duration', 'length', 'ref_length', 'ape', 'rpe', 'series']
+    public = dict(grid=grid, started=run['started'], ended=run['ended'], evaluation={k: evaluation[k] for k in keys})
+    (out / 'warehouse-console.json').write_text(json.dumps(public, separators=(',', ':')) + '\n', encoding='utf-8')
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('--map', required=True, type=Path, help='saved map folder (map_voxel.pcd, meta.json)')
     ap.add_argument('--run', required=True, type=Path, help='mapping run folder (est.tum, gt.tum, eval.json)')
     ap.add_argument('--out', required=True, type=Path, help='output folder (run.json, map.bin)')
     ap.add_argument('--scene', default='warehouse', help='scene key the demo page has captions for')
+    ap.add_argument('--console', action='store_true', help='also export the warehouse grid and full evaluation')
     ap.add_argument('--top-view-points', type=int, default=1500)
     args = ap.parse_args()
 
@@ -180,6 +197,8 @@ def main() -> None:
     }
 
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.console:
+        write_console_assets(args.map, args.run, args.out, ev)
     (args.out / 'map.bin').write_bytes(map_bytes)
     (args.out / 'run.json').write_text(json.dumps(out, separators=(',', ':')), encoding='utf-8')
     print(f"map: {map_info['count']} voxels, {len(map_bytes) / 1e6:.2f} MB; run.json "

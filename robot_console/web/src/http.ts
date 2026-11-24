@@ -1,6 +1,14 @@
 // Shared transport. Cancelling observation never implies cancelling a server-side operation.
 import type { CodedMsg } from './types'
 
+type PreviewReader = (path: string, signal: AbortSignal) => Promise<Response>
+let previewReader: PreviewReader | undefined
+
+/** Installed only by the static preview entry, before the console mounts. */
+export function setPreviewReader(reader: PreviewReader) { previewReader = reader }
+export function isReadOnlyPreview() { return previewReader !== undefined }
+export function previewReadOnlyError() { return new ApiError({ code: 'preview_read_only', params: {} }, 405) }
+
 export class ApiError extends Error {
   constructor(readonly coded: CodedMsg, readonly status?: number) { super(coded.code) }
 }
@@ -92,8 +100,11 @@ async function transport<T>(method: string, path: string, body: unknown, options
   try {
     const headers = new Headers(options.headers)
     if (body !== undefined && options.raw === undefined) headers.set('Content-Type', 'application/json')
-    const res = await fetch(path, { method, headers, signal: controller.signal, cache: options.cache,
-      body: options.raw ?? (body === undefined ? undefined : JSON.stringify(body)) })
+    if (previewReader && method !== 'GET') throw previewReadOnlyError()
+    const res = previewReader
+      ? await previewReader(path, controller.signal)
+      : await fetch(path, { method, headers, signal: controller.signal, cache: options.cache,
+        body: options.raw ?? (body === undefined ? undefined : JSON.stringify(body)) })
     if (!res.ok) throw responseError(await res.json().catch(() => null), res.status, res.statusText)
     const result = await consume(res)
     if (controller.signal.aborted) throw new RequestCancelled()

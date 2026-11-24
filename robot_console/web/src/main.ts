@@ -11,11 +11,26 @@ import { applyDocumentLang, i18n } from './i18n'
 import { initTheme } from './theme'
 import { startPlugins } from './plugins/start'
 
-const app = createApp(App)
-app.use(createPinia())
-app.use(router)
-app.use(i18n)
-applyDocumentLang()
-initTheme()
-app.mount('#app')
-startPlugins()
+async function start() {
+  const preview = import.meta.env.MODE === 'console-preview'
+  if (preview) {
+    try {
+      const { installConsolePreview } = await import('./console-preview/install')
+      await installConsolePreview()
+    } catch {
+      const root = document.querySelector('#app')
+      if (root) root.textContent = i18n.global.t('app.previewFailed')
+      return
+    }
+  }
+  const app = createApp(App)
+  app.use(createPinia())
+  app.use(router)
+  app.use(i18n)
+  applyDocumentLang()
+  initTheme()
+  app.mount('#app')
+  if (!preview) startPlugins()
+}
+
+void start()

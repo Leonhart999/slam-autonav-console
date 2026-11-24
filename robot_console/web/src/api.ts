@@ -5,7 +5,7 @@ import type { BagInfo, PlaybackStatus, BagTrash, PlaybackStorage, SensorProbe, S
 import type { SlamConfigInfo } from './mapping/slamConfig'
 
 export { ApiError, fetchAsset } from './http'
-import { ApiError, request, responseError, RequestCancelled, TIMEOUTS, validResponse } from './http'
+import { ApiError, isReadOnlyPreview, previewReadOnlyError, request, responseError, RequestCancelled, TIMEOUTS, validResponse } from './http'
 import type { RequestOptions } from './http'
 
 export interface UploadProgress {
@@ -23,6 +23,7 @@ function upload<T>(
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new RequestCancelled()); return }
+    if (isReadOnlyPreview()) { reject(previewReadOnlyError()); return }
     const xhr = new XMLHttpRequest()
     const cancel = () => xhr.abort()
     const cleanup = () => signal?.removeEventListener('abort', cancel)

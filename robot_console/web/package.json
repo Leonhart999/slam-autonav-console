@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "build:plugins": "node scripts/build-plugins.mjs",
     "dev:demo": "vite -c vite.demo.config.ts",
-    "build:demo": "vue-tsc -b && vite build -c vite.demo.config.ts",
+    "build:demo": "vue-tsc -b && vite build -c vite.demo.config.ts && vite build --mode console-preview --base ./ --outDir dist-demo/console --emptyOutDir",
     "preview:demo": "vite preview -c vite.demo.config.ts"
   },
   "dependencies": {

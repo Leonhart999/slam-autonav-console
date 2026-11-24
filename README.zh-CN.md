@@ -7,7 +7,8 @@ LiDAR SLAM 建图和自主导航控制台，覆盖 LiDAR SLAM 建图、地图管
 
 本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* 的配套软件。界面支持中英文切换，以及浅色 / 深色双外观主题。
 
-**[在线演示](https://leonhart999.github.io/slam-autonav-console/)**：在浏览器里回放一次在仿真仓库中录制的 FAST-LIO2 建图运行，并查看它的轨迹评估，不需要安装。实时建图和导航需要安装完整的控制台（见[快速开始](#快速开始)）。
+**[仓库回放演示](https://leonhart999.github.io/slam-autonav-console/)**：在浏览器里回放一次 FAST-LIO2 仿真仓库运行。
+**[完整控制台预览](https://leonhart999.github.io/slam-autonav-console/console/)**：浏览控制台原版页面，查看已保存的 2D/3D 地图和轨迹评估。预览为只读，不连接 ROS 2。实时建图和导航请按[快速开始](#快速开始)安装。
 
 [![控制台视频导览，2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 

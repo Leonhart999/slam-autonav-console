@@ -22,6 +22,25 @@ test('JSON requests preserve structured errors and validate endpoint responses',
   assert.equal(h.validResponse('/api/tasks', { tasks: [task({ input: null })] }), false)
 })
 
+test('preview reads only from fixtures and never falls through to the network', async () => {
+  let network = 0
+  const reads = []
+  const h = make(async () => { network++; return json({}) })
+  h.setPreviewReader(async path => {
+    reads.push(path)
+    return path === '/api/maps/a/cloud' ? new Response(new Uint8Array([1, 2]))
+      : path === '/api/maps' ? json([]) : json({ detail: { code: 'preview_read_only', params: {} } }, 404)
+  })
+  assert.equal((await h.request('GET', '/api/maps')).length, 0)
+  assert.equal((await (await h.fetchAsset('/api/maps/a/cloud')).arrayBuffer()).byteLength, 2)
+  await assert.rejects(h.request('GET', '/api/missing'), code('preview_read_only'))
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+    await assert.rejects(h.request(method, '/api/maps'), code('preview_read_only'))
+  }
+  assert.deepEqual(reads, ['/api/maps', '/api/maps/a/cloud', '/api/missing'])
+  assert.equal(network, 0)
+})
+
 test('network errors, explicit cancellation and timeouts have distinct outcomes', async () => {
   const h = make(async () => { throw new TypeError('offline') })
   await assert.rejects(h.request('GET', '/api/control'), code('request_network'))

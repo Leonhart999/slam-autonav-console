@@ -12,6 +12,7 @@ import { LANGS, pick, setLang } from './i18n'
 import { pagePath, registry } from './plugins/host'
 import { THEMES, setTheme, theme, type Theme } from './theme'
 import { useStatusStore } from './stores/status'
+import { isReadOnlyPreview } from './http'
 import StatusBar from './components/StatusBar.vue'
 import RadarMark from './components/RadarMark.vue'
 import TaskCenter from './components/TaskCenter.vue'
@@ -20,6 +21,8 @@ import PluginSlot from './components/PluginSlot.vue'
 const { t, locale } = useI18n()
 const route = useRoute()
 const store = useStatusStore()
+const preview = isReadOnlyPreview()
+const replayUrl = preview ? new URL('../', document.baseURI).href : ''
 
 // Element Plus 自带文字（表格"暂无数据"等）跟随界面语言
 const epLocale = computed(() => (locale.value === 'en' ? enLocale : zhCn))
@@ -110,7 +113,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
             <span class="nav-label">{{ t(p.meta.titleKey) }}</span>
             <span
               v-if="p.name === 'monitor'" class="tool-dot" :class="store.connected ? 'ok' : 'down'"
-              :title="t(store.connected ? 'app.linkUp' : 'app.linkDown')"
+              :title="preview ? t('app.preview') : t(store.connected ? 'app.linkUp' : 'app.linkDown')"
             />
             <span
               v-else-if="p.name === 'plugins' && pluginIssues" class="tool-badge mono"
@@ -159,6 +162,12 @@ onUnmounted(() => window.clearInterval(clockTimer))
           </div>
         </header>
 
+        <div v-if="preview" class="preview-note glass">
+          <strong>{{ t('app.preview') }}</strong>
+          <span>{{ t('app.previewHint') }}</span>
+          <a :href="replayUrl">{{ t('app.previewReplay') }} ↗</a>
+        </div>
+
         <main class="content">
           <router-view v-slot="{ Component }">
             <transition name="page" mode="out-in">
@@ -174,6 +183,18 @@ onUnmounted(() => window.clearInterval(clockTimer))
 </template>
 
 <style scoped>
+.preview-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.preview-note strong, .preview-note a { color: var(--ink); }
+.preview-note a { margin-left: auto; text-underline-offset: 3px; }
 .shell {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);

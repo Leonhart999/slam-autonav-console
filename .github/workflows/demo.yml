@@ -1,5 +1,5 @@
-# Publishes the web demo (robot_console/web/demo) on GitHub Pages. The demo is a static page that replays one
-# recorded mapping run with the console's own 3D view and evaluation charts; it does not need ROS 2 or a backend.
+# Publishes the recorded warehouse replay and the read-only full console preview on GitHub Pages.
+# Both run from static assets, without ROS 2 or a backend.
 name: Demo
 
 on:

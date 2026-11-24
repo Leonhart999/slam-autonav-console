@@ -15,6 +15,10 @@ const en: MessageSchema = {
     linkUp: 'Backend connected',
     linkDown: 'Backend not connected, retrying',
     pluginIssues: '{n} plugin(s) failed to load',
+    preview: 'Read-only preview',
+    previewHint: 'Recorded warehouse and sample data. No ROS 2 connection; live controls and uploads are unavailable.',
+    previewReplay: 'Warehouse replay',
+    previewFailed: 'Could not load the preview data. Please refresh to try again.',
   },
   nav: {
     mapping: 'Mapping',
@@ -899,6 +903,7 @@ const en: MessageSchema = {
     },
   },
   error: {
+    preview_read_only: 'This action requires the installed console and is unavailable in the read-only preview.',
     request_timeout: 'The request exceeded {seconds} seconds. Check the backend status before retrying.',
     request_network: 'Cannot reach the console: {reason}',
     response_invalid: 'Unexpected response format: {path}',

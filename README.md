@@ -10,9 +10,8 @@ It was built for the bachelor thesis *LiDAR-Based SLAM Mapping and Autonomous Na
 Robots* (Harbin Engineering University). The interface supports Chinese and English, as well as light and
 dark themes.
 
-**[Online demo](https://leonhart999.github.io/slam-autonav-console/)**: replay a recorded FAST-LIO2 mapping run in the simulated warehouse and look at
-its trajectory evaluation in the browser, with nothing to install. Live mapping and navigation need the full
-console (see [Quick start](#quick-start)).
+**[Online demo](https://leonhart999.github.io/slam-autonav-console/)**: replay a recorded FAST-LIO2 run in the simulated warehouse.
+**[Full console preview](https://leonhart999.github.io/slam-autonav-console/console/)**: explore the actual console UI, including the saved 2D/3D map and trajectory evaluation. The preview is read-only and has no ROS 2 connection. To run live mapping or navigation, see [Quick start](#quick-start).
 
 [![Video tour of the console, 2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 

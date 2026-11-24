@@ -1,5 +1,5 @@
 import { onScopeDispose, ref, type Ref } from 'vue'
-import { ApiError, isCancelled, latestRequest, validResponse } from '@/http'
+import { ApiError, isCancelled, isReadOnlyPreview, latestRequest, validResponse } from '@/http'
 import { tasksApi, waitTask, type ConsoleTask } from '@/tasks'
 import { errorText } from '@/messages'
 import { evalApi, type RunDetail, type RunEntry } from './api'
@@ -30,7 +30,7 @@ export function useRunDetails(runs: Ref<RunEntry[]>) {
     scopes.set(id, scope)
     busy.value = new Set([...busy.value, id])
     try {
-      const auto = (entry?.evaluable || withRef) && !entry?.recording && !entry?.eval_error
+      const auto = !isReadOnlyPreview() && (entry?.evaluable || withRef) && !entry?.recording && !entry?.eval_error
       const d = await scope.run(signal => mode === 'force' ? evalApi.evaluate(id, true, signal)
         : mode === 'evaluate' || auto ? evalApi.evaluate(id, false, signal) : evalApi.detail(id, signal))
       if (disposed || scopes.get(id) !== scope) return
