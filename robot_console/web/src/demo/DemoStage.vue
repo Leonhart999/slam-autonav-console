@@ -163,6 +163,13 @@ const slider = computed({
   background: linear-gradient(180deg, #5440d9 0 45%, transparent 45%);
   box-shadow: inset 0 0 0 1px #5440d9;
 }
+/* stacked page (DemoWorkspace): the stage grows with its content, the 3D view gets a fixed height */
+@media (max-width: 1100px) {
+  .viewport {
+    flex: none;
+    height: max(380px, 62vh);
+  }
+}
 
 .replay {
   display: flex;
@@ -219,6 +226,28 @@ const slider = computed({
   }
   .clock.dim {
     display: none;
+  }
+  /* narrow screens: the layer buttons go under the camera buttons instead of behind them */
+  .hud.tl {
+    top: 56px;
+    max-width: calc(100% - 32px);
+  }
+  .hud.br .size {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .hud.bl {
+    display: none; /* no room next to the height legend; the metrics strip has the numbers that matter */
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metric:nth-child(4) {
+    border-left: 1px solid var(--hairline);
+  }
+  .metric:nth-child(odd) {
+    border-left: none;
   }
 }
 </style>

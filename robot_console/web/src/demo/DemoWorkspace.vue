@@ -123,7 +123,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     grid-template-columns: minmax(0, 1fr);
   }
   .stage {
-    height: max(480px, 72vh);
+    height: auto;
   }
   .side {
     overflow: visible;
