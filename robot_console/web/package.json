@@ -9,7 +9,10 @@
     "build": "vue-tsc -b && vite build",
     "typecheck": "vue-tsc -b",
     "preview": "vite preview",
-    "build:plugins": "node scripts/build-plugins.mjs"
+    "build:plugins": "node scripts/build-plugins.mjs",
+    "dev:demo": "vite -c vite.demo.config.ts",
+    "build:demo": "vue-tsc -b && vite build -c vite.demo.config.ts",
+    "preview:demo": "vite preview -c vite.demo.config.ts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

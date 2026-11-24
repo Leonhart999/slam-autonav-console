@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#eef2f8" />
+    <meta name="description" content="Live demo of SLAM and AutoNav Console: replay a FAST-LIO2 mapping run in a simulated warehouse and inspect its trajectory evaluation in the browser." />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <!-- Appearance chosen earlier (src/theme.ts), applied before the first paint so a dark page does not flash white -->
+    <script>
+      try {
+        if (localStorage.getItem('robot_console.theme') === 'dark') document.documentElement.classList.add('dark')
+      } catch (e) {}
+    </script>
+    <title>SLAM and AutoNav Console live demo</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./entry.ts"></script>
+  </body>
+</html>

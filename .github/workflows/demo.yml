@@ -1,0 +1,46 @@
+# Publishes the web demo (robot_console/web/demo) on GitHub Pages. The demo is a static page that replays one
+# recorded mapping run with the console's own 3D view and evaluation charts; it does not need ROS 2 or a backend.
+name: Demo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'robot_console/web/**'
+      - '.github/workflows/demo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: robot_console/web/package-lock.json
+      - name: Test and build
+        working-directory: robot_console/web
+        run: |
+          npm ci
+          npm test
+          npm run build:demo
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: robot_console/web/dist-demo
+      - id: deployment
+        uses: actions/deploy-pages@v4

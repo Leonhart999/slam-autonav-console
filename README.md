@@ -10,6 +10,10 @@ It was built for the bachelor thesis *LiDAR-Based SLAM Mapping and Autonomous Na
 Robots* (Harbin Engineering University). The interface supports Chinese and English, as well as light and
 dark themes.
 
+**[Online demo](https://leonhart999.github.io/slam-autonav-console/)**: replay a recorded FAST-LIO2 mapping run in the simulated warehouse and look at
+its trajectory evaluation in the browser, with nothing to install. Live mapping and navigation need the full
+console (see [Quick start](#quick-start)).
+
 [![Video tour of the console, 2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 
 *Video tour (2:19, [watch on Bilibili](https://www.bilibili.com/video/BV1wm4v6GEQq) or [download the MP4](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4), 49 MB): mapping the office world with FAST-LIO2, saving the map, a three-waypoint Nav2
@@ -144,7 +148,7 @@ sensor profiles, parameter overrides and exports live under `~/robot_console_dat
 |---|---|---|
 | [FAST_LIO](https://github.com/hku-mars/FAST_LIO), ikd-Tree | GPL-2.0 | downloaded by the installer; `robot_console/install/patches/fast_lio-thesis.patch` switches the cloud subscription to reliable QoS and adds a LiDAR-only mode, ground-vehicle constraint, ring bounds check and deeper IMU queue |
 | Livox-SDK2, livox_ros_driver2 | MIT | downloaded by the installer |
-| Warehouse, shelf, pallet and cart models (Gazebo Fuel; OpenRobotics, MovAi) | CC BY-NC 4.0 / CC BY-NC-ND 4.0 | downloaded by `sim_robot/tools/fetch_fuel_models.sh`; non-commercial use only |
+| Warehouse, shelf, pallet and cart models (Gazebo Fuel; OpenRobotics, MovAi) | CC BY-NC 4.0 / CC BY-NC-ND 4.0 | downloaded by `sim_robot/tools/fetch_fuel_models.sh`; non-commercial use only. The online demo shows a point cloud mapped in this world, not the models |
 | HKUST 4F building model (SLABIM, Huang et al., ICRA 2025) | not stated by the dataset | built from your own SLABIM download; not included |
 | [GLIM](https://github.com/koide3/glim) | MIT | optional, installed from the author's PPA |
 | [evo](https://github.com/MichaelGrupp/evo) | GPL-3.0 | installed into its own virtual environment by the installer |

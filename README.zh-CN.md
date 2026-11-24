@@ -7,6 +7,8 @@ LiDAR SLAM 建图和自主导航控制台，覆盖 LiDAR SLAM 建图、地图管
 
 本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* 的配套软件。界面支持中英文切换，以及浅色 / 深色双外观主题。
 
+**[在线演示](https://leonhart999.github.io/slam-autonav-console/)**：在浏览器里回放一次在仿真仓库中录制的 FAST-LIO2 建图运行，并查看它的轨迹评估，不需要安装。实时建图和导航需要安装完整的控制台（见[快速开始](#快速开始)）。
+
 [![控制台视频导览，2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 
 *视频导览（2:19，[在 B 站观看](https://www.bilibili.com/video/BV1wm4v6GEQq)，或[下载 MP4](https://github.com/Leonhart999/slam-autonav-console/releases/download/v0.1.0/slam-autonav-console_tour.mp4)，49 MB）：在办公室场景用 FAST-LIO2 建图并保存，在仓库场景执行三个航点的 Nav2 任务，再看系统监控页和实验评估页。*
@@ -116,7 +118,7 @@ bash slam-autonav-console/robot_console/install/start_console.sh    # 启动控�
 |---|---|---|
 | [FAST_LIO](https://github.com/hku-mars/FAST_LIO)、ikd-Tree | GPL-2.0 | 安装脚本下载；`robot_console/install/patches/fast_lio-thesis.patch` 把点云订阅改为 reliable QoS，并加入仅激光模式、地面车辆约束、ring 越界检查与更大 IMU 队列深度 |
 | Livox-SDK2、livox_ros_driver2 | MIT | 安装脚本下载 |
-| 仓库、货架、托盘和推车模型（Gazebo Fuel；OpenRobotics、MovAi） | CC BY-NC 4.0 / CC BY-NC-ND 4.0 | 由 `sim_robot/tools/fetch_fuel_models.sh` 下载；仅限非商业用途 |
+| 仓库、货架、托盘和推车模型（Gazebo Fuel；OpenRobotics、MovAi） | CC BY-NC 4.0 / CC BY-NC-ND 4.0 | 由 `sim_robot/tools/fetch_fuel_models.sh` 下载；仅限非商业用途。在线演示展示的是在这个场景中建出的点云，不包含模型本身 |
 | 港科大 4 楼建筑模型（SLABIM，Huang 等，ICRA 2025） | 数据集未注明 | 用你自己下载的 SLABIM 生成，仓库里不包含 |
 | [GLIM](https://github.com/koide3/glim) | MIT | 可选，从作者的 PPA 安装 |
 | [evo](https://github.com/MichaelGrupp/evo) | GPL-3.0 | 安装脚本装进单独的虚拟环境 |

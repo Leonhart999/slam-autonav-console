@@ -168,6 +168,12 @@ def check_web(root, unused):
 
     files = sorted(p for p in src.rglob('*') if p.suffix in ('.ts', '.vue') and loc not in p.parents)
     blocks = {p.resolve(): local_blocks(p.read_text(encoding='utf-8')) for p in files}
+    # The web demo (src/demo) is a separate app: its "global" messages are src/demo/messages.ts, not the locales
+    demo = src / 'demo'
+    demo_zh, demo_en = set(), set()
+    for zh, en in blocks.get((demo / 'messages.ts').resolve(), []):
+        demo_zh |= zh
+        demo_en |= en
     for p, bl in blocks.items():
         for zh, en in bl:
             for k in sorted(zh ^ en):
@@ -195,9 +201,11 @@ def check_web(root, unused):
             name, prefix = h.group(1), h.group(2)
             for m in re.finditer(r'(?<![\w$.])' + re.escape(name) + r'''\(\s*(['"])([^'"]+)\1''', text):
                 keys.append((prefix + m.group(2), text.count('\n', 0, m.start()) + 1))
+        in_demo = demo in p.parents
+        g_zh, g_en = (demo_zh, demo_en) if in_demo else (glob_zh, glob_en)
         for key, line in keys:
             used.add(key)
-            for lang, g, l in (('zh-CN', glob_zh, local_zh), ('en', glob_en, local_en)):
+            for lang, g, l in (('zh-CN', g_zh, local_zh), ('en', g_en, local_en)):
                 if key not in g and key not in l:
                     problems.append(f'{rel}:{line}: "{key}" missing in {lang}')
         # For the unused-key hint only: keys kept in variables ('nav.mapping' in router.ts, `mapsPage.issue.${c}`)
