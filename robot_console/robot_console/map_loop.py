@@ -143,6 +143,7 @@ class LoopService:
         self.timeout = float(lb.get('timeout') or 1800)
         self.runs_dir = Path(cfg['mapping'].get('runs_dir', '~/runs')).expanduser()
         self.lock = threading.Lock()       # staging and saving; the back-end itself runs outside it
+        self.tasks = None                  # set by register_loop_routes so worker subprocesses can be tracked
 
     # ---------------- source map ----------------
 
@@ -245,7 +246,10 @@ class LoopService:
                     pass
             timer = threading.Timer(self.timeout, kill)
             timer.start()
+            ctx = self.tasks.track_process(proc) if self.tasks is not None else None
             try:
+                if ctx is not None:
+                    ctx.__enter__()
                 for line in proc.stdout:
                     log.write(line)
                     line = line.strip()
@@ -254,6 +258,13 @@ class LoopService:
                     elif line:
                         tail = (tail + [line])[-20:]
                 proc.wait()
+            except BaseException as exc:
+                if ctx is not None:
+                    ctx.__exit__(type(exc), exc, exc.__traceback__)
+                raise
+            else:
+                if ctx is not None:
+                    ctx.__exit__(None, None, None)
             finally:
                 timer.cancel()
         if timed_out.is_set():
@@ -306,6 +317,7 @@ def register_loop_routes(app, catalog, cfg):
     from .tasks import tasks_for
     service = LoopService(catalog, cfg)
     tasks = tasks_for(app, cfg)
+    service.tasks = tasks
     tasks.register('loop', lambda target, params, progress: service.run(target, params, progress))
 
     @app.get('/api/maps/loop/env')

@@ -19,10 +19,26 @@ export const useStatusStore = defineStore('status', () => {
   const connected = ref(false)
   const status = ref<StatusMsg | null>(null)
   let retryDelay = 1000
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
   let sock: WebSocket | null = null
   const streams = new Set<string>()
   const jsonHandlers = new Set<JsonHandler>()
   const binaryHandlers = new Set<BinaryHandler>()
+
+  function scheduleReconnect(delay: number) {
+    if (retryTimer !== null) clearTimeout(retryTimer)
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      connect()
+    }, delay)
+  }
+
+  function reconnectSoon() {
+    if (preview) return
+    retryDelay = 250
+    if (sock && sock.readyState === WebSocket.CONNECTING) return
+    if (!sock) scheduleReconnect(250)
+  }
 
   function connect() {
     if (preview) {
@@ -32,6 +48,10 @@ export const useStatusStore = defineStore('status', () => {
       return
     }
     if (sock) return
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     sock = new WebSocket(`${proto}://${location.host}/ws`)
     sock.binaryType = 'arraybuffer'
@@ -53,7 +73,7 @@ export const useStatusStore = defineStore('status', () => {
       // 后端没启动或重启时自动重连：1 s、2 s、4 s……最长 5 s 一次
       connected.value = false
       sock = null
-      setTimeout(connect, retryDelay)
+      scheduleReconnect(retryDelay)
       retryDelay = Math.min(retryDelay * 2, 5000)
     }
   }
@@ -100,5 +120,5 @@ export const useStatusStore = defineStore('status', () => {
   /** Data folders for display, from the backend configuration (defaults until the first status arrives) */
   const paths = computed(() => status.value?.paths ?? { maps: '~/maps', runs: '~/runs', results: '' })
 
-  return { connected, status, paths, connect, subscribe, unsubscribe, send, addJsonHandler, addBinaryHandler }
+  return { connected, status, paths, connect, reconnectSoon, subscribe, unsubscribe, send, addJsonHandler, addBinaryHandler }
 })

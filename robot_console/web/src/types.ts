@@ -251,6 +251,8 @@ export interface PickedPose {
 export interface StatusMsg {
   type: 'status'
   time: number
+  boot_id?: string
+  restarting?: boolean
   clock: ClockInfo | null
   topics: TopicInfo[]
   tf: { expected: TfEdge[]; other: TfEdge[] }

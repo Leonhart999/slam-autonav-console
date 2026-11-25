@@ -953,6 +953,22 @@ class PluginJobs:
             return None
         return full
 
+    def cancel_all(self):
+        """Cancel all queued/running plugin jobs without closing the worker loop."""
+        cancelled = []
+        with self.lock:
+            for job in self.jobs.values():
+                if job['state'] == 'queued':
+                    self._update(job, state='cancelled', finished=time.time(), error=None)
+                    cancelled.append(job['id'])
+                elif job['state'] == 'running':
+                    job['cancel'] = True
+                    cancelled.append(job['id'])
+            proc = self.proc
+        if proc is not None:
+            threading.Thread(target=self._kill, args=(proc,), daemon=True).start()
+        return cancelled
+
     def close(self):
         with self.lock:
             self.closed = True
@@ -1296,6 +1312,17 @@ class PluginManager:
         sys.modules[name] = module
         spec.loader.exec_module(module)
         return module
+
+    def cancel_jobs(self):
+        """Cancel active jobs across all loaded plugins without shutting the plugins down."""
+        cancelled = []
+        for rec in self.records.values():
+            if rec.context is not None and rec.context._jobs is not None:
+                try:
+                    cancelled.extend(rec.context._jobs.cancel_all())
+                except Exception as e:  # noqa: BLE001
+                    self._log('warn', f'plugin {rec.id} jobs could not be cancelled: {e}')
+        return cancelled
 
     def shutdown(self):
         for rec in self.records.values():

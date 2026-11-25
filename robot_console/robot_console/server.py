@@ -6,6 +6,7 @@ import os
 import re
 import threading
 import time
+import uuid
 
 import psutil
 import yaml
@@ -20,7 +21,7 @@ from .navigation import NavigationError
 from .nav_mission import MAX_GOALS, NavMission, map_origin
 from .playback import PlaybackError
 from .solid_models import asset_path as solid_asset_path
-from .process_manager import StackRunning
+from .process_manager import StackClosing, StackRunning
 from .scene_import import SceneLibrary
 from .upload_routes import register_import_routes
 from .map_catalog import register_map_routes
@@ -56,8 +57,11 @@ class WebFiles(StaticFiles):
 
 
 def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs=None,
-               plugins=None):
+               plugins=None, on_restart=None, boot_id=None):
     app = FastAPI(title='robot_console')
+    boot_id = boot_id or uuid.uuid4().hex[:12]
+    restarting = threading.Event()
+    restart_lock = threading.Lock()
     period = 1.0 / float(cfg['server'].get('status_rate', 2.0))
     psutil.cpu_percent()            # 第一次调用只是开始计时，返回值无意义
 
@@ -73,6 +77,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         snap = node.snapshot()
         snap['type'] = 'status'
         snap['time'] = time.time()
+        snap['boot_id'] = boot_id
+        snap['restarting'] = restarting.is_set()
         snap['stacks'] = procs.status()
         snap['resources'] = {'cpu': psutil.cpu_percent(), 'mem': psutil.virtual_memory().percent}
         snap['paths'] = paths_shown
@@ -185,6 +191,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         s = stack_or_404(name)
         if s.page_only:
             raise error(409, 'stack_page_only', name=name)
+        if restarting.is_set():
+            raise error(409, 'console_restarting', name=name)
         if nav_batch.running() and name in (sim_name, 'sim_gui', nav_name, mapping.stacks.get('waypoints'), *mapping.profiles):
             raise error(409, 'batch_running', id=nav_batch.batch['id'])
         # the simulation and bag playback both drive /clock and the SLAM inputs: only one at a time
@@ -216,6 +224,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
                 mapping.select(name)
                 mapping.reset()       # 每次开始建图都从空地图开始
             return info
+        except StackClosing as e:
+            raise error(409, 'console_restarting', name=e.name)
         except StackRunning as e:
             raise error(409, 'stack_running', name=e.name)
         except OSError as e:          # 命令不存在等
@@ -247,6 +257,39 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         for n in stopped:
             threading.Thread(target=procs.stop, args=(n,), daemon=True).start()
         return {'cancelled_actions': cancelled, 'stopped_stacks': stopped}
+
+    @app.post('/api/interrupt')
+    def interrupt_all():
+        if restarting.is_set():
+            raise error(409, 'console_restarting')
+        running_stacks = [s['name'] for s in procs.status() if s['state'] in ('running', 'stopping')]
+        cancelled = stop_active_work('interrupt', close_procs=False)
+        for n in running_stacks:
+            threading.Thread(target=procs.stop, args=(n,), daemon=True).start()
+        tasks = getattr(app.state, 'console_tasks', None)
+        interrupted_tasks = tasks.interrupt_all() if tasks is not None else []
+        cancelled_plugin_jobs = plugins.cancel_jobs() if plugins is not None and hasattr(plugins, 'cancel_jobs') else []
+        return {
+            'cancelled_actions': cancelled,
+            'stopped_stacks': running_stacks,
+            'interrupted_tasks': interrupted_tasks,
+            'cancelled_plugin_jobs': cancelled_plugin_jobs,
+        }
+
+    @app.post('/api/restart')
+    def restart_console():
+        if on_restart is None:
+            raise error(501, 'restart_unsupported')
+        with restart_lock:
+            if restarting.is_set():
+                raise error(409, 'console_restarting')
+            restarting.set()
+        running_stacks = [s['name'] for s in procs.status() if s['state'] in ('running', 'stopping')]
+        cancelled = stop_active_work('restart')
+        # Trigger server exit right after this response is sent; cleanup and exec happen in main().
+        threading.Timer(0.15, on_restart).start()
+        return {'restarting': True, 'boot_id': boot_id, 'cancelled_actions': cancelled,
+                'stopped_stacks': running_stacks}
 
     @app.post('/api/teleop/unlock')
     def teleop_unlock():
@@ -426,6 +469,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
                 args += [f'start_x:={origin[0]}', f'start_y:={origin[1]}', f'start_yaw:={origin[2]}']
         try:
             info = procs.start(nav_name, args, sim.preset)
+        except StackClosing:
+            raise error(409, 'console_restarting')
         except StackRunning:
             raise error(409, 'stack_running', name=s.name)
         except OSError as e:
@@ -460,6 +505,7 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
     # starting it here uses the scene recorded in the map, so the robot spawns where the map origin is
     # (AMCL's default initial pose). A simulation started elsewhere may have a robot that already moved.
     nav_sim_job = {'state': 'idle', 'error': None}     # idle / stopping / restarting
+    nav_sim_thread = {'thread': None}
 
     def nav_sim_preset(name):
         try:
@@ -489,7 +535,9 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         if nav_sim_job['state'] != 'idle':
             raise error(409, 'navigation_sim_busy')
         nav_sim_job.update(state=kind, error=None)
-        threading.Thread(target=run_sim_job, args=(kind, preset), daemon=True).start()
+        t = threading.Thread(target=run_sim_job, args=(kind, preset), daemon=True)
+        nav_sim_thread['thread'] = t
+        t.start()
         return dict(nav_sim_job)
 
     @app.post('/api/navigation/sim/start')
@@ -501,6 +549,8 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
             raise error(409, 'navigation_sim_busy')
         try:
             return start_nav_sim(preset)
+        except StackClosing:
+            raise error(409, 'console_restarting')
         except StackRunning:
             raise error(409, 'stack_running', name=sim_name)
         except OSError as e:
@@ -790,6 +840,39 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
         'other_busy': _nav_batch_other_busy,
     })
     batch_runners.append(nav_batch)
+
+    shutdown_state = {'done': False}
+    shutdown_lock = threading.Lock()
+
+    def stop_active_work(reason='estop', *, close_procs=True):
+        """Stop navigation mission/goals, lock teleop, abort batches, and optionally reject new stacks."""
+        if close_procs:
+            procs.close()
+        teleop.lock()
+        mission.stop()
+        cancelled = node.estop()
+        for _b in batch_runners:
+            _b.abort(reason)
+        return cancelled
+
+    def prepare_shutdown(reason='estop'):
+        """Drain aborted batches, navigation sim jobs, and any active map save before stop_all()."""
+        with shutdown_lock:
+            if shutdown_state['done']:
+                return
+            shutdown_state['done'] = True
+        stop_active_work(reason)
+        for _b in batch_runners:
+            t = getattr(_b, 'thread', None)
+            if t is not None and t.is_alive():
+                t.join(timeout=35)
+        t = nav_sim_thread['thread']
+        if t is not None and t.is_alive():
+            t.join(timeout=20)
+        if hasattr(library, 'wait_idle'):
+            library.wait_idle(timeout=25)
+
+    app.state.prepare_shutdown = prepare_shutdown
 
     # ---------------- WebSocket ----------------
 

@@ -22,7 +22,7 @@ from fastapi import Body, HTTPException
 
 from .nav_eval import nav_metrics
 from .navigation import NavigationError
-from .process_manager import StackRunning, _group_alive
+from .process_manager import StackClosing, StackRunning, _group_alive
 
 NAV_BATCH_RE = re.compile(r'^nav_batch_[0-9_]{8,40}$')
 SET_POSE_RE = re.compile(r'^/world/[^/]+/set_pose$')
@@ -312,6 +312,10 @@ class NavBatchRunner:
         sim_args = list(self.presets[preset]['args'].get(self.sim, []))
         try:
             self.procs.start(self.sim, sim_args, preset, 'navigation')
+        except StackClosing:
+            if self.abort_evt.is_set():
+                raise _Aborted()
+            raise _RunFailed('start_failed', name=self.sim, reason='console is restarting')
         except StackRunning as e:
             raise _RunFailed('stack_running', name=e.name)
         except OSError as e:
@@ -327,6 +331,10 @@ class NavBatchRunner:
             nav_args += [f'start_x:={origin[0]}', f'start_y:={origin[1]}', f'start_yaw:={origin[2]}']
         try:
             self.procs.start(self.nav, nav_args, preset, 'navigation')
+        except StackClosing:
+            if self.abort_evt.is_set():
+                raise _Aborted()
+            raise _RunFailed('start_failed', name=self.nav, reason='console is restarting')
         except StackRunning as e:
             raise _RunFailed('stack_running', name=e.name)
         except OSError as e:

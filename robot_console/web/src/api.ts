@@ -87,6 +87,15 @@ export const api = {
   stackLog: (name: string, lines = 300) =>
     request<{ name: string; text: string }>('GET', `/api/stacks/${encodeURIComponent(name)}/log?lines=${lines}`),
   estop: () => request<{ cancelled_actions: string[]; stopped_stacks: string[] }>('POST', '/api/estop'),
+  interruptAll: () =>
+    request<{
+      cancelled_actions: string[]
+      stopped_stacks: string[]
+      interrupted_tasks: string[]
+      cancelled_plugin_jobs: string[]
+    }>('POST', '/api/interrupt'),
+  restartConsole: () =>
+    request<{ restarting: boolean; boot_id?: string; cancelled_actions: string[]; stopped_stacks: string[] }>('POST', '/api/restart'),
   navigationMaps: (signal?: AbortSignal) => request<NavMap[]>('GET', '/api/navigation/maps', undefined, { signal }),
   /** Simulation scene of a map without a recorded one (bag playback / imported maps), see map_scene.py */
   mapScene: (map: string) =>

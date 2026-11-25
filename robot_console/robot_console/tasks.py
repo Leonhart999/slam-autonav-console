@@ -12,10 +12,11 @@ import math
 import os
 from pathlib import Path
 import queue
+import signal
 import threading
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import HTTPException
 
@@ -37,6 +38,8 @@ class Tasks:
         self._jobs, self._handlers, self._resources = {}, {}, {}
         self._queue = queue.Queue()
         self._threads = []
+        self._procs = set()
+        self._interrupted = set()
         self._closed = False
         if self.root.is_dir():
             for path in self.root.glob('*.json'):
@@ -71,6 +74,39 @@ class Tasks:
     def register(self, kind, handler, resource=None):
         self._handlers[kind] = (handler, resource or kind)
         self._resources.setdefault(resource or kind, threading.Lock())
+
+    @contextmanager
+    def track_process(self, proc):
+        """Register an active worker subprocess so close() can terminate it before exec/restart."""
+        with self._lock:
+            self._procs.add(proc)
+        try:
+            yield proc
+        finally:
+            with self._lock:
+                self._procs.discard(proc)
+
+    def _terminate_procs(self):
+        with self._lock:
+            procs = list(self._procs)
+        for proc in procs:
+            try:
+                if proc.poll() is None:
+                    os.killpg(proc.pid, signal.SIGTERM)
+            except OSError:
+                pass
+        for proc in procs:
+            try:
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                try:
+                    proc.wait(timeout=1)
+                except Exception:
+                    pass
 
     def _write(self, job):
         self.root.mkdir(parents=True, exist_ok=True)
@@ -129,25 +165,45 @@ class Tasks:
             ident = self._queue.get()
             if ident is None:
                 return
-            job = self._jobs[ident]
+            with self._lock:
+                job = self._jobs.get(ident)
+                if job is None or job['state'] != 'queued':
+                    continue
             try:
                 handler, resource = self._handlers[job['kind']]
                 with self._resources[resource]:
-                    self._update(job, state='running', phase='reading')
+                    with self._lock:
+                        if job['state'] != 'queued' or ident in self._interrupted:
+                            self._interrupted.discard(ident)
+                            continue
+                        self._update(job, state='running', phase='reading')
                     result = handler(job['target'], copy.deepcopy(job['params']),
                                      lambda phase: self._update(job, phase=phase))
+                    with self._lock:
+                        if ident in self._interrupted:
+                            self._interrupted.discard(ident)
+                            self._update(job, state='interrupted', phase='interrupted', finished=time.time(),
+                                         error={'code': 'task_interrupted', 'params': {}})
+                            continue
                     path = self.root / (ident + '.result.json')
                     tmp = path.with_suffix('.tmp')
                     tmp.write_text(json.dumps(result, ensure_ascii=False, allow_nan=False), encoding='utf-8')
                     os.replace(tmp, path)
                     self._update(job, state='succeeded', phase='done', finished=time.time())
             except Exception as exc:
-                detail = getattr(exc, 'detail', None)
-                if not isinstance(detail, dict) or not isinstance(detail.get('code'), str):
-                    code = getattr(exc, 'code', 'task_failed')
-                    detail = {'code': code, 'params': getattr(exc, 'params', {'reason': str(exc)})}
+                with self._lock:
+                    was_interrupted = ident in self._interrupted
+                    self._interrupted.discard(ident)
                 try:
-                    self._update(job, state='failed', phase='failed', error=detail, finished=time.time())
+                    if was_interrupted:
+                        self._update(job, state='interrupted', phase='interrupted', finished=time.time(),
+                                     error={'code': 'task_interrupted', 'params': {}})
+                    else:
+                        detail = getattr(exc, 'detail', None)
+                        if not isinstance(detail, dict) or not isinstance(detail.get('code'), str):
+                            code = getattr(exc, 'code', 'task_failed')
+                            detail = {'code': code, 'params': getattr(exc, 'params', {'reason': str(exc)})}
+                        self._update(job, state='failed', phase='failed', error=detail, finished=time.time())
                 except OSError:
                     # Keep the worker available even if persisting the failure also fails.
                     # The durable running record will become interrupted on the next start.
@@ -232,14 +288,47 @@ class Tasks:
                     LOG.warning('Cannot delete task record %s', job['id'], exc_info=True)
         return removed, failed
 
-    def close(self, wait=False):
+    def interrupt_all(self):
+        """Interrupt queued and running background tasks without closing the worker pool."""
+        interrupted = []
+        with self._lock:
+            for job in self._jobs.values():
+                if job['state'] == 'queued':
+                    job.update(state='interrupted', phase='interrupted', finished=time.time(),
+                               error={'code': 'task_interrupted', 'params': {}})
+                    try:
+                        self._write(job)
+                    except OSError:
+                        LOG.warning('Cannot persist interrupted task %s', job['id'], exc_info=True)
+                    interrupted.append(job['id'])
+                elif job['state'] == 'running':
+                    self._interrupted.add(job['id'])
+                    interrupted.append(job['id'])
+            has_procs = bool(self._procs)
+        if has_procs:
+            threading.Thread(target=self._terminate_procs, daemon=True).start()
+        return interrupted
+
+    def close(self, wait=False, terminate=False):
         with self._lock:
             self._closed = True
             for _ in self._threads:
                 self._queue.put(None)
+        if terminate:
+            self._terminate_procs()
         if wait:
             for thread in self._threads:
-                thread.join()
+                thread.join(timeout=5 if terminate else None)
+            # An interrupted in-flight job on disk must not stay 'running' across a clean restart
+            with self._lock:
+                for job in self._jobs.values():
+                    if job['state'] in ACTIVE:
+                        job.update(state='interrupted', phase='interrupted', finished=time.time(),
+                                   error={'code': 'task_interrupted', 'params': {}})
+                        try:
+                            self._write(job)
+                        except OSError:
+                            LOG.warning('Cannot persist interrupted task %s', job['id'], exc_info=True)
 
 
 def tasks_for(app, cfg):

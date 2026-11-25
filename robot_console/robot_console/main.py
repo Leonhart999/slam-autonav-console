@@ -13,6 +13,7 @@ import signal
 import socket
 import sys
 import threading
+import time
 
 from . import config
 
@@ -43,13 +44,23 @@ def _port_free(host, port):
             return False
 
 
+def _restart_command(argv=None, executable=None):
+    """Build the command passed to os.execv; restores `-m robot_console.main` when launched via python -m."""
+    exe = executable or sys.executable
+    args = list(sys.argv if argv is None else argv)
+    if not args or not args[0] or os.path.basename(args[0]) == 'main.py':
+        return [exe, '-m', 'robot_console.main', *args[1:]]
+    return [exe, *args]
+
+
 def main():
+    raw_argv = list(sys.argv)
     import rclpy
     from rclpy.utilities import remove_ros_args
 
     parser = argparse.ArgumentParser(description='机器人网页控制台后端')
     parser.add_argument('--config', help='console.yaml 的路径')
-    args = parser.parse_args(remove_ros_args(sys.argv)[1:])
+    args = parser.parse_args(remove_ros_args(raw_argv)[1:])
     cfg = config.load(args.config)
     _use_venv(cfg['server']['venv'])
     host, port = cfg['server']['host'], int(cfg['server']['port'])
@@ -138,27 +149,63 @@ def main():
 
     from .plugins import PluginManager
     plugins = PluginManager(cfg, node.get_logger())
-    app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs, plugins)
+    restart_req = threading.Event()
+    server = None
+
+    def request_restart():
+        restart_req.set()
+        if server is not None:
+            server.should_exit = True
+
+    app = create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, playback, slam_configs, plugins,
+                     on_restart=request_restart)
     node.get_logger().info(f'网页控制台：http://localhost:{port}（监听 {host}）')
     # Uvicorn replays shutdown signals after restoring the original handlers. SIGTERM's
     # default action terminates Python immediately, skipping this finally block. Convert
     # that replay into SystemExit so process cleanup and the recording queue can finish.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level='warning',
+                                           timeout_graceful_shutdown=3))
     try:
-        uvicorn.run(app, host=host, port=port, log_level='warning', timeout_graceful_shutdown=3)
+        server.run()
     finally:
         # 清理期间再按 Ctrl+C 或关窗口都不打断，否则进程会留在后台
         # （存大地图可能要十几秒，之前就是在这时又按了一次 Ctrl+C，FAST-LIO 留在了后台）
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        reason = 'restart' if restart_req.is_set() else 'estop'
+        if restart_req.is_set():
+            node.get_logger().info('正在重启控制台：等待正在保存的地图和后台任务，停止所有子进程……')
+        else:
+            node.get_logger().info('正在停止从网页启动的进程（存地图可能要十几秒，请不要关闭窗口）……')
+        prepare = getattr(app.state, 'prepare_shutdown', None)
+        if prepare is not None:
+            prepare(reason)
+        else:
+            procs.close()
+            library.wait_idle(timeout=25)
         plugins.shutdown()            # plugins stop their own threads before the console's processes go
-        node.get_logger().info('正在停止从网页启动的进程（存地图可能要十几秒，请不要关闭窗口）……')
+        tasks = getattr(app.state, 'console_tasks', None)
+        if tasks is not None:
+            tasks.close(wait=True, terminate=True)
         procs.stop_all()
         executor.shutdown()
         mapping.close()               # 回调停止后，排空轨迹写盘队列并结束当前运行记录
         node.destroy_node()
         rclpy.try_shutdown()
+
+    if restart_req.is_set():
+        for sig in (signal.SIGINT, signal.SIGHUP, signal.SIGTERM):
+            signal.signal(sig, signal.SIG_DFL)
+        # Wait briefly for the listening socket to release before the fresh process binds it.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not _port_free(host, port):
+            time.sleep(0.05)
+        cmd = _restart_command(raw_argv, sys.executable)
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os.execv(cmd[0], cmd)
 
 
 if __name__ == '__main__':

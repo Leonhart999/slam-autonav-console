@@ -22,7 +22,7 @@ from pathlib import Path
 from fastapi import Body, HTTPException
 
 from .map_library import SaveError
-from .process_manager import StackRunning, _group_alive
+from .process_manager import StackClosing, StackRunning, _group_alive
 
 WAYPOINT_RE = re.compile(r'到达航点 (\d+)/(\d+)')    # waypoint_driver's Chinese log, same as server.py
 TOTAL_RE = re.compile(r'共 (\d+) 个航点')
@@ -214,6 +214,10 @@ class BatchRunner:
         args = self.presets[preset]['args'].get(name, [])
         try:
             self.procs.start(name, args, preset, 'batch')
+        except StackClosing:
+            if self.abort_evt.is_set():
+                raise Aborted()
+            raise RunFailed('start_failed', name=name, reason='console is restarting')
         except StackRunning as e:
             raise RunFailed('stack_running', name=e.name)
         except OSError as e:

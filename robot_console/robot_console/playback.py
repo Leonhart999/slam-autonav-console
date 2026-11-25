@@ -55,6 +55,8 @@ import time
 import yaml
 from fastapi import HTTPException
 
+from .process_manager import StackClosing
+
 PLAYER_NODE = '/rosbag2_player'
 INPUT_TYPES = {'points': 'sensor_msgs/msg/PointCloud2', 'imu': 'sensor_msgs/msg/Imu'}
 SCAN_DEPTH = 4              # how deep below a bag folder root bags are searched
@@ -734,6 +736,8 @@ def register_playback_routes(app, pb, procs):
             pb.start(bag, rate, begin, end, save_scans)
         except PlaybackError as e:
             raise fail(e)
+        except StackClosing:
+            raise HTTPException(409, detail={'code': 'console_restarting', 'params': {}})
         except OSError as e:
             raise HTTPException(500, detail={'code': 'start_failed', 'params': {'name': pb.stack, 'reason': str(e)}})
         return pb.status()

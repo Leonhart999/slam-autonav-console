@@ -91,7 +91,13 @@ class MapLibrary:
         self._procs = procs
         self._info_fn = info_fn
         self._lock = threading.Lock()
+        self._done_evt = threading.Event()
+        self._done_evt.set()
         self._job = {'state': 'idle'}       # idle / running / done / failed
+
+    def wait_idle(self, timeout=25):
+        """Wait for an in-progress map save to finish before shutting down or restarting."""
+        self._done_evt.wait(timeout)
 
     def map_dir(self, name):
         return os.path.join(self.maps_dir, name)
@@ -115,6 +121,7 @@ class MapLibrary:
             if self._job['state'] == 'running':
                 raise SaveError('save_busy', name=self._job.get('name'))
             self._job = {'state': 'running', 'name': name, 'step': first, 'started': time.time()}
+            self._done_evt.clear()
         threading.Thread(target=self._run, args=(name,), daemon=True).start()
 
     def _step(self, step):
@@ -125,26 +132,29 @@ class MapLibrary:
         d = self.map_dir(name)
         created = False
         try:
-            # 先独占目录，避免保存和上传同时使用同一个名称；失败只清理自己创建的目录。
             try:
-                os.makedirs(d)
-            except FileExistsError:
-                raise SaveError('map_exists', name=name)
-            created = True
-            result = self._save(name, d)
+                # 先独占目录，避免保存和上传同时使用同一个名称；失败只清理自己创建的目录。
+                try:
+                    os.makedirs(d)
+                except FileExistsError:
+                    raise SaveError('map_exists', name=name)
+                created = True
+                result = self._save(name, d)
+                with self._lock:
+                    self._job.update(state='done', result=result, finished=time.time())
+                return
+            except SaveError as e:
+                code, params = e.code, e.params
+            except Exception as e:                  # 意外错误也要让网页知道，不能一直显示"保存中"
+                code, params = 'save_error', {'reason': repr(e)}
+            # 没保存完整（没写出 meta.json）的目录删掉，方便用同一个名字重试；
+            # 目录是这次新建的（开始前检查过不存在），FAST-LIO 的原始文件仍在 pcd_path
+            if created and os.path.isdir(d) and not os.path.exists(os.path.join(d, 'meta.json')):
+                shutil.rmtree(d, ignore_errors=True)
             with self._lock:
-                self._job.update(state='done', result=result, finished=time.time())
-            return
-        except SaveError as e:
-            code, params = e.code, e.params
-        except Exception as e:                  # 意外错误也要让网页知道，不能一直显示"保存中"
-            code, params = 'save_error', {'reason': repr(e)}
-        # 没保存完整（没写出 meta.json）的目录删掉，方便用同一个名字重试；
-        # 目录是这次新建的（开始前检查过不存在），FAST-LIO 的原始文件仍在 pcd_path
-        if created and os.path.isdir(d) and not os.path.exists(os.path.join(d, 'meta.json')):
-            shutil.rmtree(d, ignore_errors=True)
-        with self._lock:
-            self._job.update(state='failed', code=code, params=params, finished=time.time())
+                self._job.update(state='failed', code=code, params=params, finished=time.time())
+        finally:
+            self._done_evt.set()
 
     def _save_from_service(self, prof, d):
         """FAST-LIO: /map_save writes the dense map to pcd_path, which is copied into the map folder."""

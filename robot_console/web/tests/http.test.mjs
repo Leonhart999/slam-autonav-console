@@ -20,6 +20,10 @@ test('JSON requests preserve structured errors and validate endpoint responses',
     error.status === 409 && error.coded.params.reason === 'busy')
   assert.equal(h.validResponse('/api/maps/a', { ok: true }, 'DELETE'), true)
   assert.equal(h.validResponse('/api/tasks', { tasks: [task({ input: null })] }), false)
+  assert.equal(h.validResponse('/api/interrupt', { cancelled_actions: [], stopped_stacks: ['sim'], interrupted_tasks: ['t1'], cancelled_plugin_jobs: [] }, 'POST'), true)
+  assert.equal(h.validResponse('/api/interrupt', { cancelled_actions: [], stopped_stacks: 'sim' }, 'POST'), false)
+  assert.equal(h.validResponse('/api/restart', { restarting: true, cancelled_actions: [], stopped_stacks: ['sim'], boot_id: 'abc' }, 'POST'), true)
+  assert.equal(h.validResponse('/api/restart', { restarting: false, cancelled_actions: [], stopped_stacks: [] }, 'POST'), false)
 })
 
 test('preview reads only from fixtures and never falls through to the network', async () => {

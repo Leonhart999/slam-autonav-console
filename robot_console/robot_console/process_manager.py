@@ -141,6 +141,14 @@ class StackRunning(Exception):
         self.name = name
 
 
+class StackClosing(Exception):
+    """The console is shutting down or restarting; no new stacks may start."""
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.name = name
+
+
 class ProcessManager:
 
     def __init__(self, stacks_cfg, log_dir, node, state_file='.running.json'):
@@ -148,11 +156,17 @@ class ProcessManager:
         self._log_dir = log_dir
         self._node = node           # 用来调用 before_stop 里的服务
         self._lock = threading.Lock()
+        self._closed = False
         self._after_stop = {}       # stack name -> [fn(stack)], run in stop() after the process group is gone
         self._before_start = {}     # stack name -> fn(extra_args, preset) -> extra_args, see on_start()
         self._exclusive_groups = []
         os.makedirs(log_dir, exist_ok=True)
         self._state_path = os.path.join(log_dir, state_file)
+
+    def close(self):
+        """Reject new stack starts while the console is shutting down or restarting."""
+        with self._lock:
+            self._closed = True
 
     def on_stopped(self, name, fn):
         """Call fn(stack) after a console-initiated stop of `name` has finished (e.g. collect GLIM's dump)."""
@@ -183,6 +197,8 @@ class ProcessManager:
     def start(self, name, extra_args=None, preset=None, origin=None):
         s = self._stacks[name]
         with self._lock:
+            if self._closed:
+                raise StackClosing(name)
             if s.state() in ('running', 'stopping'):
                 raise StackRunning(name)
             for group in self._exclusive_groups:
