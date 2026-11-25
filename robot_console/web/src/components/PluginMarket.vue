@@ -6,7 +6,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Download, Link, Refresh, Upload } from '@element-plus/icons-vue'
-import { ApiError } from '@/http'
+import { ApiError, isReadOnlyPreview } from '@/http'
 import { pick } from '@/i18n'
 import { errorText } from '@/messages'
 import { fmtBytes } from '@/format'
@@ -16,6 +16,7 @@ import type { MarketEntry, MarketResult, MarketStatus, MarketView } from '@/plug
 
 const emit = defineEmits<{ changed: []; uninstall: [id: string, name: string] }>()
 const { t } = useI18n()
+const preview = isReadOnlyPreview()
 const view = ref<MarketView | null>(null)
 const loadError = ref('')
 const refreshing = ref(false)
@@ -115,14 +116,14 @@ async function chooseFile() {
 defineExpose({ load })
 onMounted(async () => {
   await load(false)
-  if (!loadError.value && view.value && !view.value.error) void load(true)
+  if (!preview && !loadError.value && view.value && !view.value.error) void load(true)
 })
 </script>
 
 <template>
   <div class="market">
-    <GlassPanel :title="t('pluginsPage.market.title')" :tip="t('pluginsPage.market.tip')">
-      <template #extra>
+    <GlassPanel :title="t('pluginsPage.market.title')" :tip="preview ? undefined : t('pluginsPage.market.tip')">
+      <template v-if="!preview" #extra>
         <el-button size="small" :icon="Refresh" :loading="refreshing" @click="load(true)">{{ t('pluginsPage.market.refresh') }}</el-button>
         <el-button size="small" :icon="Upload" :loading="busy === '#file'" :disabled="busy !== '' && busy !== '#file'" @click="chooseFile">
           {{ t('pluginsPage.market.fromFile') }}
@@ -135,15 +136,17 @@ onMounted(async () => {
           <span class="mono path">{{ view?.source ?? (view?.index_urls[0] ?? '') }}</span>
         </div>
         <div v-if="fetched || view?.updated" class="row">
-          <span class="label">{{ t('pluginsPage.market.fetched') }}</span>
-          <span class="mono">{{ fetched }}</span>
+          <template v-if="!preview">
+            <span class="label">{{ t('pluginsPage.market.fetched') }}</span>
+            <span class="mono">{{ fetched }}</span>
+          </template>
           <span v-if="view?.updated" class="dim">{{ t('pluginsPage.market.updated_at', { date: view.updated }) }}</span>
         </div>
         <div v-if="view?.install_dir" class="row">
           <span class="label">{{ t('pluginsPage.market.installDir') }}</span>
           <span class="mono path">{{ view.install_dir }}</span>
         </div>
-        <p class="trust">{{ t('pluginsPage.market.trust') }}</p>
+        <p class="trust">{{ t(preview ? 'pluginsPage.preview.marketHint' : 'pluginsPage.market.trust') }}</p>
         <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" />
         <el-alert
           v-if="errorMsg" :type="view?.stale ? 'warning' : 'error'" :closable="false" show-icon
@@ -188,12 +191,12 @@ onMounted(async () => {
         <div v-else-if="e.installed?.origin === 'manual'" class="warn">{{ t('pluginsPage.market.manual') }}</div>
         <div class="actions">
           <el-button
-            v-if="canInstall(e)" size="small" :icon="Download" :type="e.status === 'installed' ? 'default' : 'primary'"
+            v-if="!preview && canInstall(e)" size="small" :icon="Download" :type="e.status === 'installed' ? 'default' : 'primary'"
             :loading="busy === e.id" :disabled="busy !== '' && busy !== e.id" @click="install(e)"
           >
             {{ actionText(e) }}
           </el-button>
-          <el-button v-if="removable(e)" size="small" :icon="Delete" :disabled="busy !== ''" @click="emit('uninstall', e.id, pick(e.name))">
+          <el-button v-if="!preview && removable(e)" size="small" :icon="Delete" :disabled="busy !== ''" @click="emit('uninstall', e.id, pick(e.name))">
             {{ t('pluginsPage.market.uninstall') }}
           </el-button>
           <a v-if="e.source || e.homepage" :href="e.source || e.homepage" target="_blank" rel="noopener noreferrer">

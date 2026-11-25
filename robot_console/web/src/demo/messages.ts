@@ -5,6 +5,7 @@ export const demoMessages = {
     header: {
       demo: '在线演示',
       console: '完整控制台预览',
+      plugins: '插件目录',
       github: 'GitHub',
       theme: { light: '浅色', dark: '深色' },
     },
@@ -81,6 +82,7 @@ export const demoMessages = {
     header: {
       demo: 'Live demo',
       console: 'Full console preview',
+      plugins: 'Plugins',
       github: 'GitHub',
       theme: { light: 'Light', dark: 'Dark' },
     },

@@ -2,7 +2,8 @@ import { loadDemo, loadDemoMap } from '@/demo/data'
 import { setPreviewFigureUrls, setPreviewReader } from '@/http'
 import { setPreviewFeed } from '@/stores/status'
 import { buildFixtures, MAP, NAV_SAMPLES, navigationRunId, OFFICE_MAP,
-  type ConsoleAssets, type MapSummary, type NavigationAssets } from './fixtures'
+  type ConsoleAssets, type MapSummary, type NavigationAssets, type PluginCatalog } from './fixtures'
+import { validMarket, validPluginList } from '@/plugins/api'
 
 /** Use the same frame format as the real mapping stream. The fixture never opens a socket. */
 export function cloudFrame(type: 'map' | 'est' | 'gt', points: Float32Array) {
@@ -24,7 +25,7 @@ export async function installConsolePreview() {
     return response
   }
   const officeBase = `${base}office/`
-  const [data, assets, grid, officeRun, officeAssets, officeGrid, navSamples] = await Promise.all([
+  const [data, assets, grid, officeRun, officeAssets, officeGrid, navSamples, catalog] = await Promise.all([
     loadDemo(base),
     asset('warehouse-console.json').then(res => res.json() as Promise<ConsoleAssets>),
     asset('warehouse-grid.png').then(res => res.blob()),
@@ -34,9 +35,16 @@ export async function installConsolePreview() {
     Promise.all(NAV_SAMPLES.map(async sample => ({ sample,
       assets: await asset(`office/${sample}/run.json`).then(res => res.json() as Promise<NavigationAssets>),
     }))),
+    asset('plugins.json').then(async res => {
+      const value = await res.json() as PluginCatalog | null
+      if (!value || !validPluginList(value.bundled) || !validMarket(value.market)) {
+        throw new Error('Invalid preview plugin catalog')
+      }
+      return value
+    }),
   ])
   const { routes, status, mapping } = buildFixtures(data, assets, grid.size,
-    { run: officeRun, assets: officeAssets, gridBytes: officeGrid.size }, navSamples)
+    { run: officeRun, assets: officeAssets, gridBytes: officeGrid.size }, navSamples, catalog)
   const cloudBlob = (points: Float32Array) => new Blob([points.slice().buffer], { type: 'application/octet-stream' })
   const cloud = cloudBlob(data.map)
   // Decode the second point cloud only when the visitor opens that map.

@@ -1,0 +1,236 @@
+{
+  "bundled": {
+    "api_version": 1,
+    "dirs": [],
+    "paths": [],
+    "disabled_by_env": false,
+    "plugins": [
+      {
+        "id": "ai_assistant",
+        "dir": "plugins/ai_assistant",
+        "path": "plugins/ai_assistant",
+        "state": "disabled",
+        "enabled": false,
+        "restart_needed": false,
+        "issue": null,
+        "has_backend": true,
+        "has_frontend": true,
+        "frontend": null,
+        "settings": [],
+        "origin": "bundled",
+        "manifest": {
+          "api": 1,
+          "name": {
+            "zh": "AI 助手",
+            "en": "AI assistant"
+          },
+          "description": {
+            "zh": "在页头打开一个聊天抽屉，用你自己配置的大模型（在“AI 模型服务”页添加，可保存多个并随时切换）回答关于地图、运行记录、评估结果、SLAM 参数、日志和传感器配置的问题。输入框下方可以选模型和推理强度，并选择权限：仅对话、只读（默认）、运行前询问或自动运行；后两种允许它启动或取消批量实验、计算评估。它不会删除数据或修改设置。对话内容和工具读取到的数据会发送给你配置的模型服务。",
+            "en": "Opens a chat drawer in the header that answers questions about maps, run records, evaluation results, SLAM parameters, logs and sensor profiles with the model service you configure (add several on the AI model services page and switch any time). Under the input you pick the model, its reasoning effort and the access: chat only, read only (default), ask before running, or run automatically; the last two let it start or cancel batch experiments and compute evaluations. It never deletes data or changes settings. The conversation and the data the tools read are sent to that model service."
+          },
+          "version": "0.3.0",
+          "author": "Leonhart999",
+          "license": "MIT",
+          "homepage": "https://github.com/Leonhart999/slam-autonav-console/tree/main/robot_console/plugins/ai_assistant"
+        }
+      },
+      {
+        "id": "bag_convert",
+        "dir": "plugins/bag_convert",
+        "path": "plugins/bag_convert",
+        "state": "disabled",
+        "enabled": false,
+        "restart_needed": false,
+        "issue": null,
+        "has_backend": true,
+        "has_frontend": true,
+        "frontend": null,
+        "settings": [],
+        "origin": "bundled",
+        "manifest": {
+          "api": 1,
+          "name": {
+            "zh": "数据包转换",
+            "en": "Bag converter"
+          },
+          "description": {
+            "zh": "把 ROS1 的 .bag 转成 ROS2 数据包（sqlite3 或 MCAP），转好的包直接出现在“回放”页。可以只转选中的话题；Livox 的 CustomMsg 点云可以转成带逐点时间和线号的 PointCloud2。基于 rosbags（Apache-2.0）。",
+            "en": "Converts ROS1 .bag files into ROS2 bags (sqlite3 or MCAP) that show up on the Playback page. You can pick the topics to keep; Livox CustomMsg point clouds can become PointCloud2 with per-point time and line. Uses rosbags (Apache-2.0)."
+          },
+          "version": "0.1.0",
+          "author": "Leonhart999",
+          "license": "MIT",
+          "homepage": "https://github.com/Leonhart999/slam-autonav-console/tree/main/robot_console/plugins/bag_convert"
+        }
+      },
+      {
+        "id": "dynamic_removal",
+        "dir": "plugins/dynamic_removal",
+        "path": "plugins/dynamic_removal",
+        "state": "disabled",
+        "enabled": false,
+        "restart_needed": false,
+        "issue": null,
+        "has_backend": true,
+        "has_frontend": true,
+        "frontend": null,
+        "settings": [],
+        "origin": "bundled",
+        "manifest": {
+          "api": 1,
+          "name": {
+            "zh": "动态物体去除",
+            "en": "Dynamic object removal"
+          },
+          "description": {
+            "zh": "用 DUFOMap 根据每一帧原始扫描看到的空闲空间，找出地图里行人、车辆等移动物体留下的点，生成去掉这些点的点云，并可重新投影 2D 栅格，另存为新版本地图。需要带原始扫描的地图（回放时打开“保存原始扫描”）。基于 DUFOMap（BSD-3）。",
+            "en": "Uses DUFOMap and the free space seen by every raw scan to find the points that people, vehicles and other moving objects left in the map, writes the cloud without them and can project the 2D grid again, saved as a new map version. Needs a map with raw scans (turn on Save raw scans when playing back). Uses DUFOMap (BSD-3)."
+          },
+          "version": "0.1.0",
+          "author": "Leonhart999",
+          "license": "MIT",
+          "homepage": "https://github.com/Leonhart999/slam-autonav-console/tree/main/robot_console/plugins/dynamic_removal"
+        }
+      },
+      {
+        "id": "ground_seg",
+        "dir": "plugins/ground_seg",
+        "path": "plugins/ground_seg",
+        "state": "disabled",
+        "enabled": false,
+        "restart_needed": false,
+        "issue": null,
+        "has_backend": true,
+        "has_frontend": true,
+        "frontend": null,
+        "settings": [],
+        "origin": "bundled",
+        "manifest": {
+          "api": 1,
+          "name": {
+            "zh": "地面分割",
+            "en": "Ground segmentation"
+          },
+          "description": {
+            "zh": "用 Patchwork++ 把地图点云分成地面和非地面，再按每个点离当地地面的高度重新生成 2D 栅格（尺寸、分辨率、原点不变）。适合坡道、不平的地面和有倾斜或高度漂移的地图。结果先预览，确认后另存为新版本地图。基于 Patchwork++（BSD-2）。",
+            "en": "Splits the map cloud into ground and non-ground points with Patchwork++, then rebuilds the 2D grid from each point's height above the local ground (same size, resolution and origin). Helps on ramps, uneven floors and maps that are tilted or drift in height. Preview first, then save as a new map version. Uses Patchwork++ (BSD-2)."
+          },
+          "version": "0.1.0",
+          "author": "Leonhart999",
+          "license": "MIT",
+          "homepage": "https://github.com/Leonhart999/slam-autonav-console/tree/main/robot_console/plugins/ground_seg"
+        }
+      }
+    ]
+  },
+  "market": {
+    "index_urls": [],
+    "source": "https://github.com/Leonhart999/slam-console-plugins",
+    "fetched": null,
+    "name": "SLAM & AutoNav console plugins",
+    "updated": "2026-11-22",
+    "stale": false,
+    "error": null,
+    "skipped": [],
+    "install_dir": null,
+    "api_version": 1,
+    "supported_apis": [
+      1
+    ],
+    "busy": false,
+    "plugins": [
+      {
+        "id": "loop_closures",
+        "version": "0.1.0",
+        "api": 1,
+        "name": {
+          "zh": "回环检查",
+          "en": "Loop closure check"
+        },
+        "description": {
+          "zh": "用 MapClosures 在地图的原始扫描里找出建图时重复经过的地方（回环），把每个回环实测的相对位姿和 SLAM 轨迹给出的相对位姿对比，得到回环处的平移、高度和航向误差，即没有真值时也能看出里程计漂了多少；可用 KISS-ICP 细配准并验证。输出回环图、回环表和 CSV。需要带原始扫描的地图（回放时打开“保存原始扫描”）。基于 MapClosures（MIT）和 KISS-ICP（MIT）。",
+          "en": "Uses MapClosures to find the places a mapping run visited twice in the raw scans of a map (loop closures) and compares the relative pose measured at every closure with the one the SLAM trajectory implies: translation, height and heading error at the loop, that is, how far the odometry had drifted, without ground truth. Optional KISS-ICP refinement and check. Writes a loop plot, a closure table and CSV. Needs a map with raw scans (turn on Save raw scans when playing back). Uses MapClosures (MIT) and KISS-ICP (MIT)."
+        },
+        "author": "Leonhart999",
+        "license": "MIT",
+        "homepage": "https://github.com/Leonhart999/MapClosures/tree/main/robot_console_plugin/loop_closures",
+        "source": "https://github.com/Leonhart999/MapClosures/tree/HEAD/robot_console_plugin/loop_closures",
+        "upstream": "https://github.com/PRBonn/MapClosures",
+        "requirements": [
+          "map_closures==2.2.0",
+          "kiss-icp==1.3.0",
+          "numpy>=2.1,<2.3",
+          "pillow>=9",
+          "pyyaml>=6"
+        ],
+        "url": "https://github.com/Leonhart999/MapClosures/releases/download/console-loop_closures-v0.1.0/loop_closures-0.1.0.zip",
+        "sha256": "d0356723624da254fe1ed7d8be808e88de4d82c628d23d7003c7afa83b2de118",
+        "size": 70877,
+        "published": "2026-11-21",
+        "status": "available",
+        "installed": null
+      },
+      {
+        "id": "map_eval",
+        "version": "0.1.0",
+        "api": 1,
+        "name": {
+          "zh": "地图质量评估",
+          "en": "Map quality evaluation"
+        },
+        "description": {
+          "zh": "把一张地图的点云和参考点云（另一张地图，或上传的 PCD/PLY 参考点云）用 small_gicp 配准，然后计算地图指标：精度（距离均值、中位数、RMSE、95% 分位）、完整度、准确率、F 值和倒角距离，并画出按误差着色的俯视图和误差直方图。指标定义参考 MapEval（Hu 等，RA-L 2025）。基于 small_gicp（MIT）。",
+          "en": "Registers a map's point cloud onto a reference cloud (another map, or an uploaded PCD/PLY reference) with small_gicp, then computes map metrics: accuracy (mean, median, RMSE and 95th percentile of the distances), completeness, precision, F-score and Chamfer distance, with a top view coloured by the error and an error histogram. Metric definitions follow MapEval (Hu et al., RA-L 2025). Uses small_gicp (MIT)."
+        },
+        "author": "Leonhart999",
+        "license": "MIT",
+        "homepage": "https://github.com/Leonhart999/small_gicp/tree/master/robot_console_plugin/map_eval",
+        "source": "https://github.com/Leonhart999/small_gicp/tree/HEAD/robot_console_plugin/map_eval",
+        "upstream": "https://github.com/koide3/small_gicp",
+        "requirements": [
+          "small_gicp==1.0.1",
+          "numpy>=1.23,<3",
+          "pillow>=9",
+          "pyyaml>=6"
+        ],
+        "url": "https://github.com/Leonhart999/small_gicp/releases/download/console-map_eval-v0.1.0/map_eval-0.1.0.zip",
+        "sha256": "c5176a4acd5186902ff45348a7a2ffbf76afa3ee32b23a4cc9def9052c6edd60",
+        "size": 79707,
+        "published": "2026-11-21",
+        "status": "available",
+        "installed": null
+      },
+      {
+        "id": "map_merge",
+        "version": "0.1.0",
+        "api": 1,
+        "name": {
+          "zh": "地图拼接配准",
+          "en": "Map alignment & merge"
+        },
+        "description": {
+          "zh": "用 KISS-Matcher（MIT）在不需要初始位姿的前提下全局配准两张不同会话或坐标系的 3D 地图点云，再用 small_gicp（MIT）做 GICP/VGICP 精配准并可视化拼接前后的重叠俯视图；确认后可按体素去重合并两张地图，通过控制台派生接口保存为新的导航地图版本（自动重投影或保留栅格）。",
+          "en": "Globally aligns two 3D maps from different sessions or coordinate frames without an initial guess using KISS-Matcher (MIT), refines the 6-DoF transform with small_gicp GICP/VGICP, previews the merged overlap, and saves the voxel-merged point cloud as a new derived map version in the console library."
+        },
+        "author": "Leonhart999",
+        "license": "MIT",
+        "homepage": "https://github.com/Leonhart999/KISS-Matcher/tree/main/robot_console_plugin/map_merge",
+        "source": "https://github.com/Leonhart999/KISS-Matcher/tree/HEAD/robot_console_plugin/map_merge",
+        "upstream": "https://github.com/MIT-SPARK/KISS-Matcher",
+        "requirements": [
+          "kiss-matcher==1.0.2",
+          "small_gicp==1.0.1",
+          "numpy>=1.23,<3",
+          "pillow>=9",
+          "pyyaml>=6"
+        ],
+        "url": "https://github.com/Leonhart999/KISS-Matcher/releases/download/console-map_merge-v0.1.0/map_merge-0.1.0.zip",
+        "sha256": "f765ee5bc4be8e335b1462e13af3888f1c8bf9cfaa4e291f3e753b7768caab33",
+        "size": 52690,
+        "published": "2026-11-22",
+        "status": "available",
+        "installed": null
+      }
+    ]
+  }
+}

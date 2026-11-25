@@ -7,7 +7,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { Box, Delete, Document, FolderOpened, Link, Refresh, Setting, View } from '@element-plus/icons-vue'
-import { ApiError } from '@/http'
+import { ApiError, isReadOnlyPreview } from '@/http'
 import { pick } from '@/i18n'
 import { errorText } from '@/messages'
 import { openFolder } from '@/openFolder'
@@ -20,6 +20,7 @@ import { pagePath, registry } from '@/plugins/host'
 import type { PluginInfo, PluginList, PluginState, PythonState } from '@/plugins/types'
 
 const { t } = useI18n()
+const preview = isReadOnlyPreview()
 const route = useRoute()
 const router = useRouter()
 const tab = ref<'installed' | 'market'>(route.query.tab === 'market' ? 'market' : 'installed')
@@ -38,6 +39,8 @@ const settingsOpen = ref(false)
 const settingsFor = ref<PluginInfo | null>(null)
 
 const plugins = computed(() => list.value?.plugins ?? [])
+const marketCount = ref(0)
+if (preview) void pluginApi.market().then(view => { marketCount.value = view.plugins.length }).catch(() => {})
 const pending = computed(() => plugins.value.filter((p) => p.restart_needed))
 const STATE_CHIP: Record<PluginState, string> = {
   active: 'success', disabled: 'info', failed: 'danger', invalid: 'danger', duplicate: 'warning', incompatible: 'warning',
@@ -204,19 +207,19 @@ onUnmounted(() => {
 
 <template>
   <div class="plugins-page">
-    <GlassPanel :title="t('pluginsPage.title')" :tip="t('pluginsPage.tip')">
-      <template #extra>
+    <GlassPanel :title="t(preview ? 'pluginsPage.preview.title' : 'pluginsPage.title')" :tip="preview ? undefined : t('pluginsPage.tip')">
+      <template v-if="!preview" #extra>
         <el-button size="small" :icon="Refresh" :loading="scanning" @click="rescan">{{ t('pluginsPage.rescan') }}</el-button>
         <el-button size="small" :icon="FolderOpened" :disabled="!list?.paths.length" @click="openFolder(list?.paths[0])">
           {{ t('pluginsPage.openDir') }}
         </el-button>
       </template>
       <div class="intro">
-        <div class="dirs">
+        <div v-if="!preview" class="dirs">
           <span class="label">{{ t('pluginsPage.dirs') }}</span>
           <span v-for="d in list?.dirs ?? []" :key="d" class="mono path">{{ d }}</span>
         </div>
-        <p class="trust">{{ t('pluginsPage.trust') }}</p>
+        <p class="trust">{{ t(preview ? 'pluginsPage.preview.hint' : 'pluginsPage.trust') }}</p>
         <el-alert v-if="loadError" type="error" :closable="false" show-icon :title="loadError" />
         <el-alert v-if="list?.disabled_by_env" type="warning" :closable="false" show-icon :title="t('pluginsPage.envDisabled')" />
         <el-alert
@@ -227,25 +230,27 @@ onUnmounted(() => {
     </GlassPanel>
 
     <el-radio-group v-model="tab" size="small" class="tabs">
-      <el-radio-button value="installed">{{ t('pluginsPage.tabs.installed', { n: plugins.length }) }}</el-radio-button>
-      <el-radio-button value="market">{{ t('pluginsPage.tabs.market') }}</el-radio-button>
+      <el-radio-button value="installed">{{ t(preview ? 'pluginsPage.preview.bundled' : 'pluginsPage.tabs.installed', { n: plugins.length }) }}</el-radio-button>
+      <el-radio-button value="market">{{ preview ? t('pluginsPage.preview.market', { n: marketCount }) : t('pluginsPage.tabs.market') }}</el-radio-button>
     </el-radio-group>
 
     <PluginMarket v-if="tab === 'market'" ref="market" @changed="load" @uninstall="askUninstall" />
     <div v-else-if="plugins.length" class="cards">
       <GlassPanel v-for="p in plugins" :key="p.path" :title="nameOf(p)">
         <template #extra>
-          <span class="chip" :class="STATE_CHIP[p.state]">{{ t(`pluginsPage.state.${p.state}`) }}</span>
-          <el-switch
-            :model-value="p.enabled" :disabled="!usable(p) || (busy !== '' && busy !== p.id)" :loading="busy === p.id"
-            :aria-label="t('pluginsPage.enable')" :title="t('pluginsPage.enable')"
-            @update:model-value="(v: string | number | boolean) => toggle(p, v === true)"
-          />
+          <template v-if="!preview">
+            <span class="chip" :class="STATE_CHIP[p.state]">{{ t(`pluginsPage.state.${p.state}`) }}</span>
+            <el-switch
+              :model-value="p.enabled" :disabled="!usable(p) || (busy !== '' && busy !== p.id)" :loading="busy === p.id"
+              :aria-label="t('pluginsPage.enable')" :title="t('pluginsPage.enable')"
+              @update:model-value="(v: string | number | boolean) => toggle(p, v === true)"
+            />
+          </template>
         </template>
         <div class="meta mono">{{ parts(p).join(' · ') }}</div>
         <div v-if="kinds(p)" class="kinds">{{ kinds(p) }}</div>
         <p v-if="p.manifest && pick(p.manifest.description)" class="desc">{{ pick(p.manifest.description) }}</p>
-        <div class="path mono" :title="p.dir">{{ p.dir }}</div>
+        <div v-if="!preview" class="path mono" :title="p.dir">{{ p.dir }}</div>
         <el-alert v-if="p.issue" type="error" :closable="false" :title="issueText(p)" class="issue" />
         <el-alert v-if="frontendIssue(p)" type="warning" :closable="false" :title="frontendIssue(p)" class="issue" />
         <div v-if="p.restart_needed" class="restart">
@@ -284,7 +289,12 @@ onUnmounted(() => {
             </el-button>
           </div>
         </div>
-        <div class="actions">
+        <div v-if="preview && p.manifest?.homepage" class="actions">
+          <a :href="p.manifest.homepage" target="_blank" rel="noopener noreferrer">
+            <el-button size="small" :icon="Link">{{ t('pluginsPage.preview.source') }}</el-button>
+          </a>
+        </div>
+        <div v-if="!preview" class="actions">
           <el-button size="small" :icon="Setting" :disabled="!p.manifest || !p.settings.length" @click="openSettings(p)">
             {{ t('pluginsPage.settingsBtn') }}
           </el-button>

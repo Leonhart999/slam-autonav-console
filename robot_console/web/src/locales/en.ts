@@ -756,6 +756,9 @@ const en: MessageSchema = {
     after_stop_failed: 'Post-stop step failed: {reason}',
   },
   pluginsPage: {
+    preview: { title: 'Plugin catalog', bundled: 'Bundled ({n})', market: 'Market ({n})',
+      hint: 'Browse the plugins shipped with the public release and listed in the public market. Installation and execution require the full console.',
+      marketHint: 'This is a snapshot of the public market, not a live connection.', source: 'Source code' },
     title: 'Plugins',
     tip: 'Plugins add routes, pages and settings to the console. Each plugin is a sub-folder (with a plugin.yaml) of a plugin folder. Enabling or disabling applies at the next console start; settings apply as soon as they are saved.',
     rescan: 'Rescan',

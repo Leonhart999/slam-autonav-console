@@ -764,6 +764,9 @@ const zhCN = {
   },
   // 插件页（views/PluginsView.vue、PluginPageHost.vue、components/PluginSettingsDialog.vue）
   pluginsPage: {
+    preview: { title: '插件目录', bundled: '内置插件（{n}）', market: '插件市场（{n}）',
+      hint: '这里展示公开版内置插件和公开市场插件。安装和运行插件需要完整版控制台。',
+      marketHint: '此处展示公开市场的目录快照，不实时连接市场。', source: '查看源码' },
     title: '插件',
     tip: '插件可以给控制台加接口、页面和设置。每个插件是插件文件夹里的一个子文件夹（含 plugin.yaml）。启用和停用在重启控制台后生效；设置保存后立即生效。',
     rescan: '重新扫描',

@@ -1,7 +1,7 @@
 import type { NavGoalRecord, NavMetrics, RunDetail, RunEval } from '@/evaluation/api'
 import type { MapDetail, MapGrid } from '@/maps/api'
 import type { MappingStatus, PlaybackStatus } from '@/mapping/stream'
-import type { MarketView, PluginInfo, PluginList } from '@/plugins/types'
+import type { MarketView, PluginList } from '@/plugins/types'
 import type { MappingPreset, MapSceneInfo, NavMap, NavStatus, StackInfo, StatusMsg } from '@/types'
 import { poseAt, speedAt, type DemoData, type DemoRun } from '@/demo/data'
 
@@ -56,16 +56,10 @@ const stacks = [stack('sim', 'Gazebo 仿真', 'Gazebo simulation', 'ros2 launch 
 const playback: PlaybackStatus = { stack: 'playback', available: false, state: 'idle', rates,
   roots: [], slam: null, slam_ready: false, needs_slam_restart: false }
 
-function plugin(id: string, name: { zh: string; en: string }, description: { zh: string; en: string }): PluginInfo {
-  return { id, dir: `plugins/${id}`, path: `plugins/${id}`, state: 'disabled', enabled: false, restart_needed: false,
-    issue: null, manifest: { api: 1, version: '0.1.0', name, description, author: '', license: '', homepage: '' },
-    has_backend: false, has_frontend: false, frontend: null, settings: [] }
+export interface PluginCatalog {
+  bundled: PluginList
+  market: MarketView
 }
-const plugins: PluginList = { api_version: 1, dirs: [], paths: [], disabled_by_env: true, plugins: [
-  plugin('bag_convert', { zh: '数据包转换', en: 'Bag conversion' }, { zh: '展示插件列表，在线预览不运行插件。', en: 'Example catalog entry. Plugins do not run in the preview.' }),
-] }
-const market: MarketView = { index_urls: [], source: null, fetched: null, name: '', updated: '', stale: false,
-  error: null, skipped: [], install_dir: null, api_version: 1, supported_apis: [1], busy: false, plugins: [] }
 
 function mapFixture(preset: string, name: string, id: string, run: MapSummary, assets: ConsoleAssets, gridBytes: number) {
   const ev = assets.evaluation
@@ -103,7 +97,7 @@ function navigationFixture(sample: NavSample, assets: NavigationAssets): RunDeta
 
 export function buildFixtures(data: DemoData, warehouse: ConsoleAssets, gridBytes: number,
   office: { run: MapSummary; assets: ConsoleAssets; gridBytes: number },
-  navSamples: { sample: NavSample; assets: NavigationAssets }[]) {
+  navSamples: { sample: NavSample; assets: NavigationAssets }[], catalog: PluginCatalog) {
   const { run, track } = data
   const maps = [mapFixture(PRESET, MAP, RUN, { ...run, duration: warehouse.evaluation.duration,
     length: warehouse.evaluation.length }, warehouse, gridBytes),
@@ -150,8 +144,8 @@ export function buildFixtures(data: DemoData, warehouse: ConsoleAssets, gridByte
     '/api/playback/trash': { entries: [], dirs: [] },
     '/api/playback/sensor_profiles': [],
     '/api/tasks': { tasks: [] },
-    '/api/plugins': plugins,
-    '/api/plugins/market': market,
+    '/api/plugins': catalog.bundled,
+    '/api/plugins/market': catalog.market,
   }
   for (const { map, scene } of maps) {
     routes[`/api/maps/${map.name}`] = map
