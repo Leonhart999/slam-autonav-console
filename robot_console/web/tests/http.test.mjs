@@ -41,6 +41,17 @@ test('preview reads only from fixtures and never falls through to the network', 
   assert.equal(network, 0)
 })
 
+test('preview figures use only explicitly published static asset URLs', () => {
+  const h = make(() => { throw Error('unexpected network request') })
+  const backend = '/api/evaluation/runs/example/files/path.png'
+  assert.equal(h.figureAssetUrl(backend), backend)
+  h.setPreviewReader(async () => json({}))
+  assert.equal(h.figureAssetUrl(backend), undefined)
+  h.setPreviewFigureUrls(new Map([[backend, './data/example/path.png']]))
+  assert.equal(h.figureAssetUrl(backend), './data/example/path.png')
+  assert.equal(h.figureAssetUrl('/api/evaluation/runs/unpublished/files/path.png'), undefined)
+})
+
 test('network errors, explicit cancellation and timeouts have distinct outcomes', async () => {
   const h = make(async () => { throw new TypeError('offline') })
   await assert.rejects(h.request('GET', '/api/control'), code('request_network'))

@@ -12,8 +12,9 @@ Outputs:
   run.json   run metadata, evo statistics, the estimate and the ground truth in the map frame, APE per pose,
              and a top view of the aligned trajectories (world frame), all numbers rounded for size
   map.bin    the voxel map: voxel indices packed into sorted uint32 keys, stored as deltas, gzip-compressed
-  warehouse-grid.png + warehouse-console.json (--console): the saved grid and original evo series for the
-    full console preview. This option also requires Pillow, PyYAML, map.pgm, map.yaml and the run's run.json.
+  <scene>-grid.png + <scene>-console.json (--console or --summary-only): saved grid and original evo series.
+  map.json (--summary-only): map metadata and compressed map, without the replay poses in run.json.
+  Both console modes require Pillow, PyYAML, map.pgm, map.yaml and the run's run.json.
 
 The ground truth is moved into the map frame with the inverse of evo's SE(3) alignment (est -> gt) from
 eval.json, so the 3D view can draw it over the map. The APE per pose is recomputed here with the same
@@ -98,18 +99,18 @@ def rounded(a: np.ndarray, digits: int) -> list:
     return np.round(a, digits).tolist()
 
 
-def write_console_assets(map_dir: Path, run_dir: Path, out: Path, evaluation: dict) -> None:
+def write_console_assets(map_dir: Path, run_dir: Path, out: Path, evaluation: dict, scene: str) -> None:
     from PIL import Image
     import yaml
 
     info = yaml.safe_load((map_dir / 'map.yaml').read_text(encoding='utf-8'))
     run = json.loads((run_dir / 'run.json').read_text(encoding='utf-8'))
     with Image.open(map_dir / 'map.pgm') as image:
-        image.save(out / 'warehouse-grid.png', optimize=True)
+        image.save(out / f'{scene}-grid.png', optimize=True)
         grid = dict(width=image.width, height=image.height, resolution=info['resolution'], origin=info['origin'])
     keys = ['evo', 'created', 'params', 'matched_poses', 'duration', 'length', 'ref_length', 'ape', 'rpe', 'series']
     public = dict(grid=grid, started=run['started'], ended=run['ended'], evaluation={k: evaluation[k] for k in keys})
-    (out / 'warehouse-console.json').write_text(json.dumps(public, separators=(',', ':')) + '\n', encoding='utf-8')
+    (out / f'{scene}-console.json').write_text(json.dumps(public, separators=(',', ':')) + '\n', encoding='utf-8')
 
 
 def main() -> None:
@@ -118,7 +119,8 @@ def main() -> None:
     ap.add_argument('--run', required=True, type=Path, help='mapping run folder (est.tum, gt.tum, eval.json)')
     ap.add_argument('--out', required=True, type=Path, help='output folder (run.json, map.bin)')
     ap.add_argument('--scene', default='warehouse', help='scene key the demo page has captions for')
-    ap.add_argument('--console', action='store_true', help='also export the warehouse grid and full evaluation')
+    ap.add_argument('--console', action='store_true', help='also export the grid and full evaluation')
+    ap.add_argument('--summary-only', action='store_true', help='export the console grid, map and evaluation without replay poses')
     ap.add_argument('--top-view-points', type=int, default=1500)
     args = ap.parse_args()
 
@@ -130,6 +132,14 @@ def main() -> None:
     voxel = float(meta.get('voxel_size') or 0.1)
     xyz = read_pcd_xyz(args.map / 'map_voxel.pcd')
     map_bytes, map_info = encode_map(xyz, voxel)
+    if args.summary_only:
+        args.out.mkdir(parents=True, exist_ok=True)
+        write_console_assets(args.map, args.run, args.out, ev, args.scene)
+        summary = {'version': DATA_VERSION, 'algorithm': meta['algorithm'], 'frame': meta['frame'],
+                   'duration': meta['duration'], 'length': meta['length'], 'extent': meta['extent'], 'map': map_info}
+        (args.out / 'map.json').write_text(json.dumps(summary, separators=(',', ':')) + '\n', encoding='utf-8')
+        (args.out / 'map.bin').write_bytes(map_bytes)
+        return
 
     est = read_tum(args.run / 'est.tum')
     gt = read_tum(args.run / 'gt.tum')
@@ -198,7 +208,7 @@ def main() -> None:
 
     args.out.mkdir(parents=True, exist_ok=True)
     if args.console:
-        write_console_assets(args.map, args.run, args.out, ev)
+        write_console_assets(args.map, args.run, args.out, ev, args.scene)
     (args.out / 'map.bin').write_bytes(map_bytes)
     (args.out / 'run.json').write_text(json.dumps(out, separators=(',', ':')), encoding='utf-8')
     print(f"map: {map_info['count']} voxels, {len(map_bytes) / 1e6:.2f} MB; run.json "

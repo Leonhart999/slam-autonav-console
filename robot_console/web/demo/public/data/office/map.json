@@ -1,0 +1,1 @@
+{"version":1,"algorithm":"FAST-LIO2","frame":"camera_init","duration":274.3,"length":36.92,"extent":[-1.65,-1.65,-0.25,14.75,9.25,2.55],"map":{"file":"map.bin","encoding":"voxel-key-delta-u32-gzip","voxel":0.1,"min_index":[-17,-17,-3],"bits":[8,7,5],"count":58576,"bytes":6738}}

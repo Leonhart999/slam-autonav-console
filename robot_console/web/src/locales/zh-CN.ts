@@ -15,7 +15,7 @@ const zhCN = {
     linkDown: '后端未连接，正在重连',
     pluginIssues: '{n} 个插件加载出错',
     preview: '只读预览',
-    previewHint: '使用已录制的仓库实验和示例数据。不连接 ROS 2，不支持实时控制或上传。',
+    previewHint: '使用仓库和办公室的仿真实验数据。不连接 ROS 2，不支持实时控制或上传。',
     previewReplay: '仓库回放',
     previewFailed: '无法加载预览数据，请刷新重试。',
   },

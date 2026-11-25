@@ -16,7 +16,7 @@ const en: MessageSchema = {
     linkDown: 'Backend not connected, retrying',
     pluginIssues: '{n} plugin(s) failed to load',
     preview: 'Read-only preview',
-    previewHint: 'Recorded warehouse and sample data. No ROS 2 connection; live controls and uploads are unavailable.',
+    previewHint: 'Recorded warehouse and office simulation data. No ROS 2 connection; live controls and uploads are unavailable.',
     previewReplay: 'Warehouse replay',
     previewFailed: 'Could not load the preview data. Please refresh to try again.',
   },

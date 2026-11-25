@@ -178,17 +178,21 @@ export interface DemoData {
   map: Float32Array
 }
 
+export async function loadDemoMap(base: string, map: MapInfo, signal?: AbortSignal): Promise<Float32Array> {
+  if (map.encoding !== 'voxel-key-delta-u32-gzip') throw new Error(`map: encoding ${map.encoding}`)
+  const res = await fetch(`${base}${map.file}`, { signal })
+  if (!res.ok) throw new Error(`${map.file}: HTTP ${res.status}`)
+  const raw = await gunzip(new Uint8Array(await res.arrayBuffer()))
+  if (raw.byteLength !== map.count * 4) throw new Error(`${map.file}: ${raw.byteLength} bytes`)
+  const deltas = new Uint32Array(raw.buffer, raw.byteOffset, map.count)
+  return decodeMap(deltas, map)
+}
+
 /** Fetch and decode the demo data from `base` (a folder URL ending in '/') */
 export async function loadDemo(base: string, signal?: AbortSignal): Promise<DemoData> {
   const res = await fetch(`${base}run.json`, { signal })
   if (!res.ok) throw new Error(`run.json: HTTP ${res.status}`)
   const run = (await res.json()) as DemoRun
   if (run.version !== DATA_VERSION) throw new Error(`run.json: data version ${run.version}`)
-  if (run.map.encoding !== 'voxel-key-delta-u32-gzip') throw new Error(`map: encoding ${run.map.encoding}`)
-  const mres = await fetch(`${base}${run.map.file}`, { signal })
-  if (!mres.ok) throw new Error(`${run.map.file}: HTTP ${mres.status}`)
-  const raw = await gunzip(new Uint8Array(await mres.arrayBuffer()))
-  if (raw.byteLength !== run.map.count * 4) throw new Error(`${run.map.file}: ${raw.byteLength} bytes`)
-  const deltas = new Uint32Array(raw.buffer, raw.byteOffset, run.map.count)
-  return { run, track: buildTrack(run), map: decodeMap(deltas, run.map) }
+  return { run, track: buildTrack(run), map: await loadDemoMap(base, run.map, signal) }
 }

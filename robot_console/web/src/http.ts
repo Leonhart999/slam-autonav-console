@@ -3,6 +3,9 @@ import type { CodedMsg } from './types'
 
 type PreviewReader = (path: string, signal: AbortSignal) => Promise<Response>
 let previewReader: PreviewReader | undefined
+let previewFigureUrls: ReadonlyMap<string, string> | undefined
+export function setPreviewFigureUrls(urls: ReadonlyMap<string, string>) { previewFigureUrls = urls }
+export function figureAssetUrl(path: string) { return previewReader ? previewFigureUrls?.get(path) : path }
 
 /** Installed only by the static preview entry, before the console mounts. */
 export function setPreviewReader(reader: PreviewReader) { previewReader = reader }

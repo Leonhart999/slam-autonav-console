@@ -1,5 +1,5 @@
 // Evaluation page API (backend: robot_console/evaluation.py). Errors are ApiError like the rest of api.ts.
-import { request } from '@/http'
+import { figureAssetUrl, request } from '@/http'
 import { taskResult } from '@/tasks'
 import type { Bilingual } from '@/types'
 
@@ -198,7 +198,7 @@ export const evalApi = {
   /** Runs evo when there is no valid cached result (force: always). About 0.2–1 s per run */
   evaluate: (id: string, force = false, signal?: AbortSignal) =>
     taskResult<RunDetail>( `/api/evaluation/runs/${enc(id)}/evaluate${force ? '?force=true' : ''}`, undefined, signal),
-  figureUrl: (id: string, name: string) => `/api/evaluation/runs/${enc(id)}/files/${enc(name)}`,
+  figureUrl: (id: string, name: string) => figureAssetUrl(`/api/evaluation/runs/${enc(id)}/files/${enc(name)}`),
   trajectory: (id: string, signal?: AbortSignal) => request<RunTrajectory>('GET', `/api/evaluation/runs/${enc(id)}/trajectory`, undefined, { signal }),
   /** Marks the bag part of a playback run as a loop (applies to every run of that part) */
   setLoop: (id: string, loop: boolean) => request<RunDetail>('POST', `/api/evaluation/runs/${enc(id)}/loop`, { loop }),
