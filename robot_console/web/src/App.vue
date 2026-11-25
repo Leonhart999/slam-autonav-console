@@ -4,13 +4,13 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Grid, Moon, Sunny } from '@element-plus/icons-vue'
+import { Grid, Moon, Sunny, View } from '@element-plus/icons-vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import enLocale from 'element-plus/es/locale/lang/en'
 import { footPages, mainPages } from './router'
 import { LANGS, pick, setLang } from './i18n'
 import { pagePath, registry } from './plugins/host'
-import { THEMES, setTheme, theme, type Theme } from './theme'
+import { customThemes, setTheme, theme, themeChoices, type Theme } from './theme'
 import { useStatusStore } from './stores/status'
 import { isReadOnlyPreview } from './http'
 import StatusBar from './components/StatusBar.vue'
@@ -30,8 +30,11 @@ const epLocale = computed(() => (locale.value === 'en' ? enLocale : zhCn))
 const langIndex = computed(() => Math.max(0, LANGS.findIndex((l) => l.value === locale.value)))
 
 // Appearance switch: the new look spreads from the button that was pressed
-const THEME_ICON = { light: Sunny, dark: Moon }
-const THEME_LABEL = { light: 'app.themeLight', dark: 'app.themeDark' } as const
+const THEME_ICON = { light: Sunny, dark: Moon } as const
+function themeLabel(c: (typeof themeChoices.value)[number]) {
+  return pick(c.label)
+}
+const activeThemeIndex = computed(() => Math.max(0, themeChoices.value.findIndex((c) => c.id === theme.value)))
 function pickTheme(next: Theme, e: MouseEvent) {
   const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
   setTheme(next, { x: box.left + box.width / 2, y: box.top + box.height / 2 })
@@ -123,15 +126,18 @@ onUnmounted(() => window.clearInterval(clockTimer))
         </nav>
 
         <div class="rail-foot">
-          <div class="prefs">
-            <div class="seg seg-theme" role="group" :aria-label="t('app.theme')" :style="{ '--i': THEMES.indexOf(theme) }">
+          <div class="prefs" :class="{ multi: customThemes.length > 0 }">
+            <div
+              class="seg seg-theme" role="group" :aria-label="t('app.theme')"
+              :style="{ '--i': activeThemeIndex, '--n': themeChoices.length }"
+            >
               <span class="thumb" />
               <button
-                v-for="th in THEMES" :key="th" :class="{ on: theme === th }" :aria-pressed="theme === th"
-                :title="t(THEME_LABEL[th])" :aria-label="t(THEME_LABEL[th])" :data-theme="th"
-                @click="pickTheme(th, $event)"
+                v-for="th in themeChoices" :key="th.id" :class="{ on: theme === th.id }" :aria-pressed="theme === th.id"
+                :title="themeLabel(th)" :aria-label="themeLabel(th)" :data-theme="th.id"
+                @click="pickTheme(th.id, $event)"
               >
-                <el-icon :size="14"><component :is="THEME_ICON[th]" /></el-icon>
+                <el-icon :size="14"><component :is="th.builtin ? THEME_ICON[th.id as 'light' | 'dark'] : View" /></el-icon>
               </button>
             </div>
             <div class="seg" role="group" :aria-label="t('app.language')" :style="{ '--i': langIndex }">
@@ -325,7 +331,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--accent-grad);
-  box-shadow: 0 0 10px rgba(6, 182, 212, 0.8);
+  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.75);
 }
 .nav-item.active .nav-no,
 .nav-item.active .nav-icon {
@@ -389,11 +395,14 @@ onUnmounted(() => window.clearInterval(clockTimer))
   padding-top: 12px;
   border-top: 1px solid var(--hairline);
 }
-/* 外观 + 语言：一行两个分段按钮，滑块滑到当前选项 */
+/* 外观 + 语言：一行两个分段按钮，滑块滑到当前选项；自定义主题超过 2 个时换行并列 */
 .prefs {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 8px;
+}
+.prefs.multi {
+  grid-template-columns: 1fr;
 }
 .seg {
   position: relative;
@@ -404,7 +413,10 @@ onUnmounted(() => window.clearInterval(clockTimer))
   background: rgba(var(--tint-rgb), 0.06);
 }
 .seg-theme {
-  grid-template-columns: 30px 30px;
+  grid-template-columns: repeat(var(--n, 2), minmax(28px, 1fr));
+}
+.seg-theme .thumb {
+  width: calc((100% - 6px) / var(--n, 2));
 }
 .thumb {
   position: absolute;
@@ -576,10 +588,14 @@ onUnmounted(() => window.clearInterval(clockTimer))
   .seg-theme {
     grid-template-columns: 1fr;
   }
-  .thumb {
+  .thumb,
+  .seg-theme .thumb {
     width: calc(100% - 6px);
     height: calc(50% - 3px);
     transform: translateY(calc(var(--i) * 100%));
+  }
+  .seg-theme .thumb {
+    height: calc((100% - 6px) / var(--n, 2));
   }
 }
 </style>

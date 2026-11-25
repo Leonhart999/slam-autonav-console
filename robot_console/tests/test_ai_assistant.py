@@ -2,9 +2,15 @@
 the read-only tools on a fake console API, trajectory summaries, sessions and the drawer transcript.
 No network: both model services are local HTTP servers that replay scripted answers."""
 import asyncio
+from contextlib import closing
+import csv
 import http.server
+import inspect
+import io
 import json
+import os
 from pathlib import Path
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -382,7 +388,13 @@ class AssistantTests(unittest.TestCase):
                              'tool_use'),
             anthropic_answer([{'type': 'text', 'text': 'The newest run is play_b.'}]),
         ]
+        self.model.script[0][1]['usage'].update(cache_creation_input_tokens=9, cache_read_input_tokens=6)
         events = self.chat(app, 'newest run?')
+        self.assertEqual(events[-1]['usage'], {'input': 100, 'output': 20, 'cache_write': 9,
+                                               'cache_read': 6, 'reasoning': 0})
+        records = self.get(app, '/usage/export')
+        self.assertEqual([(r['cache_write'], r['cost']) for r in csv.DictReader(io.StringIO(records))],
+                         [('9', ''), ('0', '')])
         self.assertEqual([e for e in events if e['type'] == 'text'][-1]['text'], 'The newest run is play_b.')
         first, second = self.model.requests
         self.assertEqual(first['path'], '/v1/messages')
@@ -494,6 +506,231 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual([(i['tool'], i.get('decision')) for i in items if i['kind'] == 'tool'],
                          [('run', 'denied'), ('run', 'approved')])
 
+    def get(self, app, path):
+        status, body = self.call(app, 'GET', self.API + path)
+        self.assertEqual(status, 200, body)
+        return body
+
+    @property
+    def data(self):
+        return Path(self.cfg['plugins']['data_dir']) / 'ai_assistant'
+
+    def test_round_ledger_and_usage_reports(self):
+        price = {'currency': 'CNY', 'input': 10, 'output': 30, 'cache_read': 2}
+        _, app = self.start(model='alias', base_url=self.model.url, api_key='secret-api-key',
+                            models=[{'id': 'alias', 'price': price, 'effort': 'high'}])
+        st = self.get(app, '/status')
+        pid = st['active']
+        self.assertEqual(st['profiles'][0]['models'][0]['price'], price)
+        first = openai_answer('transient', [('list_runs', {})])
+        first[1]['usage'].update(prompt_tokens_details={'cached_tokens': 40},
+                                 completion_tokens_details={'reasoning_tokens': 6})
+        self.model.script = [first, openai_answer('final')]
+        events = self.chat(app, 'one?')
+        sid = events[0]['id']
+        sums = {'input': 160, 'output': 40, 'cache_read': 40, 'cache_write': 0, 'reasoning': 6}
+        self.assertEqual(events[-1]['usage'], sums)
+        self.assertEqual([e['round'] for e in events if e['type'] == 'usage'], [1, 2])
+        self.assertEqual(self.get(app, '/session/' + sid)['usage'], sums)
+        # The second turn fails on its second call. Its first call remains billable.
+        self.model.script = [openai_answer(None, [('list_runs', {})]), (500, {'error': {'message': 'down'}})]
+        self.assertEqual(self.chat(app, 'two?', sid)[-1]['code'], 'http_error')
+        # A connection test has no conversation and can run against an unpriced draft.
+        answer = openai_answer('OK')
+        answer[1]['model'] = 'other'
+        self.model.script = [answer]
+        self.assertEqual(self.call(app, 'POST', self.API + '/test',
+                                   {'profile': {'name': 'draft', 'base_url': self.model.url, 'model': 'other'}})[0], 200)
+        export = self.get(app, '/usage/export?format=csv')
+        self.assertNotIn('secret-api-key', export)
+        rows = list(csv.DictReader(io.StringIO(export)))
+        self.assertEqual([(r['round'], r['status']) for r in rows],
+                         [('1', 'ok'), ('2', 'ok'), ('1', 'ok'), ('2', 'error'), ('1', 'ok')])
+        self.assertEqual((rows[0]['input'], rows[0]['cache_read'], rows[0]['reasoning'], rows[0]['effort']),
+                         ('60', '40', '6', 'high'))
+        self.assertAlmostEqual(float(rows[0]['cost']), (60*10 + 20*30 + 40*2)/1e6)
+        self.assertEqual((rows[3]['model'], rows[3]['error'], rows[3]['input']), ('alias', 'http_error', '0'))
+        self.assertEqual((rows[4]['session'], rows[4]['source'], rows[4]['cost']), ('', 'test', ''))
+        self.assertEqual(self.get(app, '/usage/summary')['unpriced_models'], ['other'])
+        # Deterministic UTC range, timings and a half-hour local bucket boundary.
+        with closing(sqlite3.connect(self.data / 'assistant.db')) as db, db:
+            db.execute('UPDATE usage SET ts=1800 + (id-1)*3600, ms=id*10')
+        window = 'from=1799&to=19800'
+        summary = self.get(app, '/usage/summary?' + window)
+        self.assertEqual([summary[k] for k in ('calls', 'sessions', 'input', 'errors', 'ms_avg', 'ms_p90')],
+                         [5, 1, 360, 1, 30, 50])
+        self.assertEqual(summary['cost'][0]['currency'], 'CNY')
+        self.assertAlmostEqual(summary['cost'][0]['amount'], sum(float(r['cost'] or 0) for r in rows))
+        series = self.get(app, '/usage/series?bucket=hour&tz=-330&' + window + '&profile=' + pid)
+        self.assertEqual([p['t'] for p in series['points']], [-1800, 1800, 5400, 9000, 12600, 16200])
+        self.assertEqual([p['calls'] for p in series['points']], [0, 1, 1, 1, 1, 0])
+        self.assertEqual(series['points'][0]['cost'], [])
+        self.assertEqual(series['points'][1]['cache_read'], 40)
+        self.assertIn('cache_write', series['points'][1])
+        model = self.get(app, '/usage/breakdown?by=model&' + window)['rows']
+        self.assertEqual([r['key'] for r in model], ['fake-gpt', 'other', 'alias'])
+        group = self.get(app, '/usage/breakdown?by=profile&model=fake-gpt&' + window)['rows'][0]
+        self.assertEqual((group['key'], group['label'], group['calls'], group['last']), (pid, 'test', 3, 9000))
+        group = self.get(app, '/usage/breakdown?by=session&' + window)['rows']
+        self.assertEqual([(r['key'], r['title'], r['session_exists']) for r in group], [(sid, 'one?', True)])
+        filters = self.get(app, '/usage/filters')
+        self.assertIn({'id': pid, 'name': 'test'}, filters['profiles'])
+        self.assertEqual(filters['models'], ['alias', 'fake-gpt', 'other'])
+        self.assertEqual(len(list(csv.DictReader(io.StringIO(self.get(app, '/usage/export?from=5400&to=9000'))))), 1)
+        self.assertEqual(self.get(app, '/usage/prune/preview?before=5400'), {'rows': 1})
+        self.assertEqual(self.call(app, 'POST', self.API + '/usage/prune', {'before': 5400})[1], {'deleted': 1})
+        self.assertEqual(self.get(app, '/sessions')['items'][0]['tokens']['cache'], 0)
+        self.assertEqual(self.get(app, '/usage/prune/preview'), {'rows': 4})
+        self.assertEqual(self.call(app, 'POST', self.API + '/usage/prune', {'before': None})[1], {'deleted': 4})
+        self.assertEqual(self.get(app, '/usage/filters'), {'profiles': [], 'models': []})
+
+    def test_test_call_masks_credentials_and_records_only_error_code(self):
+        _, app = self.start(model='m', base_url=self.model.url, api_key='sk-private',
+                            headers={'api-key': 'header-private'})
+        profile = self.get(app, '/providers')['profiles'][0]
+        self.assertNotIn('header-private', json.dumps(profile))
+        self.model.script = [(500, {'error': {'message': 'Invalid sk-private / header-private'}})]
+        status, error = self.call(app, 'POST', self.API + '/test', {'id': profile['id'], 'profile': profile})
+        self.assertEqual(status, 502)
+        self.assertNotIn('private', json.dumps(error))
+        self.assertEqual(error['detail']['params']['status'], 500)
+        headers = {k.lower(): v for k, v in self.model.requests[-1]['headers'].items()}
+        self.assertEqual(headers['api-key'], 'header-private')
+        rows = list(csv.DictReader(io.StringIO(self.get(app, '/usage/export'))))
+        self.assertEqual([(r['source'], r['session'], r['status'], r['error'], r['input']) for r in rows],
+                         [('test', '', 'error', 'http_error', '0')])
+        self.assertNotIn('private', json.dumps(rows))
+
+    def test_usage_validation_and_failed_write(self):
+        _, app = self.start(model='m', base_url=self.model.url)
+        for path, field in [('summary?from=nan', 'from'), ('breakdown?to=foo', 'to'), ('breakdown?by=id', 'by'),
+                            ('series?tz=0.25', 'tz'), ('series?bucket=week', 'bucket'), ('export?format=md', 'format'),
+                            ('prune/preview?before=inf', 'before')]:
+            status, body = self.call(app, 'GET', self.API + '/usage/' + path)
+            self.assertEqual((status, body['detail']), (400, {'code': 'plugin.ai_assistant.usage_invalid',
+                                                              'params': {'field': field}}))
+        for payload in [{}, {'before': 'bad'}, {'before': True}]:
+            self.assertEqual(self.call(app, 'POST', self.API + '/usage/prune', payload)[0], 400)
+        for price in [{'currency': 'EUR'}, {'input': -1}, {'reasoning': 2}, {'output': True}, {'cache_write': '2'}]:
+            profile = {'name': 'bad', 'models': [{'id': 'x', 'price': price}]}
+            self.assertEqual(self.call(app, 'POST', self.API + '/providers', {'profile': profile})[0], 400)
+        module = sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.store']
+        self.model.script = [openai_answer('paid')]
+        with mock.patch.object(module.Store, 'add_usage', side_effect=sqlite3.OperationalError('disk full')):
+            events = self.chat(app, 'hello')
+        self.assertEqual(events[-1]['type'], 'done')
+        self.assertEqual(self.get(app, '/sessions')['items'][0]['preview'], 'paid')
+
+    def test_history_search_edit_export_and_delete(self):
+        manager, app = self.start(model='m', base_url=self.model.url)
+        self.model.script = [openai_answer('hidden intermediate', [('list_runs', {})]), openai_answer('Find Needle!'),
+                             openai_answer('other')]
+        a, b = self.chat(app, 'first')[0]['id'], self.chat(app, 'Needle title')[0]['id']
+        def patch(sid, body):
+            return self.call(app, 'PATCH', self.API + '/sessions/' + sid, body)
+        item = patch(a, {'title': 'Saved / notes', 'pinned': True})[1]
+        self.assertEqual((item['pinned'], item['turns'], item['preview']), (True, 1, 'Find Needle!'))
+        self.assertEqual(item['tokens'], {'input': 200, 'output': 40, 'cache': 0})
+        self.model.script = [openai_answer('again'), openai_answer('latest')]
+        self.chat(app, 'follow up', a)
+        self.chat(app, 'latest question', b)
+        listed = self.get(app, '/sessions?limit=1')
+        self.assertEqual((listed['total'], listed['items'][0]['id'], listed['items'][0]['title']), (2, a, 'Saved / notes'))
+        self.assertEqual(self.get(app, '/sessions?offset=1')['items'][0]['id'], b)
+        matches = self.get(app, '/sessions?q=%20nEEdLe%20')['items']
+        self.assertEqual([m['id'] for m in matches], [b, a])
+        self.assertIn('find needle!', matches[1]['snippet'].lower())
+        self.assertEqual(self.get(app, '/sessions?q=saved')['items'][0]['snippet'], '')
+        for hidden in ('evaluation', 'intermediate'):
+            self.assertEqual(self.get(app, '/sessions?q=' + hidden)['total'], 0)
+        md = self.get(app, f'/sessions/{a}/export?format=md')
+        for block in ['# Saved / notes', '**You**', '**Assistant**', '> tool: list_runs({}) - ok']:
+            self.assertIn(block, md)
+        exported = self.get(app, f'/sessions/{a}/export?format=json')
+        self.assertEqual(set(exported), {'id', 'created', 'title', 'items'})
+        self.assertEqual(exported['items'], self.get(app, '/session/' + a)['items'])
+        for body in [{'title': ' '}, {'title': 'a'*121}, {'pinned': 'false'}]:
+            self.assertEqual(patch(a, body)[0], 400)
+        # Reserve the actual instance used by the routes, without a timing-dependent model call.
+        router = manager.get('ai_assistant').context.router
+        endpoint = next(r.endpoint for r in router.routes if r.name == 'delete_session')
+        sessions = inspect.getclosurevars(endpoint).nonlocals['sessions']
+        self.assertTrue(sessions.acquire(a))
+        status, body = self.call(app, 'DELETE', self.API + '/sessions/' + a)
+        self.assertEqual((status, body['detail']['code']), (409, 'plugin.ai_assistant.session_busy'))
+        sessions.release(a)
+        for status in [200, 404]:
+            self.assertEqual(self.call(app, 'DELETE', self.API + '/sessions/' + a)[0], status)
+        self.assertEqual(self.call(app, 'GET', self.API + '/session/' + a)[0], 404)
+        groups = self.get(app, '/usage/breakdown?by=session')['rows']
+        self.assertFalse(next(r for r in groups if r['key'] == a)['session_exists'])
+        for method, path, body in [('PATCH', '/sessions/not-an-id', {}), ('DELETE', '/sessions/not-an-id', None),
+                                   ('GET', '/sessions/..%2Fbad/export', None), ('POST', '/chat',
+                                    {'message': 'x', 'session': ['invalid']})]:
+            self.assertEqual(self.call(app, method, self.API + path, body)[0], 404)
+
+    def test_usage_is_visible_before_turn_finishes(self):
+        _, app = self.start(model='m', base_url=self.model.url)
+        self.model.script = [openai_answer('hello'), openai_answer(None, [('list_runs', {})]), openai_answer('done')]
+        sid = self.chat(app, 'hi')[0]['id']
+        provider = sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.providers'].OpenAIProvider
+        complete = provider.complete
+        waiting, resume = threading.Event(), threading.Event()
+
+        def gated(service, system, turns, defs, choice):
+            if turns[-1]['role'] == 'tool':
+                waiting.set()
+                if not resume.wait(10):
+                    raise AssertionError('test did not release provider')
+            return complete(service, system, turns, defs, choice)
+
+        out = {}
+        with mock.patch.object(provider, 'complete', gated):
+            worker = threading.Thread(target=lambda: out.update(events=self.chat(app, 'go', sid)))
+            worker.start()
+            try:
+                self.assertTrue(waiting.wait(10))
+                self.assertEqual(self.get(app, '/usage/summary')['calls'], 2)
+                result = self.call(app, 'PATCH', self.API + '/sessions/' + sid, {'pinned': True, 'title': 'While busy'})
+                self.assertEqual(result[0], 200)
+            finally:
+                resume.set()
+                worker.join(10)
+        self.assertEqual(out['events'][-1]['type'], 'done')
+        item = self.get(app, '/sessions')['items'][0]
+        self.assertEqual((item['title'], item['pinned'], item['preview'], item['turns']), ('While busy', True, 'done', 2))
+
+    def test_pinned_survives_history_pruning(self):
+        _, app = self.start(model='m', base_url=self.model.url)
+        mod = sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.sessions']
+        self.model.script = [openai_answer('ok') for _ in range(4)]
+        with mock.patch.object(mod, 'KEEP', 2):
+            pinned = self.chat(app, 'pin me')[0]['id']
+            self.call(app, 'PATCH', self.API + '/sessions/' + pinned, {'pinned': True})
+            ids = [self.chat(app, q)[0]['id'] for q in ('oldest', 'newer', 'newest')]
+            self.assertFalse((self.data / 'sessions' / (ids[0] + '.json')).exists())
+            self.assertEqual([r['id'] for r in self.get(app, '/sessions')['items']], [pinned, ids[2], ids[1]])
+            self.assertEqual(self.get(app, '/usage/summary')['calls'], 4)
+
+    def test_backfill_from_legacy_json(self):
+        sid = 'a'*32
+        folder = self.data / 'sessions'
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / (sid + '.json')
+        path.write_text(json.dumps({'id': sid, 'title': 'Legacy', 'created': '2020-06-01 21:00:00',
+                                    'turns': [{'role': 'user', 'text': '[Console page currently open: path]\nQuestion'},
+                                              {'role': 'assistant', 'text': 'Answer'}]}), encoding='utf-8')
+        os.utime(path, (1700000000, 1700000000))
+        _, app = self.start()
+        item = self.get(app, '/sessions?q=question')['items'][0]
+        self.assertEqual((item['updated'], item['turns'], item['preview'], item['tokens']['input']),
+                         (1700000000, 1, 'Answer', 0))
+        self.assertEqual(time.strftime('%Y-%m-%d', time.localtime(item['created'])), '2020-06-01')
+        self.assertEqual(self.get(app, '/sessions?q=path')['total'], 0)
+        with closing(sqlite3.connect(self.data / 'assistant.db')) as db:
+            self.assertEqual(db.execute('PRAGMA journal_mode').fetchone()[0], 'wal')
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 1)
+
     def test_model_and_effort_from_the_composer(self):
         _, app = self.start(provider='openai', base_url=self.model.url, model='a',
                             models=[{'id': 'a'}, {'id': 'b', 'effort': 'low', 'efforts': ['low', 'high', 'ultra']}])
@@ -509,6 +746,195 @@ class AssistantTests(unittest.TestCase):
         self.chat(app, 'x')
         self.assertEqual((self.model.requests[-1]['body']['model'], self.model.requests[-1]['body']['reasoning_effort']),
                          ('b', 'high'))
+
+    def test_deep_credentials_and_proxy_userinfo_never_leak(self):
+        _, app = self.start(
+            model='m', base_url=self.model.url, api_key='sk-main-secret',
+            proxy='http://alice:proxy-pass-9@127.0.0.1:19999',
+            headers={'Authorization': 'Bearer hdr-token-7'},
+            body={'nested': {'client_secret': 'cs-secret-1', 'refresh_token': 'rt-secret-2'},
+                  'access_token': 'at-secret-3'})
+        profile = self.get(app, '/providers')['profiles'][0]
+        dumped = json.dumps(profile) + json.dumps(self.get(app, '/status'))
+        for leaked in ('sk-main-secret', 'proxy-pass-9', 'hdr-token-7', 'cs-secret-1', 'rt-secret-2', 'at-secret-3'):
+            self.assertNotIn(leaked, dumped)
+        # Re-saving the masked view keeps both the body secrets and the proxy password intact.
+        status, updated = self.call(app, 'PUT', f'{self.API}/providers/{profile["id"]}', {'profile': profile})
+        self.assertEqual(status, 200)
+        self.assertNotIn('proxy-pass-9', json.dumps(updated))
+        stored = json.loads((self.data / 'providers.json').read_text(encoding='utf-8'))['profiles'][0]
+        self.assertEqual(stored['proxy'], 'http://alice:proxy-pass-9@127.0.0.1:19999')
+        self.assertEqual(stored['body']['nested']['client_secret'], 'cs-secret-1')
+
+        # Remove proxy so FakeModel answers and echoes every secret back in a 500 error.
+        stored_copy = {**profile, 'proxy': ''}
+        self.call(app, 'PUT', f'{self.API}/providers/{profile["id"]}', {'profile': stored_copy})
+        self.model.script = [(500, {'error': {'message': 'bad cs-secret-1 rt-secret-2 at-secret-3 Bearer tok-extra'}}),
+                             (500, {'error': {'message': 'bad cs-secret-1 rt-secret-2 at-secret-3'}})]
+        status, err = self.call(app, 'POST', f'{self.API}/test', {})
+        self.assertEqual(status, 502)
+        for leaked in ('cs-secret-1', 'rt-secret-2', 'at-secret-3', 'tok-extra'):
+            self.assertNotIn(leaked, json.dumps(err))
+        events = self.chat(app, 'hi')
+        for leaked in ('cs-secret-1', 'rt-secret-2', 'at-secret-3'):
+            self.assertNotIn(leaked, json.dumps(events))
+
+    def test_r2_header_names_userinfo_restore_and_decoded_proxy_password(self):
+        # Short gateway header names are credentials too; URL userinfo survives a save of the masked view.
+        _, app = self.start(provider='anthropic', base_url='https://relay-user:relay-pass@relay.example',
+                            api_key='sk-ant-x', headers={'X-Auth': 'xauth-secret', 'X-Trace': 'keep-me'},
+                            proxy='http://bob:p%40ss%3Aw0rd@127.0.0.1:1')
+        profile = self.get(app, '/providers')['profiles'][0]
+        dumped = json.dumps(profile)
+        for leaked in ('xauth-secret', 'relay-pass', 'p%40ss', 'p@ss:w0rd'):
+            self.assertNotIn(leaked, dumped)
+        self.assertEqual(profile['headers']['X-Trace'], 'keep-me')
+        status, _ = self.call(app, 'PUT', f'{self.API}/providers/{profile["id"]}', {'profile': {**profile, 'name': 'Renamed'}})
+        self.assertEqual(status, 200)
+        stored = json.loads((self.data / 'providers.json').read_text(encoding='utf-8'))['profiles'][0]
+        self.assertEqual((stored['name'], stored['base_url'], stored['headers']['X-Auth'], stored['proxy']),
+                         ('Renamed', 'https://relay-user:relay-pass@relay.example', 'xauth-secret',
+                          'http://bob:p%40ss%3Aw0rd@127.0.0.1:1'))
+        mod = sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.profiles']
+        settings = mod.settings_for(stored, {})
+        reason = mod.safe_error({'reason': 'proxy auth failed for bob:p@ss:w0rd and relay-pass'}, settings)['reason']
+        for leaked in ('p@ss:w0rd', 'relay-pass'):
+            self.assertNotIn(leaked, reason)
+
+    def test_r2_gateway_cache_write_is_not_billed_as_input(self):
+        # CPA (Claude behind Chat Completions): prompt_tokens = input + cache read + cache write
+        price = {'currency': 'USD', 'input': 3, 'cache_read': 0.3, 'cache_write': 3.75, 'output': 15}
+        _, app = self.start(model='c', base_url=self.model.url, models=[{'id': 'c', 'price': price}])
+        answer = openai_answer('ok')
+        answer[1]['usage'] = {'prompt_tokens': 170, 'completion_tokens': 10,
+                              'prompt_tokens_details': {'cached_tokens': 50, 'cache_write_tokens': 20}}
+        self.model.script = [answer]
+        usage = self.chat(app, 'hi')[-1]['usage']
+        self.assertEqual((usage['input'], usage['cache_read'], usage['cache_write']), (100, 50, 20))
+        row = list(csv.DictReader(io.StringIO(self.get(app, '/usage/export'))))[0]
+        self.assertAlmostEqual(float(row['cost']), (100 * 3 + 50 * 0.3 + 20 * 3.75 + 10 * 15) / 1e6)
+
+    def test_r2_half_hour_dst_hour_buckets(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        _, app = self.start(model='m', base_url=self.model.url)
+        self.model.script = [openai_answer(str(i)) for i in range(4)]
+        for _ in range(4):
+            self.chat(app, 'go')
+        lh = ZoneInfo('Australia/Lord_Howe')        # +10:30 -> +11:00 at 02:00 local on 2026-10-04
+        stamps = [datetime(2026, 10, 4, h, m, tzinfo=lh).timestamp() for h, m in ((1, 30), (2, 45), (3, 15), (4, 15))]
+        with closing(sqlite3.connect(self.data / 'assistant.db')) as db, db:
+            for i, ts in enumerate(stamps, 1):
+                db.execute('UPDATE usage SET ts=? WHERE id=?', (ts, i))
+        start = int(datetime(2026, 10, 4, 0, 0, tzinfo=lh).timestamp())
+        end = int(datetime(2026, 10, 4, 6, 0, tzinfo=lh).timestamp())
+        window = f'from={start}&to={end}'
+        series = self.get(app, f'/usage/series?bucket=hour&tz_name=Australia/Lord_Howe&{window}')
+        self.assertEqual(sum(p['calls'] for p in series['points']), self.get(app, '/usage/summary?' + window)['calls'])
+        self.assertEqual(sum(p['calls'] for p in series['points']), 4)
+        self.assertEqual(len({p['t'] for p in series['points']}), len(series['points']))
+
+    def test_r2_pinned_survives_failed_index_then_prune(self):
+        _, app = self.start(model='m', base_url=self.model.url)
+        mod = sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.sessions']
+        store_mod = sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.store']
+        self.model.script = [openai_answer('ok') for _ in range(4)]
+        with mock.patch.object(mod, 'KEEP', 3):          # the fourth conversation is the one that prunes
+            oldest = self.chat(app, 'oldest')[0]['id']
+            self.chat(app, 'middle')
+            self.chat(app, 'newer')
+            real = store_mod.Store.index
+            with mock.patch.object(store_mod.Store, 'index', side_effect=sqlite3.OperationalError('locked')):
+                status, _ = self.call(app, 'PATCH', self.API + '/sessions/' + oldest, {'pinned': True})
+            self.assertEqual(status, 500)
+            self.assertTrue(json.loads((self.data / 'sessions' / (oldest + '.json')).read_text())['pinned'])
+            self.assertIs(store_mod.Store.index, real)
+            self.chat(app, 'newest')                 # its save prunes: the pinned JSON must survive
+            self.assertTrue((self.data / 'sessions' / (oldest + '.json')).exists())
+            items = self.get(app, '/sessions')['items']
+            self.assertEqual((items[0]['id'], items[0]['pinned']), (oldest, True))
+
+    def test_csv_export_neutralises_formula_prefixes(self):
+        _, app = self.start(name='=CMD|evil', model='+SUM(1,1)', base_url=self.model.url)
+        ans = openai_answer('ok')
+        ans[1]['model'] = '-2+3'
+        self.model.script = [ans]
+        self.chat(app, 'hi')
+        rows = list(csv.DictReader(io.StringIO(self.get(app, '/usage/export?format=csv'))))
+        self.assertEqual(rows[0]['profile_name'], "'=CMD|evil")
+        self.assertEqual(rows[0]['model'], "'-2+3")
+        self.assertEqual(rows[0]['input'], '100')
+
+    def test_usage_all_time_dst_and_cache_write(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        _, app = self.start(provider='anthropic', base_url=self.model.url, api_key='sk-ant-test')
+        ny = ZoneInfo('America/New_York')
+        # Across the fall-back transition, the empty daily chart still covers 30 local calendar days.
+        end = int(datetime(2026, 11, 25, 0, 30, tzinfo=ny).timestamp())
+        empty_all = self.get(app, f'/usage/series?from=0&to={end}&bucket=day&tz_name=America/New_York')
+        self.assertEqual(len(empty_all['points']), 30)
+        self.assertEqual(empty_all['points'][0]['t'], int(datetime(2026, 10, 27, tzinfo=ny).timestamp()))
+
+        self.model.script = [anthropic_answer([{'type': 'text', 'text': 'a'}]),
+                             anthropic_answer([{'type': 'text', 'text': 'b'}]),
+                             anthropic_answer([{'type': 'text', 'text': 'c'}]),
+                             anthropic_answer([{'type': 'text', 'text': 'd'}])]
+        for a in self.model.script:
+            a[1]['usage']['cache_creation_input_tokens'] = 500
+        for _ in range(4):
+            self.chat(app, 'go')
+
+        stamps = [
+            datetime(2026, 10, 31, 23, 30, tzinfo=ny).timestamp(),  # EDT
+            datetime(2026, 11, 1, 0, 30, tzinfo=ny).timestamp(),    # EDT (fall-back day, 25h)
+            datetime(2026, 11, 1, 23, 30, tzinfo=ny).timestamp(),   # EST
+            datetime(2026, 11, 2, 0, 30, tzinfo=ny).timestamp(),    # EST
+        ]
+        with closing(sqlite3.connect(self.data / 'assistant.db')) as db, db:
+            for idx, ts in enumerate(stamps, 1):
+                db.execute('UPDATE usage SET ts=? WHERE id=?', (ts, idx))
+        end = int(datetime(2026, 11, 3, 0, 0, tzinfo=ny).timestamp())
+        res = self.get(app, f'/usage/series?from=0&to={end}&bucket=day&tz_name=America/New_York')
+        self.assertEqual([(p['calls'], p['cache_write']) for p in res['points']],
+                         [(1, 500), (2, 1000), (1, 500)])
+
+    def test_reconcile_recovers_failed_index_and_delete_rollback(self):
+        _, app = self.start(model='m', base_url=self.model.url)
+        self.model.script = [openai_answer('first'), openai_answer('second')]
+        s1 = self.chat(app, 'one')[0]['id']
+        store_mod = sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.store']
+        with mock.patch.object(store_mod.Store, 'index', side_effect=sqlite3.OperationalError('locked')):
+            ev = self.chat(app, 'two')
+        s2 = ev[0]['id']
+        self.assertEqual(ev[-1]['type'], 'done')
+        # Calling /sessions triggers reconcile without requiring a server restart.
+        items = self.get(app, '/sessions')['items']
+        self.assertEqual({x['id'] for x in items}, {s1, s2})
+        item2 = next(x for x in items if x['id'] == s2)
+        self.assertEqual(item2['tokens']['input'], 100)
+
+        # Failed SQLite deletion restores the JSON file so nothing is half-deleted.
+        with mock.patch.object(store_mod.Store, 'delete_index', side_effect=sqlite3.OperationalError('locked')):
+            status, _ = self.call(app, 'DELETE', f'{self.API}/sessions/{s2}')
+            self.assertEqual(status, 500)
+        self.assertTrue((self.data / 'sessions' / f'{s2}.json').is_file())
+        self.assertEqual(self.call(app, 'GET', f'{self.API}/session/{s2}')[0], 200)
+        self.assertEqual(self.call(app, 'DELETE', f'{self.API}/sessions/{s2}')[0], 200)
+
+        # Restart with a manually removed file + an unindexed file on a non-empty DB reconciles both.
+        (self.data / 'sessions' / f'{s1}.json').unlink()
+        s3 = 'c' * 32
+        (self.data / 'sessions' / f'{s3}.json').write_text(json.dumps({
+            'id': s3, 'title': 'Recovered', 'created': '2026-11-20 10:00:00',
+            'turns': [{'role': 'user', 'text': 'hi'}, {'role': 'assistant', 'text': 'hey'}]}), encoding='utf-8')
+        self.app2 = FastAPI()
+        mgr = plugins.PluginManager(self.cfg)
+        self.addCleanup(mgr.shutdown)
+        plugins.register_plugin_routes(self.app2, mgr)
+        _, after = asyncio.run(plugins.asgi_request(self.app2, 'GET', f'{self.API}/sessions'))
+        self.assertEqual([x['id'] for x in after['items']], [s3])
 
 
 class SummaryTests(unittest.TestCase):

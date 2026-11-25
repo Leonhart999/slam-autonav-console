@@ -62,7 +62,46 @@ export interface MapDetail extends MapEntry {
   total_size: number
   /** the scans the map was built from are still on disk (2D can be rebuilt from scan evidence) */
   has_scans?: boolean
+  /** loop optimization: reason it is unavailable (null = available), ground-constrained FAST-LIO2 variant */
+  loop?: { reason: 'no_scans' | 'already_optimized' | null; ground: boolean }
 }
+
+export interface LoopParams {
+  loop_radius: number
+  loop_min_gap: number
+  map_range: number
+  map_res: number
+  scan_stride: number
+  accept_overlap: number
+  accept_rmse: number
+  max_loop_shift: number
+  max_loop_yaw_deg: number
+}
+export interface LoopWall { points: number; median_m: number; p90_m: number; rmse_m: number }
+export interface LoopRow {
+  s_i: number; s_j: number; dist: number
+  overlap_before: number; overlap_after: number; rmse_before: number; rmse_after: number
+  shift_xy: number; yaw_deg: number; ok: boolean; reasons: string[]
+}
+export interface LoopResult {
+  token: string
+  parent: string
+  params: LoopParams
+  ground: boolean
+  elapsed: number
+  scans: number
+  keyframes: number
+  path_m: number
+  duration_s: number
+  accepted: number
+  revisits: number
+  end_correction: { xy_m: number; z_m: number; yaw_deg: number } | null
+  max_correction: { xy_m: number; yaw_deg: number } | null
+  loops: LoopRow[]
+  junctions: { s_i: number; s_j: number; wall_before: LoopWall | null; wall_after: LoopWall | null }[]
+  figures: string[]
+}
+export interface LoopEnv { installed: boolean; python: string; reason: string | null; install: string }
 
 export interface RegridPreview {
   token: string
@@ -87,6 +126,14 @@ export const mapsApi = {
   preview: (name: string, params: unknown, signal?: AbortSignal, onTask?: (task: ConsoleTask<RegridPreview>) => void) =>
     taskResult<RegridPreview>(`/api/maps/${enc(name)}/regrid`, params, signal, onTask),
   savePreview: (token: string, name: string) => getJson<MapDetail>(`/api/maps/regrid/${enc(token)}/save`, 'POST', { name }),
+  loopEnv: (signal?: AbortSignal) => getJson<LoopEnv>('/api/maps/loop/env', 'GET', undefined, { signal }),
+  loop: (name: string, params: LoopParams, signal?: AbortSignal, onTask?: (task: ConsoleTask<LoopResult>) => void) =>
+    taskResult<LoopResult>(`/api/maps/${enc(name)}/loop`, params, signal, onTask),
+  loopFigure: async (token: string, figure: string, signal: AbortSignal) =>
+    (await fetchAsset(`/api/maps/loop/${enc(token)}/figures/${enc(figure)}.png`, signal)).blob(),
+  saveLoop: (token: string, name: string) =>
+    getJson<MapDetail & { loop_run: string }>(`/api/maps/loop/${enc(token)}/save`, 'POST', { name }),
+  discardLoop: (token: string) => getJson<unknown>(`/api/maps/loop/${enc(token)}`, 'DELETE'),
   trash: () => getJson<TrashEntry[]>('/api/map-trash'),
   remove: (name: string) => getJson<unknown>(`/api/maps/${enc(name)}`, 'DELETE'),
   restore: (id: string) => getJson<unknown>(`/api/map-trash/${enc(id)}/restore`, 'POST'),

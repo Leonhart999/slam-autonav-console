@@ -17,6 +17,8 @@ from .map_library import write_xyz_pcd
 IMPORT_NAME_RE = re.compile(r'^[A-Za-z0-9_-]{1,48}$')
 MIB = 1024 * 1024
 MAX_REQUEST = 384 * MIB
+MAX_CLOUD_POINTS = 5_000_000
+MAX_BINARY_CLOUD_BYTES = 256 * MIB
 
 
 class MapImportError(Exception):
@@ -29,8 +31,8 @@ def invalid(reason):
     raise MapImportError('import_invalid', reason=str(reason))
 
 
-def read_cloud(path):
-    """有限长度解析 ASCII / binary PCD，再转换成控制台统一的 XYZ 格式。"""
+def read_cloud(path, *, max_binary_xyz_points=MAX_CLOUD_POINTS):
+    """Read bounded ASCII/binary PCD as float32 XYZ; only packed binary XYZ can opt into a larger limit."""
     header = {}
     with open(path, 'rb') as f:
         consumed = 0
@@ -52,16 +54,28 @@ def read_cloud(path):
         types = header['TYPE']
         counts = list(map(int, header.get('COUNT', ['1'] * len(fields))))
         n = int(header['POINTS'][0])
-        if not (0 < n <= 5000000) or not (3 <= len(fields) <= 64):
-            invalid('PCD must contain 1 to 5,000,000 points and at most 64 fields')
+        if not 3 <= len(fields) <= 64:
+            invalid('PCD must contain 3 to 64 fields')
         if len(set(fields)) != len(fields) or not (len(fields) == len(sizes) == len(types) == len(counts)):
             invalid('PCD field declarations do not match')
-        if any(c < 1 or c > 64 for c in counts) or sum(counts) * n > 24000000:
+        encoding = header['DATA'][0].lower()
+        packed_xyz = (encoding == 'binary' and fields == ['x', 'y', 'z'] and sizes == [4, 4, 4]
+                      and types == ['F', 'F', 'F'] and counts == [1, 1, 1])
+        max_points = min(max_binary_xyz_points, MAX_BINARY_CLOUD_BYTES // 12) if packed_xyz else MAX_CLOUD_POINTS
+        if not 0 < n <= max_points:
+            invalid(f'PCD declares {n:,} points; this format requires 1 to {max_points:,} points')
+        if any(c < 1 or c > 64 for c in counts) or (not packed_xyz and sum(counts) * n > 24_000_000):
             invalid('PCD contains too many values')
         if any(k not in fields or counts[fields.index(k)] != 1 for k in ('x', 'y', 'z')):
             invalid('PCD requires scalar x, y, z fields')
-        encoding = header['DATA'][0].lower()
-        if encoding == 'binary':
+        if packed_xyz:
+            if os.fstat(f.fileno()).st_size - f.tell() != n * 12:
+                invalid('PCD binary payload size does not match POINTS')
+            xyz = np.fromfile(f, dtype='<f4', count=n * 3)
+            if xyz.size != n * 3:
+                invalid('PCD binary payload size does not match POINTS')
+            xyz = xyz.reshape(n, 3)
+        elif encoding == 'binary':
             kinds = {'F': 'f', 'I': 'i', 'U': 'u'}
             descr = []
             for key, size, kind, count in zip(fields, sizes, types, counts):
@@ -70,7 +84,7 @@ def read_cloud(path):
                 descr.append((key, '<' + kinds[kind] + str(size), (count,)) if count > 1
                              else (key, '<' + kinds[kind] + str(size)))
             dtype = np.dtype(descr)
-            if n * dtype.itemsize > 256 * MIB:
+            if n * dtype.itemsize > MAX_BINARY_CLOUD_BYTES:
                 invalid('PCD binary data exceeds 256 MiB')
             raw = f.read(n * dtype.itemsize + 1)
             if len(raw) != n * dtype.itemsize:
@@ -85,8 +99,10 @@ def read_cloud(path):
                 invalid('PCD ASCII row count does not match POINTS')
         else:
             invalid('Only ASCII and binary PCD are supported; binary_compressed is not supported')
-    xyz = xyz[np.isfinite(xyz).all(axis=1)]
-    if not len(xyz) or np.abs(xyz).max() > 1000000:
+    finite = np.isfinite(xyz).all(axis=1)
+    if not finite.all():
+        xyz = xyz[finite]
+    if not len(xyz) or xyz.min() < -1_000_000 or xyz.max() > 1_000_000:
         invalid('PCD has no finite points or coordinates exceed 1,000,000 m')
     return xyz
 

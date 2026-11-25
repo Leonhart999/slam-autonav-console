@@ -105,14 +105,15 @@ Notes:
 - `RobotConsole.vue` is the **runtime-only** build: use pre-compiled `.vue` SFCs or `h()` render functions; runtime template strings are not supported.
 - Import **only** components present in `window.RobotConsole.ui` (others are `undefined` at runtime):
   - Console components (from `window.RobotConsole.ui`): `GlassPanel`, `KpiTile`, `InfoTip`.
-  - Element Plus whitelist: `ElAlert`, `ElButton`, `ElCheckbox`, `ElDialog`, `ElDivider`, `ElDrawer`, `ElEmpty`, `ElForm`, `ElFormItem`, `ElIcon`, `ElInput`, `ElInputNumber`, `ElLink`, `ElOption`, `ElPopconfirm`, `ElProgress`, `ElRadio`, `ElRadioButton`, `ElRadioGroup`, `ElScrollbar`, `ElSelect`, `ElSwitch`, `ElTable`, `ElTableColumn`, `ElTag`, `ElTooltip`, `ElMessage`, `ElMessageBox`.
+  - Element Plus whitelist: `ElAlert`, `ElButton`, `ElCheckbox`, `ElDialog`, `ElDivider`, `ElDrawer`, `ElEmpty`, `ElForm`, `ElFormItem`, `ElIcon`, `ElInput`, `ElInputNumber`, `ElLink`, `ElOption`, `ElPopconfirm`, `ElProgress`, `ElRadio`, `ElRadioButton`, `ElRadioGroup`, `ElScrollbar`, `ElSelect`, `ElSlider`, `ElSwitch`, `ElTable`, `ElTableColumn`, `ElTag`, `ElTooltip`, `ElMessage`, `ElMessageBox`.
 - **MUST NOT** bundle full Element Plus CSS or override global Element Plus / console theme styles.
 
 ### 4.2 Registration & shared patterns
 
-- Call `window.RobotConsole.register({ id, messages, pages?, header? })` synchronously once before the 15 s load timeout.
+- Call `window.RobotConsole.register({ id, messages, pages?, header?, themes? })` synchronously once before the 15 s load timeout.
 - `pages[i].path` **MUST** match `^[a-z0-9][a-z0-9_-]{0,39}$` and be unique within the plugin (mounted at `/#/ext/<id>/<path>`).
 - `pages[i].title` **MUST** be concise bilingual `{zh, en}` (recommended <= 6 Chinese characters / <= 20 English characters) so the side menu never clips.
+- UI theme plugins registering `themes` **MUST** provide `id` (not `light`/`dark`), bilingual `label`, and `base: 'light' | 'dark'`; CSS overrides **MUST** be `--*` tokens in `tokens` (applied cleanly to `:root`) rather than unscoped global CSS selectors.
 - Use `window.RobotConsole.request(...)` for JSON calls (use `XMLHttpRequest` only when upload progress events are required) and format errors with `errorText(e)` / `codedText(m)`.
 - Tool plugins **SHOULD** follow the `plugins/_shared/web` pattern (`kit.ts`, `useJobs.ts`, `PythonGate.vue`, `JobList.vue`, `commonMessages`) for consistent job and environment UX.
 

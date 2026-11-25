@@ -11,6 +11,17 @@ This is an **offline** back-end, not an online loop-closure switch. FAST-LIO2 co
 - Registration gates, robust losses and submap spacing reduce false matches but cannot guarantee rejection of all corridor aliases. Inspect the junction and full-map figures before using the result.
 - Current implementation processes the whole recording after it ends; no corrections are fed into the live FAST-LIO filter or its local map.
 
+## In the console (Maps page)
+
+Since 2026-11-25 the whole workflow runs from the web page; the command-line steps below stay available.
+
+1. **Record**: on the Playback page pick a FAST-LIO2 variant (preferably with the ground vehicle constraint), switch **Save raw scans** on, play the bag, and **save the map**. A recording that no saved map names is deleted when the SLAM stops.
+2. **Optimize**: on the Maps page select that map and press **Loop optimization** (next to Regenerate 2D). The button is disabled with a reason when the map has no raw scans or is itself a loop result. The dialog warns when the map was built without the ground constraint, and shows the install command when the loop venv is missing. Parameters: loop search radius (10 m), minimum path between visits (100 m), map point range (20 m), map voxel (0.05 m), scan stride (2); under *Other parameters* the registration gates (overlap 0.6, RMSE 0.15 m, shift 5 m, heading 10°). The run is a background task (`kind: loop`, Background tasks list); stages: reading, checking loop candidates, optimizing, rebuilding.
+3. **Preview**: summary, end correction, wall-point consistency per revisit, a table of every checked candidate with its rejection reason, and the figures (trajectory correction, walls at the revisit, map top view, original and new grid). With no accepted loop nothing can be saved.
+4. **Save as new map** (default name `<map>_loop`, at most 48 characters): a new map with `source: loop`, `parent_map`, `loop_params`, and a new run `play_loop_<name>` whose `est.tum` is the optimized and `est_online.tum` the original FAST-LIO2 trajectory (`gt.tum` / `ref.tum` copied from the source run), so the Evaluation page compares them directly. The scans were recorded during the playback that produced the source map, so its run is the exact baseline. Navigation goals are not copied. The new map is added to the recording's `used_by_maps.txt`.
+
+Only the scans listed in the map's `data/scan_poses.tum` are used, i.e. the scans up to the moment the map was saved. Unsaved results stay in `<maps_dir>/.loop/<token>/` (at most 3, deleted after 24 h; **Discard result** deletes one at once). The back-end runs in `loop_backend.python` (`console.yaml`, default `~/venvs/loop/bin/python`, timeout 1800 s), never inside the console process. Implementation: `robot_console/map_loop.py`, `web/src/components/MapLoopDialog.vue`.
+
 ## Environment
 
 Use a separate numerical environment so the Python GTSAM 4.2 wheel does not replace the system GLIM/GTSAM installation:
@@ -56,6 +67,8 @@ The source package must be on `PYTHONPATH` (workspace `setup.bash` after buildin
 
 Output directory must be absent or empty. Input recordings are never modified. Both before/after maps use the same scans, maximum range and sampling, making their comparison meaningful.
 
+`--poses <tum>` uses only the scans listed in a TUM file (by stamp), e.g. `data/scan_poses.tum` of a map saved while the recorder was still running. `--params <json>` overrides `loop_radius`, `loop_min_gap`, `accept_overlap`, `accept_rmse`, `max_loop_shift` and `max_loop_yaw_deg`. Lines `PHASE <name>` on stdout mark the stages for the console. `loop_report.json` is written even when no loop is accepted (then without the optimized trajectory). The wall slices of the figures and metrics are taken relative to the floor height estimated from the scans.
+
 Outputs include `traj_odom.tum`, `traj_loop.tum`, `map_odom_voxel.pcd`, `map_loop_voxel.pcd`, `grid_odom.*`, `grid_loop.*`, `loop_report.json`, corrections CSV and comparison figures. `--no-map` skips full-map and grid rebuilding. `--map-range` (default 20 m) limits the points used for the map and grid; loop registration still uses 50 m.
 
 ### Occupancy grid from scan evidence
@@ -85,7 +98,7 @@ Creates a **new** library map, a new optimized run and its raw trajectory backup
 
 The grid is the back-end's `grid_loop` (5 cm cells, scan evidence as described above). It is **not** equivalent in density to the original accumulated dense FAST-LIO map. The `navigable` catalog flag means files are valid; it does not constitute a Nav2 driving validation.
 
-The existing map catalog discovers the new directory without restarting the console. No webpage loop option has been added yet. The commands need a package build/install to appear in `ros2 run`; source modules are available immediately through the explicit module invocation.
+The existing map catalog discovers the new directory without restarting the console. The commands need a package build/install to appear in `ros2 run`; source modules are available immediately through the explicit module invocation.
 
 ## HEU61 validation (2026-11-14)
 
@@ -95,7 +108,7 @@ Input: full MCAP, start at 5 s, leveled sensor frame, ground constraint 0.02 deg
 - Three accepted constraints from one revisit near the start.
 - Endpoint correction approximately 2.52 m horizontal and -1.05 deg yaw.
 - Input and output height range both -0.126542 to +0.090154 m.
-- Selected overlapping wall points: median nearest-point inconsistency 0.315 m to 0.052 m; 90th percentile 2.421 m to 0.123 m.
+- Selected overlapping wall points: median nearest-point inconsistency 0.315 m to 0.052 m; 90th percentile 2.421 m to 0.123 m (11-14 version: scans of the last 60 s against the first 60 s). Since 2026-11-25 the metric is taken per revisit: scans within 10 m of path around the new end of a loop against the map within 15 m around its old end, both before and after. On the same recording that gives 0.422 m to 0.064 m (median) and 2.433 m to 0.155 m (p90); accepted loops and the endpoint correction are unchanged.
 - These wall points are selected using the optimized overlap, so the values are an in-sample map-consistency diagnostic, **not ATE or independent accuracy**. Broad first/last-segment statistics remain worse because many surfaces were observed only in one segment.
 - Dynamic objects, thin/reflective surfaces and remaining front-end/local scan distortion are not removed by one pose-graph loop.
 
@@ -103,4 +116,4 @@ Validation run references: published map `heu61_fastlio_loop_20261114`, exact co
 
 ## Release verification still required
 
-The numerical prototype and HEU61 experiment were exercised. The ROS-package entry points, a fresh install, a new recording through the packaged recorder, and webpage-triggered workflow have not been release-tested. Per the project workflow, run the full console test/build/live checks at the next version release. No online UI integration is claimed.
+The numerical prototype, the HEU61 experiment and the Maps page workflow (test console running the working tree on the HEU61 recording, 2026-11-25: 79 s, 3 of 5 candidates accepted, save, task-center recovery) were exercised. The ROS-package entry points, a fresh install with the optional loop venv, and a new recording through the packaged recorder have not been release-tested. Per the project workflow, run the full console test/build/live checks at the next version release. The correction is offline; nothing is fed back into a running FAST-LIO2.

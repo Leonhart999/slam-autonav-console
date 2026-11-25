@@ -53,6 +53,7 @@ class MarketTests(unittest.TestCase):
         self.index_path = self.repo / 'index.json'
         self.cfg = {'paths': {'data_root': str(self.base)},
                     'plugins': {'dirs': [str(self.dir), str(self.shipped)],
+                                'shipped_dir': str(self.shipped),
                                 'state_file': str(self.base / 'state.json'),
                                 'data_dir': str(self.base / 'plugin_data'),
                                 'envs_dir': str(self.base / 'plugin_envs'),
@@ -206,9 +207,11 @@ class MarketTests(unittest.TestCase):
 
     def test_a_shipped_plugin_can_be_overridden_from_the_market(self):
         (self.shipped / 'tool').mkdir(parents=True)
-        (self.shipped / 'tool' / 'plugin.yaml').write_text('id: tool\napi: 1\nversion: 0.1.0\nname: x\n',
-                                                           encoding='utf-8')
-        self.publish('tool', plugin_zip('tool', version='0.2.0'), version='0.2.0')
+        (self.shipped / 'tool' / 'plugin.yaml').write_text(
+            'id: tool\napi: 1\nversion: 0.1.0\nname: x\nbackend: {module: backend}\n', encoding='utf-8')
+        (self.shipped / 'tool' / 'backend.py').write_text('def setup(ctx):\n    pass\n', encoding='utf-8')
+        self.publish('tool', plugin_zip('tool', version='0.2.0', backend='def setup(ctx):\n    pass\n'),
+                     version='0.2.0')
         manager, app = self.start()
         _, view = call(app, 'GET', '/api/plugins/market', params={'refresh': 'true'})
         self.assertEqual((view['plugins'][0]['status'], view['plugins'][0]['installed']['origin']), ('update', 'bundled'))
@@ -216,6 +219,31 @@ class MarketTests(unittest.TestCase):
         self.assertEqual(status, 200, out)
         self.assertEqual(out['plugin']['dir'], plugins.shown(str(self.dir / 'tool')))
         self.assertEqual(out['market']['plugins'][0]['status'], 'installed')
+        # Shadowing the shipped copy must not produce a duplicate-plugin error card
+        listed = manager.list()['plugins']
+        self.assertEqual([(p['id'], p['state']) for p in listed], [('tool', 'disabled')])
+
+        # Also check overriding while the bundled copy is currently active: keep active until restart, no duplicate
+        call(app, 'DELETE', '/api/plugins/tool')
+        manager.set_enabled('tool', True)
+        manager, app = self.start()
+        self.assertEqual(manager.get('tool').active, True)
+        status, out = call(app, 'POST', '/api/plugins/market/tool/install')
+        self.assertEqual(status, 200, out)
+        self.assertEqual([(p['id'], p['state']) for p in manager.list()['plugins']], [('tool', 'active')])
+        self.assertEqual((out['plugin']['restart_needed'], out['plugin']['pending_version']), (True, '0.2.0'))
+        self.assertEqual((out['market']['plugins'][0]['status'], out['market']['plugins'][0]['installed']['origin']),
+                         ('installed', 'market'))
+
+        # After restart the market version runs; uninstalling falls back to bundled without duplicate
+        manager, app = self.start()
+        self.assertEqual(manager.get('tool').manifest['version'], '0.2.0')
+        status, out = call(app, 'DELETE', '/api/plugins/tool')
+        self.assertEqual(status, 200, out)
+        self.assertEqual([(p['id'], p['state']) for p in manager.list()['plugins']], [('tool', 'active')])
+        self.assertEqual((out['plugin']['restart_needed'], out['plugin']['pending_version']), (True, '0.1.0'))
+        self.assertEqual((out['market']['plugins'][0]['status'], out['market']['plugins'][0]['installed']['origin']),
+                         ('update', 'bundled'))
 
     def test_update_keeps_enabled_flag_and_settings_and_needs_a_restart(self):
         backend = 'def setup(ctx):\n    pass\n'

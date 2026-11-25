@@ -7,7 +7,7 @@ import { computed } from 'vue'
 import {
   ElAlert, ElButton, ElCheckbox, ElDialog, ElDivider, ElDrawer, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput,
   ElInputNumber, ElLink, ElMessage, ElMessageBox, ElOption, ElPopconfirm, ElProgress, ElRadio, ElRadioButton,
-  ElRadioGroup, ElScrollbar, ElSelect, ElSwitch, ElTable, ElTableColumn, ElTag, ElTooltip,
+  ElRadioGroup, ElScrollbar, ElSelect, ElSlider, ElSwitch, ElTable, ElTableColumn, ElTag, ElTooltip,
 } from 'element-plus'
 // Explicit imports do not get their styles from unplugin-vue-components: import them here (deduplicated by Vite)
 import 'element-plus/es/components/alert/style/css'
@@ -31,6 +31,7 @@ import 'element-plus/es/components/radio-button/style/css'
 import 'element-plus/es/components/radio-group/style/css'
 import 'element-plus/es/components/scrollbar/style/css'
 import 'element-plus/es/components/select/style/css'
+import 'element-plus/es/components/slider/style/css'
 import 'element-plus/es/components/switch/style/css'
 import 'element-plus/es/components/table/style/css'
 import 'element-plus/es/components/table-column/style/css'
@@ -43,6 +44,7 @@ import { request } from '@/http'
 import { i18n, pick } from '@/i18n'
 import { errorText } from '@/messages'
 import { ApiError } from '@/api'
+import { effectiveBase, isDark, setTheme, theme, themeChoices } from '@/theme'
 import type { CodedMsg } from '@/types'
 import { register, setMessageMerger } from './host'
 
@@ -56,7 +58,7 @@ function buildSdk() {
       GlassPanel, KpiTile, InfoTip,
       ElAlert, ElButton, ElCheckbox, ElDialog, ElDivider, ElDrawer, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput,
       ElInputNumber, ElLink, ElOption, ElPopconfirm, ElProgress, ElRadio, ElRadioButton, ElRadioGroup, ElScrollbar,
-      ElSelect, ElSwitch, ElTable, ElTableColumn, ElTag, ElTooltip, ElMessage, ElMessageBox,
+      ElSelect, ElSlider, ElSwitch, ElTable, ElTableColumn, ElTag, ElTooltip, ElMessage, ElMessageBox,
     }),
     /** JSON request with the console's timeouts; errors are ApiError, turn them into text with errorText().
      *  options.timeout (ms) overrides the default timeout, e.g. for slow saves */
@@ -74,6 +76,13 @@ function buildSdk() {
       useT: (id: string) => (key: string, params: Record<string, unknown> = {}) => i18n.global.t(`plugins.${id}.${key}`, params),
       pick,
       locale: computed(() => i18n.global.locale.value),
+    }),
+    theme: Object.freeze({
+      current: computed(() => theme.value),
+      base: effectiveBase,
+      isDark,
+      choices: themeChoices,
+      set: (next: string, origin?: { x: number; y: number }) => setTheme(next, origin),
     }),
     register,
   })

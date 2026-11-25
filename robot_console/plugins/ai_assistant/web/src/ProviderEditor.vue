@@ -10,6 +10,7 @@ import { COLORS, USER_AGENTS, avatarColor, initial } from './presets'
 import { RC, t } from './sdk'
 import Icon from './Icon.vue'
 import EffortPicker from './EffortPicker.vue'
+import PricePicker from './PricePicker.vue'
 import ModelFetchDialog from './ModelFetchDialog.vue'
 
 const props = defineProps<{ profile: Profile | null; draft: ProfileInput | null; active: boolean }>()
@@ -46,6 +47,7 @@ const modelInputs = ref<HTMLElement | null>(null)
 
 const id = computed(() => props.profile?.id ?? null)
 const isNew = computed(() => !props.profile)
+const managed = computed(() => !!props.profile?.managed)
 
 function fromSource(): ProfileInput {
   const src = props.profile ?? props.draft
@@ -55,6 +57,7 @@ function fromSource(): ProfileInput {
     format: p.format ?? 'openai', base_url: p.base_url ?? '', endpoints: p.endpoints ?? [], full_url: !!p.full_url,
     models: (p.models ?? []).map((m) => ({
       id: m.id, label: m.label === m.id ? '' : m.label, effort: m.effort ?? '', efforts: (m.efforts ?? []) as EffortValue[],
+      price: m.price ?? null,
     })),
     model: p.model ?? '', proxy: p.proxy ?? '', user_agent: p.user_agent ?? '', headers: p.headers ?? {}, body: p.body ?? {},
   }
@@ -106,6 +109,7 @@ const invalid = computed(() => !pf.value.name.trim() || !!headersParsed.value.er
 function toInput(): ProfileInput {
   const models: ModelEntry[] = pf.value.models.map((m) => ({
     id: m.id.trim(), label: m.label.trim() || m.id.trim(), effort: m.effort, efforts: m.efforts ?? [],
+    ...(m.price ? { price: m.price } : {}),
   }))
   return {
     ...pf.value,
@@ -290,19 +294,19 @@ function pickUserAgent(v: string) {
 
     <div class="aip-field">
       <span class="aip-label">{{ t('editor.format') }}</span>
-      <el-radio-group v-model="pf.format" size="small">
+      <el-radio-group v-model="pf.format" size="small" :disabled="managed">
         <el-radio-button value="openai">{{ t('editor.formats.openai') }}</el-radio-button>
         <el-radio-button value="anthropic">{{ t('editor.formats.anthropic') }}</el-radio-button>
       </el-radio-group>
-      <span class="aip-help">{{ t(`editor.formatHelp.${pf.format}`) }}</span>
+      <span class="aip-help">{{ managed ? t('editor.managedNote') : t(`editor.formatHelp.${pf.format}`) }}</span>
     </div>
 
     <div class="aip-field">
       <span class="aip-label">API Key<b v-if="pf.format === 'anthropic'">*</b></span>
       <span class="aip-row">
         <el-input v-model="keyInput" type="password" show-password autocomplete="new-password" :placeholder="keyPlaceholder"
-                  @input="clearKey = false" />
-        <el-button v-if="profile?.key_set" size="small" text :type="clearKey ? 'danger' : 'default'"
+                  :disabled="managed" @input="clearKey = false" />
+        <el-button v-if="profile?.key_set && !managed" size="small" text :type="clearKey ? 'danger' : 'default'"
                    @click="clearKey = !clearKey; keyInput = ''">{{ clearKey ? t('editor.key.undoClear') : t('editor.key.clear') }}</el-button>
       </span>
       <span class="aip-help">{{ clearKey ? t('editor.key.willClear') : t('editor.key.help') }}</span>
@@ -312,11 +316,11 @@ function pickUserAgent(v: string) {
       <span class="aip-label">
         {{ t('editor.baseUrl') }}
         <span class="aip-grow" />
-        <button type="button" class="aip-link" @click="showEndpoints = !showEndpoints">
+        <button v-if="!managed" type="button" class="aip-link" @click="showEndpoints = !showEndpoints">
           <Icon name="bolt" />{{ t('editor.endpoints.toggle') }}
         </button>
       </span>
-      <el-input v-model="pf.base_url" maxlength="500"
+      <el-input v-model="pf.base_url" maxlength="500" :disabled="managed"
                 :placeholder="pf.format === 'anthropic' ? ANTHROPIC_DEFAULT : OPENAI_DEFAULT" />
       <span class="aip-help mono">{{ t('editor.requestUrl') }} {{ requestUrl }}</span>
     </div>
@@ -359,7 +363,7 @@ function pickUserAgent(v: string) {
       <div v-if="pf.models.length" ref="modelInputs" class="aip-models">
         <div class="aip-mrow head">
           <span /><span>{{ t('editor.models.label') }}</span><span>{{ t('editor.models.id') }}</span>
-          <span>{{ t('editor.models.effort') }}</span><span>{{ t('editor.models.default') }}</span><span />
+          <span>{{ t('editor.models.effort') }}</span><span>{{ t('editor.pricing.column') }}</span><span>{{ t('editor.models.default') }}</span><span />
         </div>
         <div v-for="(m, i) in pf.models" :key="i" class="aip-mrow" :class="{ dragging: dragRow === i }"
              @dragover.prevent @drop="onRowDrop(i)">
@@ -367,6 +371,7 @@ function pickUserAgent(v: string) {
           <el-input v-model="m.label" size="small" :placeholder="m.id || t('editor.models.labelPlaceholder')" />
           <el-input v-model="m.id" size="small" class="aip-model-id" :placeholder="t('editor.models.idPlaceholder')" />
           <EffortPicker v-model:efforts="m.efforts" v-model:effort="m.effort" />
+          <PricePicker v-model="m.price" />
           <button type="button" class="aip-radio" :class="{ on: pf.model === m.id && !!m.id }" :aria-pressed="pf.model === m.id"
                   :title="t('editor.models.makeDefault')" :disabled="!m.id" @click="pf.model = m.id" />
           <button type="button" class="aip-ibtn" :title="t('editor.models.remove')" @click="removeModel(i)"><Icon name="trash" /></button>

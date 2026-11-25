@@ -203,7 +203,7 @@ function makeRobot() {
   body.position.z = 0.11
   const edges = new THREE.LineSegments(
     new THREE.EdgesGeometry(body.geometry),
-    new THREE.LineBasicMaterial({ color: 0x0891b2 }),
+    new THREE.LineBasicMaterial({ color: scenePalette.value.robotAccent }),
   )
   edges.position.copy(body.position)
   const chevron = new THREE.Shape()
@@ -212,9 +212,11 @@ function makeRobot() {
   chevron.lineTo(0.02, 0)
   chevron.lineTo(-0.06, -0.13)
   chevron.closePath()
-  const arrow = new THREE.Mesh(new THREE.ShapeGeometry(chevron), new THREE.MeshBasicMaterial({ color: 0x0891b2 }))
+  const arrow = new THREE.Mesh(new THREE.ShapeGeometry(chevron), new THREE.MeshBasicMaterial({ color: scenePalette.value.robotAccent }))
   arrow.position.z = 0.225
   g.add(body, edges, arrow)
+  g.userData.edges = edges
+  g.userData.arrow = arrow
   return g
 }
 
@@ -454,6 +456,10 @@ watch(() => props.status, applyStatus)
 watch(scenePalette, (p) => {
   setCloud(props.cloud)
   if (floor) (floor.material as THREE.MeshBasicMaterial).color.set(p.floorTint)
+  const edges = robot?.userData.edges as THREE.LineSegments | undefined
+  const arrow = robot?.userData.arrow as THREE.Mesh | undefined
+  if (edges) (edges.material as THREE.LineBasicMaterial).color.set(p.robotAccent)
+  if (arrow) (arrow.material as THREE.MeshBasicMaterial).color.set(p.robotAccent)
   renderer.render(scene, props.mode === 'top' ? ortho : camera)
 })
 

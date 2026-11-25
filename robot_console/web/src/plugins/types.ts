@@ -83,6 +83,46 @@ export interface PluginPageDef {
   component: Component
 }
 
+/** A UI theme a plugin registers: appears in the console appearance switcher alongside Light / Dark */
+export interface PluginThemeDef {
+  /** Unique theme id (lowercase letters, digits, underscores or hyphens, 2-40 chars) */
+  id: string
+  label: Bilingual | string
+  /** Built-in base appearance this theme builds on ('light' or 'dark') */
+  base: 'light' | 'dark'
+  /** Browser theme-color meta tag value */
+  pageColor?: string
+  /** CSS custom properties (--*) applied to :root when this theme is active */
+  tokens?: Record<string, string>
+  /** Optional partial overrides for 2D/3D canvas and WebGL scene palettes */
+  scene?: {
+    ramp?: [[number, number, number], [number, number, number], [number, number, number], [number, number, number]]
+    gridMajor?: number
+    gridMinor?: number
+    estLine?: number
+    scanPoint?: number
+    robotAccent?: string
+    robotRing?: number
+    floorTint?: number
+    mapShade?: string | null
+    canvasBg?: string
+    canvasEdge?: string
+  }
+  /** Optional partial overrides for ECharts evaluation palettes */
+  charts?: {
+    series?: string[]
+    axis?: Partial<{
+      line: string
+      split: string
+      label: string
+      ink: string
+      tipBg: string
+      tipInk: string
+      paper: string
+    }>
+  }
+}
+
 /** What a plugin script passes to window.RobotConsole.register() (plugin interface v1, docs/plugins.md) */
 export interface PluginDef {
   id: string
@@ -90,6 +130,8 @@ export interface PluginDef {
   pages?: PluginPageDef[]
   /** components shown in the page header, before the background-task button */
   header?: Component[]
+  /** UI themes (appearance modes) contributed by this plugin */
+  themes?: PluginThemeDef[]
 }
 
 /** Plugin market (robot_console/plugin_market.py): one plugin of the index and what is installed under its id */

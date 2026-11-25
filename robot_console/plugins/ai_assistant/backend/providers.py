@@ -32,6 +32,20 @@ class ProviderError(Exception):
         self.params = params
 
 
+TOKEN_FIELDS = ('input', 'output', 'cache_read', 'cache_write', 'reasoning')
+
+
+def _count(value):
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def tokens(usage=None):
+    return {k: _count((usage or {}).get(k)) for k in TOKEN_FIELDS}
+
+
 class Reply:
     """One model response. stop: end | tool | max_tokens | refusal | pause."""
 
@@ -40,7 +54,7 @@ class Reply:
         self.tool_calls = tool_calls        # [{'id', 'name', 'input'}]
         self.stop = stop
         self.raw = raw                      # provider-native assistant message content
-        self.usage = usage or {}
+        self.usage = tokens(usage)
         self.model = model
         self.detail = detail                # e.g. the refusal category
 
@@ -187,9 +201,18 @@ class OpenAIProvider:
             raw['tool_calls'] = msg['tool_calls']
         if msg.get('reasoning_content'):
             raw['reasoning_content'] = msg['reasoning_content']   # DeepSeek & co. want it back within a turn
-        usage = data.get('usage') or {}
+        usage = data['usage'] if isinstance(data.get('usage'), dict) else {}
+        prompt = usage.get('prompt_tokens_details')
+        completion = usage.get('completion_tokens_details')
+        cached = _count(prompt.get('cached_tokens')) if isinstance(prompt, dict) else 0
+        # Claude behind an OpenAI-compatible gateway (e.g. CPA): prompt_tokens includes cache writes too
+        written = (_count(prompt.get('cache_write_tokens') or prompt.get('cached_creation_tokens')
+                          or prompt.get('cache_creation_tokens')) if isinstance(prompt, dict) else 0)
+        reasoning = completion.get('reasoning_tokens') if isinstance(completion, dict) else 0
         return Reply(msg.get('content') or '', calls, stop, raw,
-                     {'input': usage.get('prompt_tokens'), 'output': usage.get('completion_tokens')},
+                     {'input': max(0, _count(usage.get('prompt_tokens')) - cached - written),
+                      'output': usage.get('completion_tokens'),
+                      'cache_read': cached, 'cache_write': written, 'reasoning': reasoning},
                      data.get('model') or self.model)
 
 
@@ -284,7 +307,8 @@ class AnthropicProvider:
         usage = response.usage
         return Reply('\n\n'.join(t for t in texts if t), calls, stop, [b.to_dict() for b in response.content],
                      {'input': getattr(usage, 'input_tokens', None), 'output': getattr(usage, 'output_tokens', None),
-                      'cache_read': getattr(usage, 'cache_read_input_tokens', None)},
+                      'cache_read': getattr(usage, 'cache_read_input_tokens', None),
+                      'cache_write': getattr(usage, 'cache_creation_input_tokens', None)},
                      response.model, detail)
 
 
@@ -406,9 +430,25 @@ def ping_all(settings, urls):
         return list(pool.map(lambda u: ping(settings, u), urls))
 
 
-def check(settings):
+def measured_call(provider, system, turns, defs, choice, number, on_round):
+    """Measure just the provider call, even when the provider rejects it."""
+    start = time.monotonic()
+    try:
+        reply = provider.complete(system, turns, defs, choice)
+    except ProviderError as e:
+        if on_round:
+            on_round({'round': number, 'model': provider.model, 'status': 'error', 'error': e.code,
+                      'ms': round((time.monotonic() - start) * 1000), **tokens()})
+        raise
+    if on_round:
+        on_round({'round': number, 'model': reply.model or provider.model, 'status': 'ok', 'error': None,
+                  'ms': round((time.monotonic() - start) * 1000), **reply.usage})
+    return reply
+
+
+def check(provider, on_round=None):
     """A one-line round trip without tools: (model, seconds, reply text)."""
-    provider = make_provider(settings)
-    t0 = time.monotonic()
-    reply = provider.complete('Reply with the single word OK.', [{'role': 'user', 'text': 'Connection test.'}], [])
-    return reply.model or getattr(provider, 'model', ''), round(time.monotonic() - t0, 2), _short(reply.text, 80)
+    start = time.monotonic()
+    reply = measured_call(provider, 'Reply with the single word OK.', [{'role': 'user', 'text': 'Connection test.'}],
+                          [], 'auto', 1, on_round)
+    return reply.model or provider.model, round(time.monotonic() - start, 2), _short(reply.text, 80)

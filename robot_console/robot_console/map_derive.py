@@ -44,6 +44,7 @@ from .map_regrid import auto_params, run_worker
 
 MIB = 1024 * 1024
 MAX_REQUEST = 600 * MIB
+MAX_DERIVED_XYZ_POINTS = 20_000_000  # Packed binary XYZ from map tools; keep import limits unchanged.
 MAX_CELLS = 25_000_000
 GRID_MODES = ('keep', 'replace', 'regrid')
 VOXEL = 0.1                    # m, map_voxel.pcd (the Maps page preview), as when a map is saved
@@ -73,7 +74,7 @@ def voxel_points(xyz, size=VOXEL):
 
 def cloud_points(path):
     try:
-        return read_cloud(path)
+        return read_cloud(path, max_binary_xyz_points=MAX_DERIVED_XYZ_POINTS)
     except MapImportError as e:
         raise failed(e.params.get('reason') or e.code)
 
@@ -167,15 +168,18 @@ class MapDeriver:
                    'cloud': 'replaced' if cloud_file is not None else 'kept', 'grid': grid_mode}
         meta = dict(meta)
         files = {}
+        extent_xy = None
         # --- cloud
         if cloud_file is not None:
             xyz = cloud_points(cloud_file)
-            write_xyz_pcd(stage / 'map.pcd', xyz.astype(np.float32))
+            write_xyz_pcd(stage / 'map.pcd', xyz)
             preview = voxel_points(xyz)
-            write_xyz_pcd(stage / 'map_voxel.pcd', preview.astype(np.float32))
+            write_xyz_pcd(stage / 'map_voxel.pcd', preview)
             lo, hi = xyz.min(axis=0), xyz.max(axis=0)
+            extent_xy = tuple(float(v) for v in (hi - lo)[:2])
             meta.update(points=int(len(xyz)), voxels=int(len(preview)), voxel_size=VOXEL,
                         extent=[round(float(v), 2) for v in (*lo, *hi)])
+            del xyz, preview
             files.update({'map.pcd': f'Point cloud from {tool}', 'map_voxel.pcd': '0.1 m voxel preview'})
         else:
             for filename in ('map.pcd', 'map_voxel.pcd'):
@@ -224,8 +228,11 @@ class MapDeriver:
             params = dict(old['params']) if old and isinstance(old.get('params'), dict) and \
                 old.get('method', 'cloud') != 'scans' and 'res' in old['params'] else None
             if params is None:
-                xyz = cloud_points(cloud)
-                params = auto_params((float(np.ptp(xyz[:, 0])), float(np.ptp(xyz[:, 1]))))
+                if extent_xy is None:
+                    xyz = cloud_points(cloud)
+                    extent_xy = (float(np.ptp(xyz[:, 0])), float(np.ptp(xyz[:, 1])))
+                    del xyz
+                params = auto_params(extent_xy)
             work = stage / '.grid'
             work.mkdir()
             try:

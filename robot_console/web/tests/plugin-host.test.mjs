@@ -24,8 +24,13 @@ function loadHost(scripts = {}) {
     },
   }
   const window = { setTimeout, clearTimeout }
-  const host = loadSource('../src/plugins/host.ts', { vue }, { document, window })
-  return { host, head }
+  const customThemes = vue.ref([])
+  const themeMock = {
+    customThemes,
+    registerPluginThemes: (defs) => { customThemes.value = [...customThemes.value, ...defs] },
+  }
+  const host = loadSource('../src/plugins/host.ts', { vue, '@/theme': themeMock }, { document, window })
+  return { host, head, customThemes }
 }
 
 const active = (id, frontend = { script: `/ext/${id}/plugin.js`, style: null }) =>
@@ -89,4 +94,35 @@ test('header components are registered, checked, and removed when they crash', a
   host.reportCrash('a', 'render failed')
   assert.deepEqual(plain(host.registry.header), [])
   assert.deepEqual(plain(host.registry.issues.a), { code: 'crashed', params: { error: 'render failed' } })
+})
+
+test('UI extension themes are registered, validated, and rejected on invalid definitions', async () => {
+  const { host, customThemes } = loadHost({
+    '/ext/ui_ext/plugin.js': (h) => h.register({
+      id: 'ui_ext',
+      themes: [{
+        id: 'eye_care',
+        label: { zh: '护眼', en: 'Eye Care' },
+        base: 'light',
+        pageColor: '#efe6d1',
+        tokens: { '--accent': '#a16207' },
+        scene: { estLine: 0x9a5b13 },
+        charts: { series: ['#9a5b13'] },
+      }],
+    }),
+    '/ext/bad_theme/plugin.js': (h) => h.register({
+      id: 'bad_theme',
+      themes: [{ id: 'dark', label: 'Dark', base: 'dark' }],
+    }),
+    '/ext/bad_tok/plugin.js': (h) => h.register({
+      id: 'bad_tok',
+      themes: [{ id: 'custom_x', label: 'X', base: 'light', tokens: { color: 'red' } }],
+    }),
+  })
+  await host.loadPluginFrontends([active('ui_ext'), active('bad_theme'), active('bad_tok')])
+  assert.equal(customThemes.value.length, 1)
+  assert.equal(customThemes.value[0].id, 'eye_care')
+  assert.equal(customThemes.value[0].pluginId, 'ui_ext')
+  assert.equal(host.registry.issues.bad_theme.code, 'register_invalid')
+  assert.equal(host.registry.issues.bad_tok.code, 'register_invalid')
 })

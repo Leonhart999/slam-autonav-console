@@ -340,7 +340,7 @@ onMounted(loadMaps)
   overflow: auto;
   border: 1px solid var(--hairline);
   border-radius: 8px;
-  background: #cdcdcd;
+  background: var(--canvas-bg);
 }
 .gs-image img {
   display: block;

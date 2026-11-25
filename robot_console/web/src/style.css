@@ -322,6 +322,14 @@ body::after {
   --el-button-disabled-bg-color: rgba(var(--paper-rgb), 0.45);
 }
 
+/* Element Plus' default warning text (#e6a23c) on its pale amber alert fill is only ~2.0:1 in the light look;
+   raise it globally so both console views and plugin PythonGate alerts meet contrast guidelines. */
+.el-alert--warning.is-light .el-alert__title,
+.el-alert--warning.is-light .el-alert__icon,
+.el-alert--warning.is-light .el-alert__description {
+  color: color-mix(in srgb, var(--warn) 70%, var(--ink));
+}
+
 .el-overlay {
   background-color: var(--overlay);
   backdrop-filter: blur(2px);

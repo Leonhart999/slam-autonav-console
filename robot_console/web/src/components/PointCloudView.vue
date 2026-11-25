@@ -164,7 +164,7 @@ function makeRobot() {
   const body = new THREE.Mesh(new THREE.ShapeGeometry(bodyShape), new THREE.MeshBasicMaterial({ color: 0xffffff }))
   const edge = new THREE.LineLoop(
     new THREE.BufferGeometry().setFromPoints(bodyShape.getPoints(6)),
-    new THREE.LineBasicMaterial({ color: 0x0891b2 }),
+    new THREE.LineBasicMaterial({ color: scenePalette.value.robotAccent }),
   )
   const chevron = new THREE.Shape()
   chevron.moveTo(0.22, 0)
@@ -172,15 +172,15 @@ function makeRobot() {
   chevron.lineTo(0.02, 0)
   chevron.lineTo(-0.06, -0.13)
   chevron.closePath()
-  const arrow = new THREE.Mesh(new THREE.ShapeGeometry(chevron), new THREE.MeshBasicMaterial({ color: 0x0891b2 }))
+  const arrow = new THREE.Mesh(new THREE.ShapeGeometry(chevron), new THREE.MeshBasicMaterial({ color: scenePalette.value.robotAccent }))
   arrow.position.z = 0.003
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(0.94, 1.0, 72),
-    new THREE.MeshBasicMaterial({ color: 0x06b6d4, transparent: true, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ color: scenePalette.value.robotRing, transparent: true, depthWrite: false }),
   )
   group.add(ring, body, edge, arrow)
   group.renderOrder = 10
-  return { group, ring }
+  return { group, ring, edge, arrow }
 }
 
 // ---------------- 场景 ----------------
@@ -373,7 +373,7 @@ onMounted(() => {
 
   const s = props.stream
   mapSync = { obj: makePoints(false, 0), buf: s.map, version: -1, resets: -1, data: null, uploaded: 0 }
-  scanSync = { obj: makePoints(true, 0x00b4d8), buf: s.scan, version: -1, resets: -1, data: null, uploaded: 0 }
+  scanSync = { obj: makePoints(true, scenePalette.value.scanPoint), buf: s.scan, version: -1, resets: -1, data: null, uploaded: 0 }
   scanSync.obj.renderOrder = 2
   estSync = { obj: makeLine(scenePalette.value.estLine, false), buf: s.est, version: -1 }
   gtSync = { obj: makeLine(0x8a97ad, true), buf: s.gt, version: -1 }
@@ -398,7 +398,11 @@ watch(() => props.mode, applyMode)
 watch(scenePalette, (p) => {
   const ramp = (mapSync.obj.material as THREE.ShaderMaterial).uniforms.uRamp.value as THREE.Vector3[]
   p.ramp.forEach((c, i) => ramp[i].set(...c))
+  ;((scanSync.obj.material as THREE.ShaderMaterial).uniforms.uColor.value as THREE.Color).set(p.scanPoint)
   ;(estSync.obj.material as LineMaterial).color.set(p.estLine)
+  ;(robot.edge.material as THREE.LineBasicMaterial).color.set(p.robotAccent)
+  ;(robot.arrow.material as THREE.MeshBasicMaterial).color.set(p.robotAccent)
+  ;(robot.ring.material as THREE.MeshBasicMaterial).color.set(p.robotRing)
   gridKey = ''
   updateGrid()
   if (grid) grid.visible = props.layers.grid

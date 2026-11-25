@@ -6,7 +6,9 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElButton, ElInput, ElTooltip } from 'element-plus'
 import { renderMarkdown } from './markdown'
 import { ACCESS_LEVELS, ChatError, confirmCall, getSession, getStatus, streamChat, testConnection, type Access,
-  type ChatEvent, type Item, type Status } from './api'
+  type ChatEvent, type Item, type Status, type Tokens } from './api'
+import { compact } from './format'
+import HistoryPane from './HistoryPane.vue'
 import { RC, codeText, t } from './sdk'
 import { DRAG_SPRING, createSpring } from './spring'
 import { finishReveal, vReveal } from './reveal'
@@ -21,6 +23,8 @@ const OFFSET_STORE = 'robot_console.ai_assistant.offset'
 const GEOMETRY_STORE = 'robot_console.ai_assistant.geometry'
 const LIKES_STORE = 'robot_console.ai_assistant.likes'
 const ACCESS_STORE = 'robot_console.ai_assistant.access'
+const DOCK_STORE = 'robot_console.ai_assistant.history.docked'
+const DOCK_WIDTH = 720
 const SUGGESTIONS = ['latest', 'batch', 'zdrift', 'params', 'status', 'runBatch']
 
 const open = ref(false)
@@ -29,6 +33,7 @@ const statusError = ref('')
 const items = ref<Item[]>([])
 const input = ref('')
 const busy = ref(false)
+const switching = ref(false)
 const busyText = ref('')
 const usage = ref('')
 const testing = ref(false)
@@ -39,6 +44,9 @@ const expanded = ref<Set<string>>(new Set())
 const startedAt = ref(0)
 const now = ref(0)
 let controller: AbortController | null = null
+let loadController: AbortController | null = null
+let loadSeq = 0
+let sessionEpoch = 0
 let loaded = false
 let ticker = 0
 // set when a new answer is taller than the list: keep its first line in view instead of jumping to the bottom
@@ -75,12 +83,123 @@ async function refreshStatus() {
 async function restore() {
   if (loaded || !sessionId.value) return
   loaded = true
+  await loadSession(sessionId.value, true)
+}
+
+/** Show a stored conversation (from the history list, the usage page or the last one of this browser) */
+async function loadSession(id: string, quiet = false) {
+  loadController?.abort()
+  const ac = loadController = new AbortController()
+  const seq = ++loadSeq
+  switching.value = true
   try {
-    items.value = (await getSession(sessionId.value)).items
-  } catch {
-    sessionId.value = ''
-    localStorage.removeItem(STORE)
+    const s = await getSession(id, ac.signal)
+    if (seq !== loadSeq || ac.signal.aborted) return false
+    sessionEpoch++
+    items.value = s.items
+    sessionId.value = s.id
+    const u = s.usage
+    usage.value = u && (u.input || u.output || u.cache_read || u.cache_write) ? sessionUsageText(u) : ''
+    holdScroll = false
+    expanded.value = new Set()
+    scrollDown()
+    return true
+  } catch (e) {
+    if (seq !== loadSeq || ac.signal.aborted) return false
+    if (id === sessionId.value) {
+      sessionId.value = ''
+      localStorage.removeItem(STORE)
+    }
+    if (!quiet) onMenuError(RC().errorText(e))
+    return false
+  } finally {
+    if (seq === loadSeq) {
+      switching.value = false
+      if (loadController === ac) loadController = null
+    }
   }
+}
+
+function sessionUsageText(u: Partial<Tokens>) {
+  return t('sessionUsage', {
+    input: compact(u.input), output: compact(u.output), cache: compact((u.cache_read || 0) + (u.cache_write || 0)),
+  })
+}
+
+/** "in 1.2k · out 860 · cache 900" under an answer; cache parts only when present */
+function tokenText(u: Tokens) {
+  const parts = [t('turn.in', { n: compact(u.input) }), t('turn.out', { n: compact(u.output) })]
+  if (u.cache_read) parts.push(t('turn.cache', { n: compact(u.cache_read) }))
+  if (u.cache_write) parts.push(t('turn.cacheWrite', { n: compact(u.cache_write) }))
+  return parts.join(' · ')
+}
+
+// ---- history: an overlay on narrow panels, a docked column on wide ones ----
+const historyOpen = ref(false)
+const panelWidth = ref(0)
+const dockPref = ref(localStorage.getItem(DOCK_STORE) === '1')
+const wide = computed(() => panelWidth.value >= DOCK_WIDTH)
+const docked = computed(() => wide.value && dockPref.value)
+const showHistory = computed(() => docked.value || historyOpen.value)
+const historyReload = ref(0)
+const pendingOpen = ref<string | null>(null)       // conversation to open once the running answer is stopped
+
+function toggleHistory() {
+  if (wide.value) {
+    dockPref.value = !dockPref.value
+    localStorage.setItem(DOCK_STORE, dockPref.value ? '1' : '0')
+    historyOpen.value = false
+  } else {
+    historyOpen.value = !historyOpen.value
+  }
+}
+
+async function openFromHistory(id: string) {
+  if (id === sessionId.value && items.value.length) {
+    // back to the conversation already on screen: a switch to another one still loading is cancelled, so the last
+    // click wins (A, then B, then A again stays on A)
+    if (switching.value) {
+      loadController?.abort()
+      loadController = null
+      loadSeq++
+      switching.value = false
+    }
+    if (!docked.value) historyOpen.value = false
+    return
+  }
+  if (busy.value) {
+    pendingOpen.value = id
+    return
+  }
+  if (await loadSession(id) && !docked.value) historyOpen.value = false
+}
+
+async function stopAndOpen() {
+  const id = pendingOpen.value
+  if (!id) return
+  stop()
+  // wait until the stream has ended (the server releases the conversation with it)
+  for (let i = 0; i < 100 && busy.value; i++) await new Promise((r) => window.setTimeout(r, 50))
+  pendingOpen.value = null
+  if (await loadSession(id) && !docked.value) historyOpen.value = false
+}
+
+function onHistoryNew() {
+  newChat()
+  if (!docked.value) historyOpen.value = false
+}
+
+function onHistoryDeleted(id: string) {
+  if (id === sessionId.value) newChat()
+}
+
+/** Another page (the usage page) asks to show a conversation */
+function onOpenSession(e: Event) {
+  const id = (e as CustomEvent<string>).detail
+  if (typeof id !== 'string' || !id) return
+  open.value = true
+  loaded = true
+  void openFromHistory(id)
 }
 
 watch(open, async (o) => {
@@ -88,6 +207,7 @@ watch(open, async (o) => {
   await Promise.all([refreshStatus(), restore()])
   scrollDown()
 })
+watch(busy, (b) => { if (!b) historyReload.value++ })
 watch(sessionId, (id) => (id ? localStorage.setItem(STORE, id) : localStorage.removeItem(STORE)))
 
 function scrollDown() {
@@ -113,6 +233,12 @@ function showAnswer() {
 
 function newChat() {
   if (busy.value) return
+  loadController?.abort()
+  loadController = null
+  loadSeq++
+  switching.value = false
+  sessionEpoch++
+  pendingOpen.value = null
   items.value = []
   usage.value = ''
   sessionId.value = ''
@@ -161,6 +287,7 @@ function toolItem(id: string) {
   return null
 }
 let lastRound = 1
+let turnTokens: Tokens | null = null
 
 // ---- run tools waiting for the user's approval (access "ask") ----
 const answering = ref<Set<string>>(new Set())
@@ -229,9 +356,22 @@ function onEvent(e: ChatEvent) {
       if (busy.value) busyText.value = t('thinking', { round: lastRound })
       break
     }
-    case 'done':
-      usage.value = t('usage', { model: e.model, input: e.usage.input ?? '?', output: e.usage.output ?? '?', rounds: e.rounds })
+    case 'usage': {
+      const u = e.usage
+      const prev = turnTokens ?? { input: 0, output: 0, cache_read: 0, cache_write: 0, reasoning: 0 }
+      turnTokens = {
+        input: prev.input + (u.input || 0), output: prev.output + (u.output || 0), cache_read: prev.cache_read + (u.cache_read || 0),
+        cache_write: prev.cache_write + (u.cache_write || 0), reasoning: prev.reasoning + (u.reasoning || 0),
+      }
       break
+    }
+    case 'done': {
+      usage.value = t('turnUsage', { model: e.model, input: compact(e.usage.input), output: compact(e.usage.output), rounds: e.rounds })
+      // the final answer shows the sums of the whole turn
+      const last = [...items.value].reverse().find((x) => x.kind === 'assistant')
+      if (last && last.kind === 'assistant' && last.final) last.tokens = { ...(turnTokens ?? {}), ...e.usage } as Tokens
+      break
+    }
     case 'error':
       items.value.push({ kind: 'note', text: e.code === 'cancelled' ? t('stopped') : codeText(e.code, e.params), tone: e.code === 'cancelled' ? 'info' : 'error' })
       break
@@ -241,11 +381,13 @@ function onEvent(e: ChatEvent) {
 
 async function send(text?: string) {
   const message = (text ?? input.value).trim()
-  if (!message || busy.value) return
+  if (!message || busy.value || switching.value) return
+  const epoch = sessionEpoch
   input.value = ''
   usage.value = ''
   holdScroll = false
   items.value.push({ kind: 'user', text: message })
+  turnTokens = null
   busy.value = true
   busyText.value = t('thinking', { round: 1 })
   startedAt.value = now.value = Date.now()
@@ -254,17 +396,21 @@ async function send(text?: string) {
   scrollDown()
   try {
     await streamChat({ message, session: sessionId.value || undefined, page: location.hash.replace(/^#/, ''),
-      access: access.value }, onEvent, controller.signal)
+      access: access.value }, (e) => { if (epoch === sessionEpoch) onEvent(e) }, controller.signal)
   } catch (e) {
-    const err = e instanceof ChatError ? e : new ChatError('unknown', { reason: String(e) })
-    onEvent({ type: 'error', code: err.code, params: err.params })
-    if (err.code !== 'cancelled') void refreshStatus()
+    if (epoch === sessionEpoch) {
+      const err = e instanceof ChatError ? e : new ChatError('unknown', { reason: String(e) })
+      onEvent({ type: 'error', code: err.code, params: err.params })
+      if (err.code !== 'cancelled') void refreshStatus()
+    }
   } finally {
-    for (const it of items.value) if (it.kind === 'tool' && it.decision === 'pending') it.decision = 'cancelled'
+    if (epoch === sessionEpoch) {
+      for (const it of items.value) if (it.kind === 'tool' && it.decision === 'pending') it.decision = 'cancelled'
+      scrollDown()
+    }
     busy.value = false
     controller = null
     window.clearInterval(ticker)
-    scrollDown()
   }
 }
 
@@ -370,6 +516,7 @@ function applyGeometry() {
   if (geo.h !== null) geo.h = panelH()
   el.style.width = `${geo.w}px`
   el.style.height = `${panelH()}px`
+  panelWidth.value = geo.w
   geo.x = clampX(moveX.target)
   geo.y = clampY(moveY.target)
   moveX.jump(geo.x)
@@ -449,6 +596,7 @@ function onResizeMove(e: PointerEvent) {
   geo.h = top <= SAFE_TOP && bottom >= safeBottom - 0.5 ? null : bottom - top
   el.style.width = `${geo.w}px`
   el.style.height = `${bottom - top}px`
+  panelWidth.value = geo.w
   moveX.jump(geo.x)
   moveY.jump(geo.y)
 }
@@ -466,6 +614,7 @@ function resetSize(dir: Dir) {
   if (dir.includes('e') || dir.includes('w')) geo.w = DEFAULT_W
   if (dir.includes('n') || dir.includes('s')) { geo.h = null; geo.y = SAFE_TOP }
   el.classList.add('aia-gliding')
+  panelWidth.value = panelW()
   el.style.width = `${panelW()}px`
   el.style.height = `${panelH()}px`
   geo.x = clampX(geo.x)
@@ -489,11 +638,13 @@ onMounted(() => {
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('resize', onResize)
   window.addEventListener('aia:providers-changed', onProvidersChanged)
+  window.addEventListener('aia:open-session', onOpenSession)
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('resize', onResize)
   window.removeEventListener('aia:providers-changed', onProvidersChanged)
+  window.removeEventListener('aia:open-session', onOpenSession)
   window.clearInterval(ticker)
   moveX.stop()
   moveY.stop()
@@ -501,6 +652,7 @@ onUnmounted(() => {
 // Ctrl+/ toggles the panel from anywhere
 function onGlobalKey(e: KeyboardEvent) {
   if (e.key === '/' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); open.value = !open.value }
+  else if (e.altKey && e.key.toLowerCase() === 'h' && open.value) { e.preventDefault(); toggleHistory() }
 }
 </script>
 
@@ -521,6 +673,10 @@ function onGlobalKey(e: KeyboardEvent) {
             <span class="aia-tick" />{{ t('title') }}
           </div>
           <span class="aia-grow" />
+          <button type="button" class="aia-ibtn" :class="{ on: showHistory }" :aria-pressed="showHistory"
+                  :aria-label="t('history.title')" :title="`${t('history.title')} (Alt+H)`" @click="toggleHistory">
+            <Icon name="history" />
+          </button>
           <el-button size="small" text :disabled="busy || !items.length" @click="newChat">{{ t('newChat') }}</el-button>
           <button type="button" class="aia-ibtn" :aria-label="t('switcher.manage')" :title="t('switcher.manage')" @click="openSettings">
             <Icon name="gear" />
@@ -530,6 +686,20 @@ function onGlobalKey(e: KeyboardEvent) {
           </button>
         </header>
 
+        <div class="aia-body" :class="{ docked }">
+        <transition name="aia-hist">
+          <HistoryPane
+            v-if="showHistory" :current="sessionId" :busy="busy" :docked="docked" :reload="historyReload"
+            @open="openFromHistory" @new-chat="onHistoryNew" @close="historyOpen = false" @deleted="onHistoryDeleted"
+          />
+        </transition>
+        <div class="aia-main">
+        <div v-if="pendingOpen" class="aia-busybar" role="alert">
+          <span>{{ t('history.busy') }}</span>
+          <span class="aia-grow" />
+          <el-button size="small" @click="pendingOpen = null">{{ t('history.busyCancel') }}</el-button>
+          <el-button size="small" type="warning" @click="stopAndOpen">{{ t('history.busyStop') }}</el-button>
+        </div>
         <div ref="list" class="aia-list">
           <div v-if="statusError" class="aia-note error">{{ statusError }}</div>
           <div v-else-if="status && status.problem" class="aia-setup">
@@ -559,6 +729,7 @@ function onGlobalKey(e: KeyboardEvent) {
               <div v-if="it.final" class="aia-acts">
                 <CopyButton :text="it.text" />
                 <LikeButton :liked="likes.has(likeKey(i))" @toggle="toggleLike(i)" />
+                <span v-if="it.tokens" class="aia-tokens" :title="t('turn.title')">{{ tokenText(it.tokens) }}</span>
               </div>
             </div>
             <div v-else-if="it.kind === 'tool' && it.tool === 'run'" class="aia-run"
@@ -601,7 +772,7 @@ function onGlobalKey(e: KeyboardEvent) {
         <footer class="aia-foot">
           <el-input
             v-model="input" type="textarea" :autosize="{ minRows: 2, maxRows: 7 }" resize="none" :maxlength="8000"
-            :placeholder="t('placeholder')" :disabled="!ready" @keydown="onKey"
+            :placeholder="t('placeholder')" :disabled="!ready || switching" @keydown="onKey"
           />
           <div class="aia-row">
             <ModelMenu :status="status" :busy="busy" :testing="testing" @changed="refreshStatus" @test="test"
@@ -612,9 +783,11 @@ function onGlobalKey(e: KeyboardEvent) {
               <button type="button" class="aia-ibtn aia-privacy" :aria-label="t('privacy', { service })"><Icon name="info" /></button>
             </el-tooltip>
             <el-button v-if="busy" size="small" type="warning" @click="stop">{{ t('stop') }}</el-button>
-            <el-button v-else size="small" type="primary" :disabled="!ready || !input.trim()" @click="send()">{{ t('send') }}</el-button>
+            <el-button v-else size="small" type="primary" :disabled="!ready || switching || !input.trim()" @click="send()">{{ t('send') }}</el-button>
           </div>
         </footer>
+        </div>
+        </div>
       </aside>
       <!-- edges and corners resize the panel; double-click one to get that size's default back -->
       <div v-for="d in RESIZE_DIRS" :key="d" class="aia-rz" :class="[`aia-rz-${d}`, { on: resizing === d }]"
@@ -900,7 +1073,7 @@ function onGlobalKey(e: KeyboardEvent) {
 }
 .aia-run.dec-pending { --aia-run-c: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--aia-l1)); }
 .aia-run.dec-denied, .aia-run.dec-blocked, .aia-run.dec-cancelled { --aia-run-c: var(--ink-3); }
-.aia-run.error:not(.dec-denied):not(.dec-blocked):not(.dec-cancelled) { --aia-run-c: var(--bad, #e5484d); }
+.aia-run.error:not(.dec-denied):not(.dec-blocked):not(.dec-cancelled) { --aia-run-c: var(--bad); }
 .aia-run.ok { --aia-run-c: var(--ok); }
 .aia-run-head { display: flex; align-items: center; gap: 7px; }
 .aia-run-icon { color: var(--aia-run-c, var(--accent)); }
@@ -1013,6 +1186,169 @@ function onGlobalKey(e: KeyboardEvent) {
 }
 .aia-ibtn:hover { background: var(--aia-l2); color: var(--ink); }
 .aia-ibtn:active { background: var(--aia-l3); }
+.aia-ibtn.on { background: var(--aia-l3); color: var(--ink); }
+.aia-ibtn:disabled { opacity: 0.45; cursor: default; background: transparent; }
+
+/* ---- body: history (overlay or docked column) + conversation ---- */
+.aia-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.aia-main { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.aia-busybar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 12px 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: color-mix(in srgb, var(--warn) 9%, var(--aia-l2));
+}
+.aia-busybar .el-button + .el-button { margin-left: 0; }
+
+.aia-hist {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  background: var(--aia-l0);
+}
+.aia-hist.docked {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  flex: none;
+  width: 230px;
+  background: var(--aia-l1);
+}
+.aia-hist-enter-active, .aia-hist-leave-active { transition: opacity 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), translate 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.aia-hist-enter-from, .aia-hist-leave-to { opacity: 0; translate: -16px 0; }
+.aia-hist.docked.aia-hist-enter-from, .aia-hist.docked.aia-hist-leave-to { width: 0; translate: 0 0; }
+.aia-hist-top { flex: none; display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; }
+.aia-hist-search {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: var(--aia-l2);
+  transition: box-shadow 0.15s ease;
+}
+.aia-hist-search:focus-within { box-shadow: 0 0 0 2px var(--aia-l1), 0 0 0 4px rgba(var(--accent-rgb), 0.35); }
+.aia-hist-sicon { color: var(--ink-3); font-size: 13px; }
+.aia-hist-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+.aia-hist-search input::placeholder { color: var(--ink-3); }
+.aia-hist-search input::-webkit-search-cancel-button { display: none; }
+.aia-hist-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px 8px 10px; }
+.aia-hist-group { padding: 12px 8px 4px; font-size: 11px; letter-spacing: 0.04em; color: var(--ink-3); }
+.aia-hist-note { padding: 18px 10px; font-size: 12.5px; color: var(--ink-3); text-wrap: pretty; }
+.aia-hist-note.error { color: var(--bad); }
+.aia-hist-sub { margin-top: 4px; font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
+.aia-hist-retry { border: 0; padding: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.aia-hist-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.aia-hist-item:hover, .aia-hist-item:focus-within { background: var(--aia-l2); }
+.aia-hist-item.on { background: var(--aia-l3); box-shadow: inset 2px 0 0 var(--accent); }
+.aia-hist-item:focus-visible { outline: none; box-shadow: inset 0 0 0 2px rgba(var(--accent-rgb), 0.4); }
+.aia-hist-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.dark .aia-hist-title { font-weight: 560; }
+.aia-hist-pin { flex: none; color: var(--accent); font-size: 11px; }
+.aia-hist-snippet {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.aia-hist-snippet mark { padding: 0 1px; border-radius: 3px; color: inherit; background: rgba(var(--accent-rgb), 0.18); }
+.aia-hist-rename {
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  outline: none;
+  color: var(--ink);
+  background: var(--aia-l0);
+  font: inherit;
+  font-size: 13px;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.35);
+}
+.aia-hist-meta { position: relative; display: flex; align-items: center; gap: 4px; min-height: 20px; }
+.aia-hist-metatext { flex: 1; min-width: 0; font-size: 11.5px; color: var(--ink-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.aia-hist-acts {
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  gap: 1px;
+  padding-left: 14px;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--aia-l2) 14px);
+  transition: opacity 0.12s ease;
+}
+.aia-hist-item.on .aia-hist-acts { background: linear-gradient(to right, transparent, var(--aia-l3) 14px); }
+.aia-hist-item:hover .aia-hist-acts, .aia-hist-item:focus-within .aia-hist-acts, .aia-hist-item.confirming .aia-hist-acts { opacity: 1; pointer-events: auto; }
+.aia-hist-act {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 3px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.aia-hist-act:hover { background: var(--aia-l3); color: var(--ink); }
+.aia-hist-act.del:hover, .aia-hist-act.del.ask { color: var(--bad); }
+.aia-hist-act.del.ask { padding: 0 6px; font-size: 11.5px; background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.aia-hist-act:disabled { opacity: 0.4; cursor: default; }
+.aia-hist-foot { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 12px 10px; font-size: 11px; color: var(--ink-3); }
+.aia-hist-more { border: 0; padding: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.aia-hist-more:hover { text-decoration: underline; }
+.aia-hist-more:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+@media (prefers-reduced-motion: reduce) {
+  .aia-hist-enter-active, .aia-hist-leave-active { transition: none; }
+}
 
 .aia-list {
   position: relative;
@@ -1101,8 +1437,19 @@ function onGlobalKey(e: KeyboardEvent) {
   to { opacity: 1; filter: blur(0); }
 }
 
-.aia-acts { display: flex; gap: 2px; margin: 4px 0 0 -6px; }
+.aia-acts { display: flex; align-items: center; gap: 2px; margin: 4px 0 0 -6px; }
 .aia-acts .aia-ibtn { width: 26px; height: 26px; line-height: 26px; font-size: 14px; }
+/* tokens of the answer: quiet until the pointer is on the answer */
+.aia-tokens {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 11px;
+  color: var(--ink-3);
+  opacity: 0.7;
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
+}
+.aia-answer-wrap:hover .aia-tokens { opacity: 1; }
 /* copy: icon and check mark share one cell and cross-fade */
 .aia-swap { display: inline-grid; vertical-align: -0.125em; }
 .aia-swap > .aia-i { grid-area: 1 / 1; vertical-align: 0; transition: opacity 0.16s ease, scale 0.16s ease; }
@@ -1141,7 +1488,7 @@ function onGlobalKey(e: KeyboardEvent) {
 }
 .aia-tool.running .aia-dot { animation: aia-pulse 1.2s ease-in-out infinite; }
 .aia-tool.ok .aia-dot { background: var(--ok); }
-.aia-tool.error .aia-dot { background: var(--bad, #e5484d); }
+.aia-tool.error .aia-dot { background: var(--bad); }
 .aia-fold {
   display: grid;
   grid-template-rows: 0fr;
@@ -1157,10 +1504,10 @@ function onGlobalKey(e: KeyboardEvent) {
   overflow-wrap: anywhere;
   background: var(--aia-l2);
 }
-.aia-tool-error { margin-top: 4px; color: var(--bad, #e5484d); }
+.aia-tool-error { margin-top: 4px; color: var(--bad); }
 
 .aia-note { font-size: 12px; color: var(--ink-2); }
-.aia-note.error { color: var(--bad, #e5484d); }
+.aia-note.error { color: var(--bad); }
 .aia-setup {
   padding: 12px 14px;
   border-radius: 12px;

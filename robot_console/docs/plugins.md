@@ -178,13 +178,15 @@ same size as the source grid) | `regrid` (pcd2grid on the new cloud), and the fi
 ## Frontend: `window.RobotConsole`
 
 When at least one active plugin has a frontend, the console defines `window.RobotConsole` and loads the plugin
-scripts in order (the style sheet first). A script registers its messages and pages:
+scripts in order (the style sheet first). A script registers its messages, pages, header items, and optional UI
+themes:
 
 ```js
 RobotConsole.register({
   id: 'hello_console',
   messages: { 'zh-CN': { title: '示例', errors: { empty_greeting: '…' } }, en: { title: 'Hello', errors: { … } } },
   pages: [{ path: 'main', title: { zh: '示例插件', en: 'Hello plugin' }, component: HelloPage, icon: undefined }],
+  themes: [{ id: 'eye_care', label: { zh: '护眼防蓝光', en: 'Eye Care' }, base: 'light', tokens: { '--accent': '#a16207' } }],
 })
 ```
 
@@ -192,17 +194,19 @@ RobotConsole.register({
 - `header: [Component, ...]` puts components into the page header, before the *Background tasks* button (the AI
   assistant uses it for its button and floating panel). A header component that throws is hidden and reported on
   the *Plugins* page.
+- `themes: [{ id, label, base, pageColor?, tokens?, scene?, charts? }]` registers UI appearance extensions that appear in the sidebar appearance switcher alongside Light / Dark; `tokens` maps CSS custom properties (`--*`) on `:root`, while `scene` and `charts` override 2D/3D WebGL/canvas and ECharts evaluation palettes.
 - Messages are merged under `plugins.<id>`; avoid `{ } @ | $` in texts (vue-i18n syntax).
 
 | Member | Content |
 |---|---|
 | `apiVersion` | `1` |
 | `vue` | the console's Vue module (`h`, `ref`, `computed`, `defineComponent`, ...). It is the runtime-only build: use render functions or pre-compiled SFCs, not template strings |
-| `ui` | `GlassPanel`, `KpiTile`, `InfoTip` (console components) and Element Plus `ElAlert, ElButton, ElCheckbox, ElDialog, ElDivider, ElDrawer, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput, ElInputNumber, ElLink, ElOption, ElPopconfirm, ElProgress, ElRadio, ElRadioButton, ElRadioGroup, ElScrollbar, ElSelect, ElSwitch, ElTable, ElTableColumn, ElTag, ElTooltip, ElMessage, ElMessageBox` |
+| `ui` | `GlassPanel`, `KpiTile`, `InfoTip` (console components) and Element Plus `ElAlert, ElButton, ElCheckbox, ElDialog, ElDivider, ElDrawer, ElEmpty, ElForm, ElFormItem, ElIcon, ElInput, ElInputNumber, ElLink, ElOption, ElPopconfirm, ElProgress, ElRadio, ElRadioButton, ElRadioGroup, ElScrollbar, ElSelect, ElSlider, ElSwitch, ElTable, ElTableColumn, ElTag, ElTooltip, ElMessage, ElMessageBox` |
 | `request(method, path, body?, signal?, options?)` | JSON request with the console's timeouts and error codes; `options.timeout` (ms) for slow calls |
 | `errorText(error)` | the error as text in the current language (plugin codes use your `errors.*` messages) |
 | `codedText({code, params})` | the same for a coded error object, e.g. the `error` of a failed job |
 | `i18n.useT(id)` | `t(key, params)` for your own messages; `i18n.pick({zh, en})`; `i18n.locale` (computed) |
+| `theme` | `{ current, base, isDark, choices, set(id, origin?) }` to inspect or switch the active appearance (including custom plugin themes) |
 | `register(def)` | see above; the whole definition is checked before anything is applied |
 
 Use the console's CSS variables (`--ink`, `--ink-2`, `--ink-3`, `--accent`, `--accent-grad`, `--hairline`,
@@ -300,11 +304,12 @@ plain language; the model answers by calling tools and the panel shows each tool
 
 ## Shipped plugins
 
-All start disabled: enable them, press **Install packages**, restart the console. Forks of the upstream projects
+All start disabled: enable them, press **Install packages** (for tools with Python dependencies), restart the console. Forks of the upstream projects
 are kept at github.com/Leonhart999 (rosbags, patchwork-plusplus, dufomap).
 
 | Plugin | Package (licence) | What it does |
 |---|---|---|
+| `eye_care_ui` Eye-care anti-blue-light UI | — (MIT) | Registers an Eye Care (`eye_care`) warm-amber anti-blue-light theme in the sidebar appearance switcher, adds a header quick-toggle button, and provides an interactive control page to tune warmth level (1–5), blue-light optical filter strength (0–80%), and soft contrast across all console pages, 2D/3D viewers, and charts. |
 | `bag_convert` Bag converter | rosbags 0.11.9 (Apache-2.0) | ROS1 `.bag` to a ROS2 bag (sqlite3 or MCAP) in the playback upload folder; pick topics; Livox `CustomMsg` (livox_ros_driver / driver2) to `PointCloud2` with x y z intensity time (s after the stamp) ring tag. Lists `.bag` files in the bag folders, the upload folder and the folders of its `search_dirs` setting; uploads go to `<upload folder>/ros1/`. |
 | `ground_seg` Ground segmentation | pypatchworkpp 1.4.1 (BSD-2) | Ground / non-ground labels by Patchwork++, from every raw scan (maps with a scan recording; labels are voted per 5 cm voxel and given to the map cloud's points) or from discs of the map cloud along the mapping trajectory. Rebuilds the 2D grid in the same geometry from each point's height above the local ground (ramps, tilted maps); preview images (grid, changes, labels), ground / non-ground PCDs, save as a new map version. |
 | `dynamic_removal` Dynamic object removal | dufomap 1.1.1 (BSD-3) | DUFOMap over the raw scans of a map (needs *Save raw scans* during playback) labels the map points that lie in space seen as free: points of people and vehicles that moved. Writes the cleaned cloud and saves it as a new map version with the grid projected again (or the old grid kept). |

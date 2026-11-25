@@ -20,6 +20,12 @@ const TOOL_COLOR = { pose: '#7c3aed', goal: '#16a34a', waypoint: '#0891b2' } as 
 const WAYPOINT_COLOR: Record<WaypointMark['kind'], string> = {
   draft: '#0891b2', waiting: '#64748b', active: '#16a34a', ok: '#16a34a', fail: '#e11d48',
 }
+function waypointColor(kind: WaypointMark['kind']) {
+  return kind === 'draft' ? scenePalette.value.robotAccent : WAYPOINT_COLOR[kind]
+}
+function toolColor(tool: Exclude<MapTool, 'pan'>) {
+  return tool === 'waypoint' ? scenePalette.value.robotAccent : TOOL_COLOR[tool]
+}
 // Pose being placed with the mouse (press = position, drag = heading)
 let placing: { tool: Exclude<MapTool, 'pan'>; x: number; y: number; yaw: number } | null = null
 
@@ -129,7 +135,7 @@ function draw() {
     ctx.fillStyle = '#ffffff'
     ctx.fill()
     ctx.lineWidth = 2 / (view.scale * k)
-    ctx.strokeStyle = '#0891b2'
+    ctx.strokeStyle = scenePalette.value.robotAccent
     ctx.stroke()
     ctx.beginPath()
     ctx.moveTo(0.22, 0)
@@ -137,7 +143,7 @@ function draw() {
     ctx.lineTo(0.02, 0)
     ctx.lineTo(-0.06, -0.13)
     ctx.closePath()
-    ctx.fillStyle = '#0891b2'
+    ctx.fillStyle = scenePalette.value.robotAccent
     ctx.fill()
     ctx.restore()
   }
@@ -152,7 +158,7 @@ function draw() {
   if (g && (g.state === 'pending' || g.state === 'active' || g.state === 'canceling')) {
     arrow(ctx, g.x, g.y, g.yaw, TOOL_COLOR.goal, g.state === 'canceling')
   }
-  if (placing) arrow(ctx, placing.x, placing.y, placing.yaw, TOOL_COLOR[placing.tool], false)
+  if (placing) arrow(ctx, placing.x, placing.y, placing.yaw, toolColor(placing.tool), false)
 }
 
 function layer(ctx: CanvasRenderingContext2D, c: CostmapLayer | null, alpha: number) {
@@ -171,7 +177,7 @@ function layer(ctx: CanvasRenderingContext2D, c: CostmapLayer | null, alpha: num
 /** Numbered waypoint: disc with the number and a short heading tick (constant size on screen) */
 function waypoint(ctx: CanvasRenderingContext2D, p: WaypointMark, n: number) {
   const u = 1 / view.scale
-  const color = WAYPOINT_COLOR[p.kind]
+  const color = waypointColor(p.kind)
   const hollow = p.kind === 'draft' || p.kind === 'waiting'
   ctx.save()
   ctx.translate(p.x, p.y)

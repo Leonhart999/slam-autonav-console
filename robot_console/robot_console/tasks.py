@@ -171,11 +171,11 @@ class Tasks:
             except OSError:
                 LOG.warning('Cannot delete old task record %s', job['id'], exc_info=True)
 
-    def mark_saved_preview(self, token, name):
-        """Keep the recovery entry useful after saving consumes the disposable preview."""
+    def mark_saved_preview(self, token, name, kind='regrid'):
+        """Keep the recovery entry useful after saving consumes the disposable preview (regrid or loop result)."""
         with self._lock:
             for job in self._jobs.values():
-                if job['kind'] != 'regrid' or job['state'] != 'succeeded':
+                if job['kind'] != kind or job['state'] != 'succeeded':
                     continue
                 try:
                     if self._view(job, result=True)['result'].get('token') == token:

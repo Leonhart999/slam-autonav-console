@@ -177,7 +177,7 @@ function drawNow() {
   ctx.strokeRect(view.x - 0.5, view.y - 0.5, g.width * view.s + 1, g.height * view.s + 1)
   if (hover && mode.value !== 'pan' && !panning) {
     const r = brushRange(hover.cx, hover.cy)
-    ctx.strokeStyle = '#0891b2'
+    ctx.strokeStyle = scenePalette.value.robotAccent
     ctx.lineWidth = 1.5 * (window.devicePixelRatio || 1)
     ctx.strokeRect(view.x + r.x0 * view.s, view.y + r.y0 * view.s, (r.x1 - r.x0 + 1) * view.s, (r.y1 - r.y0 + 1) * view.s)
   }

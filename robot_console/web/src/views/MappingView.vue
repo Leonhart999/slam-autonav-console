@@ -647,7 +647,7 @@ const imuState = computed<[string, TagType]>(() => {
   height: 100%;
   border-radius: 4px;
   background: var(--accent-grad);
-  box-shadow: 0 0 6px rgba(6, 182, 212, 0.7);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.65);
   transition: width 0.5s ease;
 }
 .wp-track.bad i {

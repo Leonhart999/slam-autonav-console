@@ -12,8 +12,11 @@ import copy
 import json
 import os
 import re
+import sys
 import threading
 import uuid
+
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 FORMATS = ('openai', 'anthropic')
 EFFORT_VALUES = ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')
@@ -65,6 +68,23 @@ def _efforts(value):
     return [e for e in EFFORT_VALUES if e in picked]
 
 
+def _price(value):
+    fields = ('input', 'output', 'cache_read', 'cache_write')
+    if not isinstance(value, dict) or value.keys() - {*fields, 'currency'}:
+        raise ProfileError('profile_invalid', field='price')
+    currency = value.get('currency', 'USD')
+    if currency not in ('USD', 'CNY'):
+        raise ProfileError('profile_invalid', field='price')
+    price = {'currency': currency}
+    for field in fields:
+        if field in value:
+            rate = value[field]
+            if type(rate) not in (int, float) or not (0 <= rate <= sys.float_info.max):
+                raise ProfileError('profile_invalid', field='price')
+            price[field] = float(rate)
+    return price
+
+
 def _models(value):
     if value is None:
         return []
@@ -84,8 +104,11 @@ def _models(value):
         efforts = _efforts(m.get('efforts'))
         if efforts and effort and effort not in efforts:
             effort = ''
-        out.append({'id': mid, 'label': _text(m.get('label'), 'models', 200) or mid,
-                    'effort': effort, 'efforts': efforts})
+        entry = {'id': mid, 'label': _text(m.get('label'), 'models', 200) or mid,
+                 'effort': effort, 'efforts': efforts}
+        if 'price' in m:
+            entry['price'] = _price(m['price'])
+        out.append(entry)
     return out
 
 
@@ -114,6 +137,125 @@ def _body(value):
     return copy.deepcopy(value)
 
 
+MASK = '[redacted]'
+_NON_SECRET = {'tokentype', 'tokencount', 'maxtokens', 'maxoutputtokens', 'maxcompletiontokens', 'finishreason', 'stopreason'}
+
+
+def _secret_field(name):
+    norm = re.sub(r'[^a-z0-9]', '', name.lower())
+    if not norm or norm in _NON_SECRET:
+        return False
+    if re.search(r'(secret|password|passwd|apikey|authorization|privatekey|sessionkey|cookie|credential|'
+                 r'accesstoken|refreshtoken|idtoken|authtoken|bearertoken|oauthtoken|signature)', norm):
+        return True
+    # short gateway header names such as X-Auth, X-Token, X-Key, X-Pass
+    return norm in ('token', 'key', 'auth', 'pass', 'session') or \
+        norm.endswith(('token', 'secret', 'apikey', 'key', 'auth', 'pass'))
+
+
+def mask_url(value):
+    """Hide user:password inside a URL while keeping scheme, host and port visible."""
+    if not value:
+        return ''
+    try:
+        u = urlsplit(value)
+    except ValueError:
+        return value
+    if '@' not in u.netloc:
+        return value
+    host = u.netloc.rsplit('@', 1)[1]
+    return urlunsplit((u.scheme, f'{MASK}@{host}', u.path, u.query, u.fragment))
+
+
+def _restore_url(value, old, field):
+    """A URL from the editor: the masked view of the stored URL ([redacted]@host) means "keep the stored one"."""
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        raise ProfileError('profile_invalid', field=field)
+    trimmed = value.strip()
+    if MASK in trimmed:
+        if old and trimmed.rstrip('/') == mask_url(old).rstrip('/'):
+            return old
+        raise ProfileError('profile_invalid', field=field)
+    return trimmed
+
+
+def _url_secrets(url, out):
+    """The userinfo of a URL in every spelling an upstream may echo (raw and percent-decoded)."""
+    if not url:
+        return
+    try:
+        u = urlsplit(url)
+    except ValueError:
+        return
+    if '@' not in u.netloc:
+        return
+    creds = u.netloc.rsplit('@', 1)[0]
+    parts = [creds, *creds.split(':', 1)]
+    for p in parts:
+        if p:
+            out.append(p)
+            if unquote(p) != p:
+                out.append(unquote(p))
+
+
+def _credentials(value, old=None, mask=False):
+    """Mask credential overrides in views; preserve masked values submitted by the editor."""
+    if isinstance(value, list):
+        prev = old if isinstance(old, list) else []
+        return [_credentials(v, prev[i] if i < len(prev) else None, mask) for i, v in enumerate(value)]
+    if not isinstance(value, dict):
+        return value
+    prev = old if isinstance(old, dict) else {}
+    out = {}
+    for k, v in value.items():
+        if _secret_field(k):
+            if mask:
+                out[k] = MASK
+            else:
+                out[k] = prev.get(k, '') if v == MASK else v
+        else:
+            out[k] = _credentials(v, prev.get(k), mask)
+    return out
+
+
+def _collect_secrets(value, out, force=False):
+    if isinstance(value, list):
+        for item in value:
+            _collect_secrets(item, out, force)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _collect_secrets(v, out, force or _secret_field(str(k)))
+    elif force and isinstance(value, str) and value and value != MASK:
+        out.append(value)
+        if ' ' in value:
+            out.append(value.rsplit(' ', 1)[-1])
+
+
+def safe_error(params, settings):
+    """Relays and proxy errors sometimes quote the submitted credential or proxy password."""
+    secrets = [settings.get('api_key')]
+    px = settings.get('proxy') or ''
+    if px:
+        secrets.append(px)
+    for url in (px, settings.get('base_url') or ''):
+        _url_secrets(url, secrets)
+    _collect_secrets(settings.get('headers'), secrets)
+    _collect_secrets(settings.get('body'), secrets)
+    out = dict(params)
+    reason = out.get('reason')
+    if isinstance(reason, str):
+        for secret in sorted({s for s in secrets if s and len(s) >= 2}, key=len, reverse=True):
+            reason = reason.replace(secret, MASK)
+        reason = re.sub(r'(https?://|socks5h?://)[^\s/@]+@', rf'\1{MASK}@', reason)
+        reason = re.sub(r'(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{6,}', rf'\1 {MASK}', reason)
+        reason = re.sub(r'(?i)((?:access_token|refresh_token|client_secret|api_key|password|secret)\s*[:=]\s*["\']?)[^\s"\',;&}]+',
+                        rf'\1{MASK}', reason)
+        out['reason'] = reason
+    return out
+
+
 def clean(raw, old=None):
     """A checked profile from browser input. `api_key`: None or '' keeps the old key, `clear_key` removes it."""
     if not isinstance(raw, dict):
@@ -127,25 +269,34 @@ def clean(raw, old=None):
     endpoints = raw.get('endpoints') or []
     if not isinstance(endpoints, list) or len(endpoints) > MAX_ENDPOINTS:
         raise ProfileError('profile_invalid', field='endpoints')
+    prev = old or {}
     p = {
-        'id': (old or {}).get('id') or uuid.uuid4().hex[:12],
+        'id': prev.get('id') or uuid.uuid4().hex[:12],
         'name': _text(raw.get('name'), 'name', 60, True),
         'note': _text(raw.get('note'), 'note', 200),
-        'website': _url(raw.get('website'), 'website'),
+        'website': _url(_restore_url(raw.get('website'), prev.get('website', ''), 'website'), 'website'),
         'color': color,
         'format': fmt,
-        'base_url': _url(raw.get('base_url'), 'base_url'),
+        'base_url': _url(_restore_url(raw.get('base_url'), prev.get('base_url', ''), 'base_url'), 'base_url'),
         'endpoints': [],
         'full_url': bool(raw.get('full_url')) and fmt == 'openai',
         'models': _models(raw.get('models')),
         'model': _text(raw.get('model'), 'model', 200),
-        'proxy': _url(raw.get('proxy'), 'proxy'),
+        'proxy': _url(_restore_url(raw.get('proxy'), prev.get('proxy', ''), 'proxy'), 'proxy'),
         'user_agent': _text(raw.get('user_agent'), 'user_agent', 500),
-        'headers': _headers(raw.get('headers')),
-        'body': _body(raw.get('body')),
-        'api_key': (old or {}).get('api_key', ''),
+        'headers': _credentials(_headers(raw.get('headers')), prev.get('headers')),
+        'body': _credentials(_body(raw.get('body')), prev.get('body')),
+        'api_key': prev.get('api_key', ''),
     }
+    if prev.get('managed_by'):
+        p['managed_by'] = prev['managed_by']          # set by the backend only, never by the editor
+    old_endpoints = prev.get('endpoints') or []
     for e in endpoints:
+        if isinstance(e, str) and MASK in e:
+            match = next((o for o in old_endpoints if mask_url(o).rstrip('/') == e.strip().rstrip('/')), None)
+            if match is None:
+                raise ProfileError('profile_invalid', field='endpoints')
+            e = match
         e = _url(e, 'endpoints', True)
         if e not in p['endpoints']:
             p['endpoints'].append(e)
@@ -167,14 +318,24 @@ def clean(raw, old=None):
 def key_hint(key):
     if not key:
         return ''
+    if len(key) <= 2:
+        return MASK
     return f'{key[:3]}…{key[-4:]}' if len(key) > 10 else '…' + key[-2:]
 
 
-def view(p):
+def view(p, managed=False):
     """What the browser may see of a profile."""
-    out = {k: copy.deepcopy(v) for k, v in p.items() if k != 'api_key'}
+    out = {k: copy.deepcopy(v) for k, v in p.items() if k not in ('api_key', 'managed_by')}
+    for field in ('headers', 'body'):
+        out[field] = _credentials(out[field], mask=True)
+    out['proxy'] = mask_url(out.get('proxy', ''))
+    out['base_url'] = mask_url(out.get('base_url', ''))
+    out['endpoints'] = [mask_url(e) for e in out.get('endpoints') or []]
+    out['website'] = mask_url(out.get('website', ''))
     out['key_set'] = bool(p.get('api_key'))
     out['key_hint'] = key_hint(p.get('api_key'))
+    if managed or p.get('managed_by'):
+        out['managed'] = True
     return out
 
 
@@ -296,6 +457,23 @@ class ProfileStore:
             self.data['active'] = pid
             self._write()
             return copy.deepcopy(p)
+
+    def mark_managed(self, pid, by='cpa'):
+        """Record in providers.json itself that the embedded engine owns this profile, so it stays bound to the engine
+        even if the engine's own metadata is lost."""
+        with self.lock:
+            for p in self.data['profiles']:
+                if p['id'] == pid:
+                    if p.get('managed_by') != by:
+                        p['managed_by'] = by
+                        self._write()
+                    return copy.deepcopy(p)
+            raise ProfileError('profile_missing', id=pid)
+
+    def managed(self, by='cpa'):
+        with self.lock:
+            p = next((x for x in self.data['profiles'] if x.get('managed_by') == by), None)
+            return copy.deepcopy(p) if p else None
 
     def reorder(self, ids):
         with self.lock:

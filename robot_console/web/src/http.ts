@@ -61,6 +61,8 @@ export function validResponse(path: string, v: unknown, method = 'GET'): boolean
   if (/^\/api\/maps\/[^/]+\/regrid$/.test(p)) return isRecord(v) && string(v.token) && string(v.parent)
     && grid(v.grid) && isRecord(v.stats) && number(v.stats.occupied) && number(v.stats.free)
     && strings(v.warnings) && number(v.elapsed) && string(v.info)
+  if (/^\/api\/maps\/[^/]+\/loop$/.test(p)) return isRecord(v) && string(v.token) && string(v.parent)
+    && number(v.accepted) && number(v.scans) && number(v.path_m) && array(v.loops) && array(v.junctions) && strings(v.figures)
   if (p === '/api/navigation/status') return isRecord(v) && v.type === 'navigation' && string(v.state) && array(v.scan)
   if (/^\/api\/slam_config\//.test(p)) return isRecord(v) && string(v.stack) && string(v.algorithm)
     && rows(v.params, row => string(row.key) && 'value' in row && 'auto' in row)

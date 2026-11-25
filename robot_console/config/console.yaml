@@ -195,6 +195,11 @@ evaluation:
   rpe_delta: 1.0               # m, RPE segment length
   results_dir: ${data_root}/results   # exports: <time>/summary.csv + PNG figures
 
+# Maps page "Loop optimization": offline planar loop back-end for maps saved with raw scans (robot_console/map_loop.py)
+loop_backend:
+  python: ~/venvs/loop/bin/python   # GTSAM 4.2 wheel + small_gicp, kept apart from the system GTSAM used by GLIM
+  timeout: 1800                     # s per optimization
+
 # Batch mapping experiments (evaluation page): sim -> SLAM -> waypoints, repeated N times (robot_console/batch.py)
 batch:
   slam_stacks: [mapping_fastlio, mapping_fastlio_ground, mapping_fastlio_lidar, mapping_fastlio_lidar_ground, mapping_glim]   # stacks.yaml names offered as SLAM algorithms (labels come from stacks.yaml)

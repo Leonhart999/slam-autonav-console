@@ -1,9 +1,11 @@
 """Offline loop-closure back-end for FAST-LIO2 output (keyframes + GICP loop edges + GTSAM pose graph).
 
-Input : <rec>/scans.bin + <rec>/index.csv written by rec_scans.py (body-frame scans and odometry poses).
+Input : <rec>/scans.bin + <rec>/index.csv written by fastlio_loop_record.py (body-frame scans and odometry poses).
 Output: <out>/traj_odom.tum, traj_loop.tum, map_odom_voxel.pcd, map_loop_voxel.pcd, loop_report.json, figures.
+loop_report.json is written even when no loop is accepted (then without the trajectories after optimization).
+Lines "PHASE <name>" on stdout mark the stages (reading, matching, optimizing, rebuilding) for the console.
 
-usage: loop_backend.py <rec_dir> <out_dir> [--no-map]
+usage: fastlio_loop_backend.py <rec_dir> <out_dir> [--no-map] [--poses scan_poses.tum] [--params JSON]
 """
 import argparse
 import json
@@ -19,7 +21,16 @@ from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation as R, Slerp
 from scipy.optimize import least_squares
 
-from robot_console import fastlio_loop_grid as loop_grid
+try:
+    from robot_console import fastlio_loop_grid as loop_grid
+except ImportError:
+    # Run as a file by the console job (python -I, the package is not installed in the loop venv): load the
+    # sibling module directly.
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location(
+        'fastlio_loop_grid', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fastlio_loop_grid.py'))
+    loop_grid = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(loop_grid)
 
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt  # noqa: E402
@@ -50,7 +61,9 @@ P = dict(
 
 
 # ---------- data ----------
-def load(rec):
+def load(rec, poses=None):
+    """Index rows, points and odometry poses of a recording. poses: TUM file listing the scans to use (by stamp),
+    e.g. data/scan_poses.tum of a map saved while the recorder was still running."""
     idx = np.atleast_2d(np.loadtxt(os.path.join(rec, 'index.csv')))
     if idx.shape[1] != 10 or len(idx) < 2 or not np.isfinite(idx).all():
         raise ValueError('Invalid recording index: expected >= 2 finite rows with 10 columns')
@@ -61,6 +74,12 @@ def load(rec):
     idx = idx[np.argsort(idx[:, 0], kind='stable')]
     _, first = np.unique(idx[:, 0], return_index=True)
     idx = idx[np.sort(first)]
+    if poses:
+        micro = lambda t: np.round(t * 1e6).astype(np.int64)   # noqa: E731
+        listed = micro(np.loadtxt(poses, ndmin=2)[:, 0])
+        idx = idx[np.isin(micro(idx[:, 0]), listed)]
+        if len(idx) < 2:
+            raise ValueError('The pose file lists fewer than 2 scans of the recording')
     pts = np.memmap(os.path.join(rec, 'scans.bin'), dtype=np.float32, mode='r').reshape(-1, 4)
     if np.any(idx[:, 1:3] < 0) or np.any(idx[:, 1] + idx[:, 2] > len(pts)):
         raise ValueError('Recording index points outside scans.bin')
@@ -279,31 +298,24 @@ def wall_slice(p, floor_z):
     return p[(p[:, 2] > floor_z + 0.3) & (p[:, 2] < floor_z + 1.8)]
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('recording')
-    parser.add_argument('output')
-    parser.add_argument('--no-map', action='store_true')
-    parser.add_argument('--map-res', type=float, default=P['map_res'])
-    parser.add_argument('--scan-stride', type=int, default=2)
-    parser.add_argument('--map-range', type=float, default=P['map_range'])
-    args = parser.parse_args()
-    P['map_range'] = args.map_range
-    if args.map_res <= 0 or args.scan_stride < 1:
-        parser.error('map-res must be positive and scan-stride must be >= 1')
-    P['map_res'] = args.map_res
-    rec, out = args.recording, args.output
-    if os.path.isdir(out) and os.listdir(out):
-        raise FileExistsError(f'Refusing to overwrite nonempty output directory: {out}')
-    os.makedirs(out, exist_ok=True)
-    t0 = time.time()
-    idx, pts, T = load(rec)
-    stamps = idx[:, 0]
-    kf = select_keyframes(T)
-    Tk = T[kf]
-    s = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(Tk[:, :3, 3], axis=0), axis=1))])
-    print(f'scans {len(T)}, keyframes {len(kf)}, path {s[-1]:.1f} m, {stamps[-1] - stamps[0]:.0f} s')
+# Parameters the console's loop dialog may override (--params); the others stay fixed.
+TUNABLE = ('loop_radius', 'loop_min_gap', 'accept_overlap', 'accept_rmse', 'max_loop_shift', 'max_loop_yaw_deg')
+REVISIT_GAP = 30.0     # m of path: accepted loops closer than this at both ends show the same revisit
+MAX_JUNCTIONS = 4      # revisits shown in the junction figure and report
 
+
+def phase(name):
+    """Stage marker; the console job (map_loop.py) shows it as the task's progress."""
+    print(f'PHASE {name}', flush=True)
+
+
+def write_report(out, report):
+    with open(os.path.join(out, 'loop_report.json'), 'w') as f:
+        json.dump(report, f, indent=1)
+
+
+def detect(idx, pts, T, kf, Tk, s, t0):
+    """Verify every loop candidate by submap registration; returns all checked loops (accepted or not)."""
     cands = find_candidates(Tk, s)
     print(f'loop candidates: {len(cands)}')
     loops, tgt_cache = [], {}
@@ -356,12 +368,144 @@ def main():
         print(f'  kf {i:4d} (s {s[i]:6.1f}) -> kf {j:3d} (s {s[j]:5.1f}) d {d:5.2f} | overlap {ov0:.2f}->{ov1:.2f} rmse {rm0:.3f}->{rm1:.3f}'
               f' | shift {shift[0]:+.3f} {shift[1]:+.3f} {shift[2]:+.3f} m  rpy {lp["drift_rpy_deg"][0]:+.2f} {lp["drift_rpy_deg"][1]:+.2f} {lp["drift_rpy_deg"][2]:+.2f} deg'
               f' | eig {lp["trans_eig_ratio"]:.3f} {"OK" if ok else "REJECTED"}')
+    print(f'accepted loops: {sum(lp["ok"] for lp in loops)} / {len(loops)}  ({time.time() - t0:.0f} s)')
+    return loops
+
+
+def revisits(good):
+    """One representative loop (the middle one) per revisit, largest correction first, and the number of revisits.
+    Consecutive accepted loops whose old and new ends both lie within REVISIT_GAP of path show the same place."""
+    groups = []
+    for lp in sorted(good, key=lambda lp: lp['s_i']):
+        last = groups[-1][-1] if groups else None
+        if last and abs(lp['s_i'] - last['s_i']) < REVISIT_GAP and abs(lp['s_j'] - last['s_j']) < REVISIT_GAP:
+            groups[-1].append(lp)
+        else:
+            groups.append([lp])
+    reps = sorted((g[len(g) // 2] for g in groups), key=lambda lp: -float(np.linalg.norm(lp['shift_xyz'][:2])))
+    return reps[:MAX_JUNCTIONS], len(groups)
+
+
+def nearest_stats(d):
+    return dict(points=int(len(d)), mean_m=float(d.mean()), median_m=float(np.median(d)),
+                p90_m=float(np.percentile(d, 90)), within_0p1=float((d < 0.1).mean()))
+
+
+def junction(idx, pts, T, T_new, kf, s, lp, floor_z):
+    """Map consistency where loop lp closes: the scans around its new end against the map around its old end,
+    with odometry poses (before) and loop poses (after). In-sample consistency, not ground-truth accuracy."""
+    tgt = kf[(np.abs(s - lp['s_j']) <= P['tgt_window']) & (s < lp['s_i'] - P['loop_min_gap'])]
+    src = kf[(np.abs(s - lp['s_i']) <= P['src_window']) & (s > lp['s_j'] + P['loop_min_gap'])]
+    out = dict(i=lp['i'], j=lp['j'], s_i=lp['s_i'], s_j=lp['s_j'])
+    clouds, trees = {}, {}
+    for name, poses in (('odom', T), ('loop', T_new)):
+        a = voxel_down(np.vstack([apply(poses[k], scan_xyz(idx, pts, k)) for k in tgt]), 0.1)
+        b = voxel_down(np.vstack([apply(poses[k], scan_xyz(idx, pts, k)) for k in src]), 0.1)
+        # Region metric: points of the new visit inside the bounds of the old map (includes the floor).
+        lo, hi = np.percentile(a, [1, 99], axis=0)
+        support = np.all((b >= lo - 0.5) & (b <= hi + 0.5), axis=1)
+        trees[name] = cKDTree(a)
+        out[name] = nearest_stats(trees[name].query(b[support], k=1, workers=P['threads'])[0])
+        clouds[name] = (a, b)
+    # Wall metric: the same wall points of the new visit before and after, selected once where the optimized
+    # map overlaps (distance < 0.3 m).
+    before, after = [], []
+    for k in src:
+        local = voxel_down(scan_xyz(idx, pts, k), 0.1)
+        moved = apply(T_new[k], local)
+        da, _ = trees['loop'].query(moved, workers=P['threads'])
+        match = (da < 0.3) & (moved[:, 2] > floor_z + 0.3) & (moved[:, 2] < floor_z + 1.8)
+        db, _ = trees['odom'].query(apply(T[k], local[match]), workers=P['threads'])
+        before.extend(db.tolist())
+        after.extend(da[match].tolist())
+    for name, values in (('wall_odom', before), ('wall_loop', after)):
+        values = np.asarray(values)
+        out[name] = (dict(points=len(values), median_m=float(np.median(values)), p90_m=float(np.percentile(values, 90)),
+                          rmse_m=float(np.sqrt(np.mean(values ** 2)))) if len(values) else None)
+    return out, clouds
+
+
+def junction_figure(path, items, floor_z):
+    """One row per revisit: wall slice of the old map (blue) and of the new visit (red), before and after."""
+    bounds = []
+    for j, clouds in items:
+        both = np.vstack([wall_slice(c, floor_z) for c in clouds['loop']])
+        if len(both) < 10:
+            both = np.vstack(clouds['loop'])
+        lo, hi = np.percentile(both[:, :2], [1, 99], axis=0)
+        bounds.append((lo - 2.0, hi + 2.0))
+    # Row height follows the aspect ratio of the area, so long corridors do not leave empty space.
+    heights = [float(np.clip(7.0 * (hi[1] - lo[1]) / max(hi[0] - lo[0], 1e-3), 2.5, 9.0)) + 1.3 for lo, hi in bounds]
+    fig, ax = plt.subplots(len(items), 2, figsize=(15, sum(heights)), dpi=120, squeeze=False,
+                           gridspec_kw={'height_ratios': heights})
+    for row, (j, clouds), (lo, hi) in zip(ax, items, bounds):
+        walls = {name: tuple(wall_slice(c, floor_z) for c in clouds[name]) for name in ('odom', 'loop')}
+        for a_, name, title in ((row[0], 'odom', 'before: FAST-LIO2 only'), (row[1], 'loop', 'after: with loop closure')):
+            a, b = walls[name]
+            a_.plot(a[:, 0], a[:, 1], '.', ms=0.6, color='#2a78d6', label=f'first visit (path {j["s_j"]:.0f} m)')
+            a_.plot(b[:, 0], b[:, 1], '.', ms=0.6, color='#eb6834', label=f'revisit (path {j["s_i"]:.0f} m)')
+            a_.set_xlim(lo[0], hi[0]); a_.set_ylim(lo[1], hi[1]); a_.set_aspect('equal'); a_.grid(alpha=0.3)
+            w = j['wall_' + name]
+            detail = (f'wall points: median {w["median_m"] * 100:.1f} cm, 90% within {w["p90_m"] * 100:.1f} cm'
+                      if w else 'no matching wall points')
+            a_.set_title(f'{title}\n{detail}')
+            a_.set_xlabel('x [m]'); a_.set_ylabel('y [m]'); a_.legend(markerscale=15, fontsize=8, loc='upper right')
+    fig.tight_layout(); fig.savefig(path); plt.close(fig)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('recording')
+    parser.add_argument('output')
+    parser.add_argument('--no-map', action='store_true')
+    parser.add_argument('--map-res', type=float, default=P['map_res'])
+    parser.add_argument('--scan-stride', type=int, default=2)
+    parser.add_argument('--map-range', type=float, default=P['map_range'])
+    parser.add_argument('--poses', help='TUM file with one pose per scan; only the scans it lists are used '
+                                        '(a map saved before the recording ended)')
+    parser.add_argument('--params', help='JSON object overriding ' + ', '.join(TUNABLE))
+    args = parser.parse_args()
+    P['map_range'] = args.map_range
+    if args.map_res <= 0 or args.scan_stride < 1:
+        parser.error('map-res must be positive and scan-stride must be >= 1')
+    P['map_res'] = args.map_res
+    if args.params:
+        extra = json.loads(args.params)
+        if not isinstance(extra, dict) or set(extra) - set(TUNABLE):
+            parser.error('params must be a JSON object with keys from: ' + ', '.join(TUNABLE))
+        for key, value in extra.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 0:
+                parser.error(f'{key} must be a positive number')
+            P[key] = float(value)
+    rec, out = args.recording, args.output
+    if os.path.isdir(out) and os.listdir(out):
+        raise FileExistsError(f'Refusing to overwrite nonempty output directory: {out}')
+    os.makedirs(out, exist_ok=True)
+    t0 = time.time()
+    phase('reading')
+    idx, pts, T = load(rec, args.poses)
+    stamps = idx[:, 0]
+    kf = select_keyframes(T)
+    Tk = T[kf]
+    s = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(Tk[:, :3, 3], axis=0), axis=1))])
+    print(f'scans {len(T)}, keyframes {len(kf)}, path {s[-1]:.1f} m, {stamps[-1] - stamps[0]:.0f} s')
+
+    phase('matching')
+    loops = detect(idx, pts, T, kf, Tk, s, t0)
     good = [lp for lp in loops if lp['ok']]
-    print(f'accepted loops: {len(good)} / {len(loops)}  ({time.time() - t0:.0f} s)')
+    write_tum(os.path.join(out, 'traj_odom.tum'), stamps, T)
+    report = dict(params={k: v for k, v in P.items()}, scans=len(T), keyframes=len(kf), path_m=float(s[-1]),
+                  duration_s=float(stamps[-1] - stamps[0]),
+                  input_recording=os.path.realpath(rec),
+                  input_poses=os.path.realpath(args.poses) if args.poses else None, backend_mode='offline_planar',
+                  map_scan_stride=args.scan_stride, map_range_m=P['map_range'], map_res_m=P['map_res'],
+                  loops=[{k: v for k, v in lp.items() if k != 'T_ji'} for lp in loops], accepted=len(good))
     if not good:
         print('no loop accepted - nothing to optimise')
+        write_report(out, report)
         return
 
+    phase('optimizing')
     Tk_new, e0, e1 = optimise(Tk, s, good)
     T_new = all_scan_poses(T, kf, Tk_new)
     dxy = np.linalg.norm(Tk_new[:, :2, 3] - Tk[:, :2, 3], axis=1)
@@ -371,63 +515,35 @@ def main():
     dyaw = np.degrees(yaw_new - yaw_old)
     print(f'graph error {e0:.1f} -> {e1:.3f}; correction at the end: xy {dxy[-1]:.3f} m, z {dz[-1]:+.3f} m, yaw {dyaw[-1]:+.3f} deg; '
           f'z range after {T_new[:, 2, 3].min():+.3f}..{T_new[:, 2, 3].max():+.3f}')
-    write_tum(os.path.join(out, 'traj_odom.tum'), stamps, T)
     write_tum(os.path.join(out, 'traj_loop.tum'), stamps, T_new)
-
-    # junction consistency: scans of the last 60 s against the map of the first 60 s
-    first = np.where(stamps < stamps[0] + 60)[0][::5]
-    last = np.where(stamps > stamps[-1] - 60)[0][::5]
-    report = dict(params={k: v for k, v in P.items()}, scans=len(T), keyframes=len(kf), path_m=float(s[-1]),
-                  input_recording=os.path.realpath(rec), backend_mode='offline_planar',
-                  map_scan_stride=args.scan_stride, map_range_m=P['map_range'],
-                  loops=[{k: v for k, v in lp.items() if k != 'T_ji'} for lp in loops], accepted=len(good),
-                  graph_error=[e0, e1], end_correction=dict(xy_m=float(dxy[-1]), z_m=float(dz[-1]), yaw_deg=float(dyaw[-1])),
+    # Floor height in the map frame, for the wall slices: sensor height estimated from the scans themselves.
+    hs = loop_grid.sensor_height(idx, pts, T[:, :3, :3])
+    floor_z = float(np.median(T[:, 2, 3])) - hs
+    report.update(graph_error=[e0, e1],
+                  end_correction=dict(xy_m=float(dxy[-1]), z_m=float(dz[-1]), yaw_deg=float(dyaw[-1])),
+                  max_correction=dict(xy_m=float(dxy.max()), yaw_deg=float(np.abs(dyaw).max())),
                   z_range_odom=[float(T[:, 2, 3].min()), float(T[:, 2, 3].max())],
                   z_range_loop=[float(T_new[:, 2, 3].min()), float(T_new[:, 2, 3].max())],
                   end_minus_start_odom=[float(v) for v in T[-1, :3, 3] - T[0, :3, 3]],
-                  end_minus_start_loop=[float(v) for v in T_new[-1, :3, 3] - T_new[0, :3, 3]])
-    junction = {}
-    a = voxel_down(np.vstack([apply(T[k], scan_xyz(idx, pts, k)) for k in first]), 0.1)
-    b0 = voxel_down(np.vstack([apply(T[k], scan_xyz(idx, pts, k)) for k in last]), 0.1)
-    b1 = voxel_down(np.vstack([apply(T_new[k], scan_xyz(idx, pts, k)) for k in last]), 0.1)
-    # Both evaluations use the same fixed spatial region; do not silently discard each method's bad matches.
-    lo, hi = np.percentile(a, [1, 99], axis=0)
-    lo -= 0.5
-    hi += 0.5
-    tree = cKDTree(a)
-    for name, b in (('odom', b0), ('loop', b1)):
-        support = np.all((b >= lo) & (b <= hi), axis=1)
-        d, _ = tree.query(b[support], k=1, workers=P['threads'])
-        junction[name] = dict(points=int(len(d)), mean_m=float(d.mean()), median_m=float(np.median(d)),
-                              p90_m=float(np.percentile(d, 90)), within_0p1=float((d < 0.1).mean()))
-        junction[name + '_clouds'] = (a, b)
-        print(f'junction {name}: mean {junction[name]["mean_m"]:.3f} median {junction[name]["median_m"]:.3f} '
-              f'p90 {junction[name]["p90_m"]:.3f} m, within 0.1 m {junction[name]["within_0p1"]:.2f}')
-    report['junction_region_xyz'] = [lo.tolist(), hi.tolist()]
-    report['junction_metric_note'] = '3D nearest-point map consistency in a fixed start-map region; not ground-truth accuracy; includes floor.'
-    # Fixed point identities: select geometric overlap once with the accepted planar loop,
-    # then evaluate the very same scan points before/after (not independent ground-truth accuracy).
-    common_errors = {}
-    a = voxel_down(np.vstack([apply(T[k], scan_xyz(idx, pts, k)) for k in first]), 0.1)
-    tree = cKDTree(a)
-    fixed_before, fixed_after = [], []
-    for k in last:
-        local = voxel_down(scan_xyz(idx, pts, k), 0.1)
-        before, after = apply(T[k], local), apply(T_new[k], local)
-        da, _ = tree.query(after, workers=P['threads'])
-        wall = (after[:, 2] > -0.19) & (after[:, 2] < 1.31)
-        match = (da < 0.3) & wall
-        db, _ = tree.query(before[match], workers=P['threads'])
-        fixed_before.extend(db.tolist())
-        fixed_after.extend(da[match].tolist())
-    for name, values in (('odom', fixed_before), ('loop', fixed_after)):
-        values = np.asarray(values)
-        common_errors[name] = dict(points=len(values), median_m=float(np.median(values)),
-                                   p90_m=float(np.percentile(values, 90)), rmse_m=float(np.sqrt(np.mean(values**2))))
-    report['junction_fixed_wall_support'] = common_errors
-    report['junction_fixed_wall_support_note'] = 'Same source wall points in both evaluations; overlap selected using the optimized map (distance < 0.3 m); in-sample consistency, not independent accuracy.'
-    report['junction'] = {k: v for k, v in junction.items() if not k.endswith('_clouds')}
-    json.dump(report, open(os.path.join(out, 'loop_report.json'), 'w'), indent=1)
+                  end_minus_start_loop=[float(v) for v in T_new[-1, :3, 3] - T_new[0, :3, 3]],
+                  sensor_height_m=hs, floor_z_m=floor_z)
+
+    reps, n_revisits = revisits(good)
+    items = []
+    for lp in reps:
+        j, clouds = junction(idx, pts, T, T_new, kf, s, lp, floor_z)
+        items.append((j, clouds))
+        w0, w1 = j['wall_odom'], j['wall_loop']
+        if w0 and w1:
+            print(f'junction kf {lp["i"]} -> {lp["j"]}: wall median {w0["median_m"]:.3f} -> {w1["median_m"]:.3f} m, '
+                  f'p90 {w0["p90_m"]:.3f} -> {w1["p90_m"]:.3f} m')
+    report['revisits'] = n_revisits
+    report['junctions'] = [j for j, _ in items]
+    report['junction_metric_note'] = ('Per revisit: scans around the new end of a loop against the map around its old '
+                                      'end, both with odometry (before) and with loop poses (after). Region metric '
+                                      'includes the floor; wall metric uses the same wall points before and after, '
+                                      'selected where the optimized map overlaps (< 0.3 m). In-sample map consistency, '
+                                      'not ground-truth accuracy.')
 
     # ---- figure: correction along the path ----
     fig, axs = plt.subplots(1, 3, figsize=(15, 5), dpi=150)
@@ -450,41 +566,37 @@ def main():
     np.savetxt(os.path.join(out, 'keyframe_corrections.csv'), np.column_stack((s, dxy, dz, dyaw)),
                delimiter=',', header='path_m,horizontal_shift_m,height_shift_m,yaw_change_deg', comments='')
     fig.tight_layout(); fig.savefig(os.path.join(out, 'trajectory_correction.png')); plt.close(fig)
-
-    # ---- figure: junction before / after (start part blue, end part red) ----
-    floor_z = -0.49
-    c = T[0, :2, 3]
-    fig, ax = plt.subplots(1, 2, figsize=(15, 6.5), dpi=150)
-    for a_, name, title in ((ax[0], 'odom', 'before: FAST-LIO2 only'), (ax[1], 'loop', 'after: with loop closure')):
-        a, b = junction[name + '_clouds']
-        a, b = wall_slice(a, floor_z), wall_slice(b, floor_z)
-        a_.plot(a[:, 0], a[:, 1], '.', ms=0.6, color='#2a78d6', label='first 60 s')
-        a_.plot(b[:, 0], b[:, 1], '.', ms=0.6, color='#eb6834', label='last 60 s')
-        a_.set_xlim(c[0] - 32, c[0] + 22); a_.set_ylim(c[1] - 16, c[1] + 14); a_.set_aspect('equal'); a_.grid(alpha=0.3)
-        j = junction[name]
-        a_.set_title(f'{title}\nend part vs start part: median {j["median_m"] * 100:.1f} cm, 90% within {j["p90_m"] * 100:.1f} cm')
-        a_.set_xlabel('x [m]'); a_.set_ylabel('y [m]'); a_.legend(markerscale=15, fontsize=8, loc='upper right')
-    fig.tight_layout(); fig.savefig(os.path.join(out, 'junction_before_after.png')); plt.close(fig)
+    if items:
+        junction_figure(os.path.join(out, 'junction_before_after.png'), items, floor_z)
+    write_report(out, report)
 
     if args.no_map:
         return
-    # ---- voxel maps and top views ----
+    # ---- voxel maps, grids and top views ----
+    phase('rebuilding')
     scans = np.arange(0, len(T), args.scan_stride)
+    maps = {}
     fig, ax = plt.subplots(1, 2, figsize=(14, 8.5), dpi=150)
     for a_, name, poses, title in ((ax[0], 'odom', T, 'before: FAST-LIO2 only'), (ax[1], 'loop', T_new, 'after: with loop closure')):
         # Grid from per-cell evidence first; the map then drops what the grid judged transient.
+        # The trajectory files list exactly the scans used here, so the grid follows --poses as well.
         grid_stats, clean = loop_grid.build(rec, out, f'traj_{name}.tum', f'grid_{name}',
                                             dict(map_range=P['map_range'], scan_stride=args.scan_stride))
         print(f'grid {name}: {grid_stats["width"]} x {grid_stats["height"]}, occupied {grid_stats["occupied"]:.2%}, '
               f'free {grid_stats["free"]:.2%} ({time.time() - t0:.0f} s)')
         m = build_map(idx, pts, poses, scans, P['map_res'], clean)
         write_pcd(os.path.join(out, f'map_{name}_voxel.pcd'), m)
+        maps[name] = dict(voxels=int(len(m)), grid=dict(width=grid_stats['width'], height=grid_stats['height'],
+                                                        occupied=grid_stats['occupied'], free=grid_stats['free']))
         w = wall_slice(m, floor_z)
         a_.plot(w[:, 0], w[:, 1], ',', color='k', alpha=0.25)
         a_.set_aspect('equal'); a_.set_title(f'{title} ({len(m) / 1e6:.2f} M voxels of {P["map_res"]} m)')
         a_.set_xlabel('x [m]'); a_.set_ylabel('y [m]')
         print(f'map {name}: {len(m)} voxels ({time.time() - t0:.0f} s)')
     fig.tight_layout(); fig.savefig(os.path.join(out, 'map_top_view_before_after.png')); plt.close(fig)
+    report['maps'] = maps
+    report['elapsed_s'] = round(time.time() - t0, 1)
+    write_report(out, report)
 
 
 if __name__ == '__main__':

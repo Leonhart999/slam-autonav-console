@@ -66,7 +66,7 @@ defineProps<{ title?: string; flush?: boolean; tip?: string }>()
   height: 14px;
   border-radius: 2px;
   background: var(--accent-grad);
-  box-shadow: 0 0 8px rgba(6, 182, 212, 0.6);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.55);
 }
 .extra {
   margin-left: auto;

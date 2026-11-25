@@ -241,6 +241,15 @@ if [ ! -x "$HOME/venvs/evo/bin/python" ]; then
     python3 -m venv "$HOME/venvs/evo"
 fi
 "$HOME/venvs/evo/bin/pip" install -q "${PIP_INDEX[@]}" -r "$HERE/requirements-evo.txt"
+# Optional: offline planar loop back-end (Maps page "Loop optimization"). GTSAM 4.2 wheel + small_gicp in a venv of
+# their own, so the system GTSAM used by GLIM stays untouched. A failure only disables that button.
+if [ ! -x "$HOME/venvs/loop/bin/python" ]; then
+    python3 -m venv "$HOME/venvs/loop" || echo "WARNING: cannot create ~/venvs/loop; loop optimization unavailable"
+fi
+if [ -x "$HOME/venvs/loop/bin/pip" ]; then
+    "$HOME/venvs/loop/bin/pip" install -q "${PIP_INDEX[@]}" -r "$HERE/requirements-loop.txt" \
+        || echo "WARNING: loop back-end packages failed to install; loop optimization unavailable"
+fi
 
 # ---------------------------------------------------------------------------------------------------------------
 WEB="$CONSOLE_DIR/web"

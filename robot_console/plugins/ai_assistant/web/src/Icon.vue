@@ -3,7 +3,8 @@
 <script setup lang="ts">
 defineProps<{
   name: 'spark' | 'close' | 'chevron' | 'info' | 'copy' | 'check' | 'like' | 'plus' | 'bolt' | 'download' | 'trash' | 'gear'
-    | 'chat' | 'eye' | 'shield' | 'gauge' | 'search'
+    | 'chat' | 'eye' | 'shield' | 'gauge' | 'search' | 'history' | 'pin' | 'edit' | 'refresh' | 'key' | 'upload'
+    | 'link' | 'power' | 'external'
   filled?: boolean
 }>()
 </script>
@@ -51,6 +52,29 @@ defineProps<{
       <circle cx="11" cy="11" r="6.5" class="aia-i-line" />
       <path d="M16 16l4.5 4.5" class="aia-i-line" />
     </template>
+    <template v-else-if="name === 'history'">
+      <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9" class="aia-i-line" />
+      <path d="M4.5 4.5V9H9M12 8v4.5l3 2" class="aia-i-line" />
+    </template>
+    <path v-else-if="name === 'pin'" class="aia-i-line" :fill="filled ? 'currentColor' : 'none'"
+          d="M9 4h6l-1 6 3.5 3v1.5h-11V13L10 10zM12 14.5V20" />
+    <path v-else-if="name === 'edit'" class="aia-i-line" d="M4.5 19.5l1-4L15.5 5.5a2.1 2.1 0 0 1 3 3l-10 10zM13.5 7.5l3 3" />
+    <template v-else-if="name === 'refresh'">
+      <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3L19.5 9" class="aia-i-line" />
+      <path d="M19.5 4.5V9H15" class="aia-i-line" />
+    </template>
+    <template v-else-if="name === 'key'">
+      <circle cx="8" cy="15" r="4" class="aia-i-line" />
+      <path d="M11 12l8.5-8.5M16.5 6.5l2.5 2.5M14 9l2 2" class="aia-i-line" />
+    </template>
+    <path v-else-if="name === 'upload'" d="M12 16V5m0 0L7.5 9.5M12 5l4.5 4.5M5 19.5h14" class="aia-i-line" />
+    <path v-else-if="name === 'link'" class="aia-i-line"
+          d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    <template v-else-if="name === 'power'">
+      <path d="M12 3.5v8" class="aia-i-line" />
+      <path d="M7 6.5a7.5 7.5 0 1 0 10 0" class="aia-i-line" />
+    </template>
+    <path v-else-if="name === 'external'" d="M13.5 4.5h6v6M19.5 4.5L11 13M17 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1H10" class="aia-i-line" />
     <path
       v-else-if="name === 'like'" class="aia-i-line" :fill="filled ? 'currentColor' : 'none'"
       d="M7.5 10.5v9H5a1.5 1.5 0 0 1-1.5-1.5v-6A1.5 1.5 0 0 1 5 10.5zm0 0l3.6-6.3a1.9 1.9 0 0 1 3.5 1.3l-.7 3.5h4.6a2 2 0 0 1 2 2.4l-1.3 6.5a2 2 0 0 1-2 1.6H7.5"

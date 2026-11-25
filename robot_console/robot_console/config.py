@@ -255,11 +255,19 @@ def load(path=None):
     ev.setdefault('evo_python', '~/venvs/evo/bin/python')
     for key in ('results_dir', 'evo_python'):
         ev[key] = expand(ev[key])
+    # Offline planar loop back-end (Maps page, map_loop.py): its own interpreter with GTSAM + small_gicp
+    lb = cfg['loop_backend'] = cfg.get('loop_backend') or {}
+    lb['python'] = expand(lb.get('python') or '~/venvs/loop/bin/python')
+    lb.setdefault('timeout', 1800)
     plugins = cfg['plugins'] = cfg.get('plugins') or {}
     plugins['dirs'] = [expand(d) for d in (plugins.get('dirs') or ['${data_root}/plugins'])]
     shipped = shipped_plugins_dir()
-    if plugins.get('shipped', True) and shipped and shipped not in plugins['dirs']:
-        plugins['dirs'].append(shipped)
+    if plugins.get('shipped', True) and shipped:
+        plugins['shipped_dir'] = shipped
+        if shipped not in plugins['dirs']:
+            plugins['dirs'].append(shipped)
+    else:
+        plugins['shipped_dir'] = None
     plugins['state_file'] = expand(plugins.get('state_file') or '${data_root}/plugin_state.json')
     plugins['data_dir'] = expand(plugins.get('data_dir') or '${data_root}/plugin_data')
     plugins['envs_dir'] = expand(plugins.get('envs_dir') or '${data_root}/plugin_envs')

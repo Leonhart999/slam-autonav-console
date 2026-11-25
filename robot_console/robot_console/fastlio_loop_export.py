@@ -38,7 +38,33 @@ def write_pcd(path, xyz):
         stream.write(np.asarray(xyz, dtype='<f4').tobytes())
 
 
-def publish(result_dir, maps_dir, name, grid_python, grid_script, source_run=None, runs_dir=None, parent_map=None):
+PROVENANCE = {
+    # CLI: the scans were recorded during a new replay of the bag, so the source run is lineage only
+    'new_replay': 'New FAST-LIO replay on the same bag/settings; source_run provides bag/reference metadata only, '
+                  'not the exact odometry baseline.',
+    # Console (Maps page): the scans were recorded during the playback that produced the parent map
+    'same_replay': "Scans were recorded during the replay of source_run: its est.tum and this run's est_online.tum "
+                   'come from the same FAST-LIO odometry, so source_run is the exact baseline.',
+}
+
+
+def mark_recording_used(recording, name):
+    """Name the new map in the recording's used_by_maps.txt, so the playback page does not delete the recording."""
+    if not recording:
+        return
+    try:
+        with open(os.path.join(recording, 'used_by_maps.txt'), 'a', encoding='utf-8') as f:
+            f.write(name + '\n')
+    except OSError:
+        pass
+
+
+def publish(result_dir, maps_dir, name, grid_python=None, grid_script=None, source_run=None, runs_dir=None,
+            parent_map=None, provenance='new_replay', loop_params=None, quiet=False):
+    """Publish <maps_dir>/<name> (and <runs_dir>/play_loop_<name> when runs_dir is given) from a back-end result.
+    Returns (map dir, run id or None)."""
+    if provenance not in PROVENANCE:
+        raise ValueError('Unknown provenance')
     result_dir, maps_dir = Path(result_dir).resolve(), Path(maps_dir).expanduser().resolve()
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,48}', name):
         raise ValueError('Map name must contain 1-48 ASCII letters, digits, underscores or hyphens')
@@ -105,10 +131,10 @@ def publish(result_dir, maps_dir, name, grid_python, grid_script, source_run=Non
         length = float(np.linalg.norm(np.diff(trajectory[:, 1:4], axis=0), axis=1).sum())
         info = {k: v for k, v in metadata.items() if k not in ('id', 'maps', 'extent', 'length', 'voxels', 'last_error', 'lag')}
         info.update(name=name, created=time.strftime('%Y-%m-%d %H:%M:%S'), algorithm='FAST-LIO2 (ground + planar loop)',
-                    frame='fastlio_loop_map', run=run_id if run_dest else None, source_run=metadata.get('id'),
-                    input_recording=report.get('input_recording'),
-                    provenance_note='New FAST-LIO replay on the same bag/settings; source_run provides bag/reference metadata only, not the exact odometry baseline.',
-                    parent_map=parent_map, postprocess='fastlio_planar_loop',
+                    source='loop', frame='fastlio_loop_map', run=run_id if run_dest else None,
+                    source_run=metadata.get('id'), input_recording=report.get('input_recording'),
+                    provenance_note=PROVENANCE[provenance],
+                    parent_map=parent_map, postprocess='fastlio_planar_loop', loop_params=loop_params,
                     points=len(xyz), voxels=len(preview), voxel_size=0.1,
                     duration=float(trajectory[-1, 0] - trajectory[0, 0]), length=round(length, 2),
                     extent=[float(v) for v in np.r_[xyz.min(axis=0), xyz.max(axis=0)]],
@@ -135,14 +161,17 @@ def publish(result_dir, maps_dir, name, grid_python, grid_script, source_run=Non
             run_meta = {k: v for k, v in metadata.items() if k not in ('lag', 'slam_cmd', 'last_error')}
             run_meta.update(id=run_id, maps=[name], algorithm=info['algorithm'], frame=info['frame'],
                             source_run=metadata.get('id'), est_source='fastlio_planar_loop',
+                            provenance_note=PROVENANCE[provenance],
                             slam='fastlio_planar_loop_offline', parent_slam_cmd=metadata.get('slam_cmd'),
                             input_recording=report.get('input_recording'),
                             started=time.strftime('%Y-%m-%d %H:%M:%S'), ended=time.strftime('%Y-%m-%d %H:%M:%S'),
                             duration=info['duration'], length=info['length'], voxels=len(preview), extent=info['extent'])
             (run_dest / 'run.json').write_text(json.dumps(run_meta, ensure_ascii=False, indent=2))
-        print(json.dumps({'map': str(dest), 'run': str(run_dest) if run_dest else None,
-                          'points': len(xyz), 'voxels': len(preview), 'grid': info['grid']}, indent=2))
-        return dest
+        mark_recording_used(report.get('input_recording'), name)
+        if not quiet:
+            print(json.dumps({'map': str(dest), 'run': str(run_dest) if run_dest else None,
+                              'points': len(xyz), 'voxels': len(preview), 'grid': info['grid']}, indent=2))
+        return dest, (run_id if run_dest else None)
     finally:
         if not published and staging.exists():
             # Only this call's fresh hidden staging directory can be removed.

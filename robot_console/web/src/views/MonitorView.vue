@@ -493,7 +493,7 @@ const kpis = computed(() => {
   overflow: auto;
   border-radius: 12px;
   background:
-    linear-gradient(rgba(6, 182, 212, 0.05) 1px, transparent 1px) 0 0 / 100% 22px,
+    linear-gradient(rgba(var(--accent-rgb), 0.05) 1px, transparent 1px) 0 0 / 100% 22px,
     #0b1220;
   color: #cbd5e1;
   font-size: 12px;

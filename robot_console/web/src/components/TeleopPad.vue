@@ -75,7 +75,7 @@ function up() {
 .pad.dragging {
   cursor: grabbing;
   box-shadow: inset 0 0 0 1.5px rgba(var(--accent-rgb), 0.5), inset 0 6px 18px -8px rgba(var(--shade-rgb), 0.25),
-    0 0 0 6px rgba(6, 182, 212, 0.1);
+    0 0 0 6px rgba(var(--accent-rgb), 0.12);
 }
 .pad.disabled {
   cursor: not-allowed;
@@ -129,12 +129,12 @@ function up() {
   height: 52px;
   border-radius: 50%;
   pointer-events: none;
-  background: radial-gradient(circle at 35% 30%, #67e8f9, #0891b2 55%, #2563eb);
-  box-shadow: 0 0 0 4px rgba(var(--paper-rgb), 0.85), 0 6px 16px -4px rgba(37, 99, 235, 0.65);
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--accent) 45%, #fff), var(--accent) 55%, var(--accent-2));
+  box-shadow: 0 0 0 4px rgba(var(--paper-rgb), 0.85), 0 6px 16px -4px rgba(var(--accent-rgb), 0.55);
   transition: transform 0.12s ease-out;
 }
 .dragging .knob {
   transition: none; /* 拖动时紧跟手指，松开时才有回中动画 */
-  box-shadow: 0 0 0 4px rgba(var(--paper-rgb), 0.9), 0 0 18px rgba(6, 182, 212, 0.75);
+  box-shadow: 0 0 0 4px rgba(var(--paper-rgb), 0.9), 0 0 18px rgba(var(--accent-rgb), 0.7);
 }
 </style>

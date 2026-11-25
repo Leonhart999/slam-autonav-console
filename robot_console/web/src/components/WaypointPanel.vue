@@ -406,7 +406,7 @@ const batchSum = computed(() => batchLive.value.summary ?? null)
   height: 8px;
   margin-right: 6px;
   border-radius: 50%;
-  border: 2px solid #0891b2;
+  border: 2px solid var(--accent);
 }
 .wide { width: 100%; margin-top: 4px; }
 .eval-link { margin-top: 8px; }
@@ -428,7 +428,7 @@ const batchSum = computed(() => batchLive.value.summary ?? null)
 .list li { display: flex; align-items: center; gap: 8px; padding: 1px 0; }
 .list .n {
   display: inline-grid; place-items: center; width: 18px; height: 18px;
-  border: 1.5px solid #0891b2; border-radius: 50%; color: #0891b2;
+  border: 1.5px solid var(--accent); border-radius: 50%; color: var(--accent);
   font: 600 10.5px/1 var(--font-mono);
 }
 .list .xy { flex: 1; color: var(--ink-2); }

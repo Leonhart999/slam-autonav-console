@@ -15,7 +15,8 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from robot_console import plugins  # noqa: E402
 from robot_console.map_catalog import MapCatalog  # noqa: E402
-from robot_console.map_derive import register_derive_routes  # noqa: E402
+from robot_console.map_derive import MAX_DERIVED_XYZ_POINTS, register_derive_routes  # noqa: E402
+from robot_console.map_import import MAX_CLOUD_POINTS, MapImportError, read_cloud  # noqa: E402
 from robot_console.map_library import write_xyz_pcd  # noqa: E402
 
 
@@ -99,6 +100,44 @@ class DeriveTests(unittest.TestCase):
         detail = self.catalog.detail('office_static')
         self.assertEqual(detail['points'], 2000)
         self.assertTrue(detail['has_grid'])
+
+    def test_large_binary_xyz_can_be_derived_but_not_imported(self):
+        # More than eight million XYZ points also exceed the ordinary 24 million scalar limit.
+        count = 8_000_001
+        cloud = self.root / 'large.pcd'
+        pts = np.zeros((count, 3), dtype=np.float32)
+        pts[-1] = (0.5, -0.5, 1.5)
+        write_xyz_pcd(cloud, pts)
+        del pts
+        with self.assertRaises(MapImportError) as exc:
+            read_cloud(cloud)
+        self.assertIn(f'{MAX_CLOUD_POINTS:,}', exc.exception.params['reason'])
+        status, body = self.post('office', {'new_name': 'office_dense', 'tool': 'DUFOMap'},
+                                 {'cloud': ('static.pcd', cloud)})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body['points'], count)
+        d = self.root / 'office_dense'
+        self.assertEqual(self.catalog.detail('office_dense')['points'], count)
+        np.testing.assert_array_equal(read_cloud(d / 'map_voxel.pcd'), [[0, 0, 0], [0.5, -0.5, 1.5]])
+        self.assertEqual((d / 'map.pcd').stat().st_size, cloud.stat().st_size)
+
+    def test_large_cloud_bounds_and_payload_are_checked(self):
+        cases = [
+            (MAX_DERIVED_XYZ_POINTS + 1, 'binary', 'x y z', 'requires 1 to 20,000,000 points'),
+            (MAX_CLOUD_POINTS + 1, 'ascii', 'x y z', 'requires 1 to 5,000,000 points'),
+            (MAX_CLOUD_POINTS + 1, 'binary', 'x y z intensity', 'requires 1 to 5,000,000 points'),
+            (MAX_CLOUD_POINTS + 1, 'binary', 'x y z', 'size does not match POINTS'),
+        ]
+        for count, encoding, fields, reason in cases:
+            with self.subTest(count=count, encoding=encoding, fields=fields):
+                num_fields = len(fields.split())
+                header = (f'FIELDS {fields}\nSIZE{" 4" * num_fields}\nTYPE{" F" * num_fields}\n'
+                          f'POINTS {count}\nDATA {encoding}\n').encode('ascii')
+                status, body = self.post('office', {'new_name': 'bad_cloud', 'tool': 'DUFOMap'},
+                                         {'cloud': ('static.pcd', header)})
+                self.assertEqual(status, 400, body)
+                self.assertIn(reason, body['detail']['params']['reason'])
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ['office'])
 
     @unittest.skipUnless((Path.home() / 'venvs/console/bin/python').exists(), 'console venv with pcd2grid')
     def test_regrid_with_a_new_cloud(self):

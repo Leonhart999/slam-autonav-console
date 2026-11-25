@@ -11,6 +11,7 @@ description:
 author: Leonhart999
 license: MIT
 homepage: https://gitlab.com/ternaris/rosbags
+upstream: https://gitlab.com/ternaris/rosbags
 backend:
   module: backend
 frontend:

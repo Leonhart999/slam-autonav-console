@@ -1162,6 +1162,8 @@ class PluginManager:
         pc = cfg.get('plugins') or {}
         self.cfg = cfg
         self.dirs = list(pc.get('dirs') or [])
+        shipped_dir = pc.get('shipped_dir')
+        self.shipped_dir = os.path.normpath(shipped_dir) if shipped_dir else None
         self.data_dir = pc.get('data_dir') or os.path.join(cfg['paths']['data_root'], 'plugin_data')
         self.state = StateFile(pc.get('state_file') or os.path.join(cfg['paths']['data_root'], 'plugin_state.json'))
         self.envs = PythonEnvs(pc.get('envs_dir') or os.path.join(cfg['paths']['data_root'], 'plugin_envs'),
@@ -1185,6 +1187,7 @@ class PluginManager:
             old = self.records
             records = {}
             for base in self.dirs:
+                is_shipped = bool(self.shipped_dir) and os.path.normpath(base) == self.shipped_dir
                 try:
                     names = sorted(os.listdir(base))
                 except OSError:
@@ -1215,6 +1218,14 @@ class PluginManager:
                             rec.load_error = prev.load_error
                         key = rec.manifest['id'] if rec.manifest else name
                     if key in records:
+                        # A user/market install in an earlier dir shadows the bundled copy instead of
+                        # showing a duplicate-plugin error card. If the bundled copy is still loaded from
+                        # startup, keep the active record until restart and mark its pending version.
+                        if is_shipped:
+                            if rec.active and records[key].manifest is not None:
+                                rec.disk_version = records[key].manifest['version']
+                                records[key] = rec
+                            continue
                         dup = PluginRecord(name, folder)
                         dup.manifest = rec.manifest
                         dup.issue = PluginError('plugin_duplicate', id=key, other=records[key].dir)
@@ -1224,6 +1235,11 @@ class PluginManager:
             # Plugins loaded at start stay listed even if their folder was removed meanwhile
             for pid, rec in old.items():
                 if rec.active and pid not in records:
+                    records[pid] = rec
+                elif rec.active and pid in records and records[pid] is not rec and not os.path.isdir(rec.dir):
+                    # Active market override was uninstalled while a bundled copy exists: keep the loaded
+                    # instance listed until restart and show the bundled version as pending.
+                    rec.disk_version = records[pid].manifest['version'] if records[pid].manifest else ''
                     records[pid] = rec
             self.records = records
         return self.list()
@@ -1329,7 +1345,7 @@ class PluginManager:
                 (enabled and not rec.active and rec.load_error is None) or (not enabled and rec.active)
                 or (rec.active and (rec.disk_version is not None or not os.path.isdir(rec.dir)))),
             # version on disk of a loaded plugin that was updated or removed since the start ('' = removed)
-            'pending_version': ('' if rec.active and not os.path.isdir(rec.dir) else rec.disk_version),
+            'pending_version': (rec.disk_version if rec.disk_version is not None else ('' if rec.active and not os.path.isdir(rec.dir) else None)),
             # how the folder got there: 'market' / 'file' (plugin market, .market.json), None (put by hand/shipped)
             'origin': _origin(rec.dir),
             'issue': {'code': issue.code, 'params': issue.params} if issue else None,

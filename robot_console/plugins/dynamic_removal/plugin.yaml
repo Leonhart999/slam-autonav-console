@@ -11,6 +11,7 @@ description:
 author: Leonhart999
 license: MIT
 homepage: https://github.com/KTH-RPL/dufomap
+upstream: https://github.com/KTH-RPL/dufomap
 backend:
   module: backend
 frontend:

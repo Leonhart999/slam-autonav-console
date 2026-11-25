@@ -263,7 +263,7 @@ onMounted(loadMaps)
   overflow: auto;
   border: 1px solid var(--hairline);
   border-radius: 8px;
-  background: #fff;
+  background: var(--canvas-bg);
 }
 .dr-image img {
   display: block;

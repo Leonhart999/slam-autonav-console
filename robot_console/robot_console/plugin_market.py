@@ -272,18 +272,26 @@ class PluginMarket:
     def installed(self, pid):
         """What is installed under this id: version on disk, where, and how it came there; None if nothing."""
         rec = self.manager.records.get(pid)
-        if rec is None or not os.path.isdir(rec.dir):
-            return None            # never installed, or removed while it is still loaded until the restart
-        try:
-            version = read_manifest(rec.dir)['version']
-        except PluginError:
-            version = rec.manifest['version'] if rec.manifest else '?'
-        prov = read_provenance(rec.dir)
         target = self.target_dir()
-        in_target = bool(target) and os.path.dirname(os.path.normpath(rec.dir)) == os.path.normpath(target)
-        return {'version': version, 'dir': shown(rec.dir), 'origin': (prov or {}).get('source') or
-                ('manual' if in_target else 'bundled'), 'state': self.manager.status_of(rec),
-                'enabled': self.manager.state.enabled(pid), 'active': rec.active}
+        # Look up the highest-priority folder on disk first so an active bundled plugin shadowed by a fresh
+        # market install (or an active market install just uninstalled back to bundled) reports the disk state.
+        folder = None
+        for base in self.manager.dirs:
+            cand = os.path.join(base, pid)
+            if os.path.isdir(cand):
+                folder = cand
+                break
+        if folder is None:
+            return None
+        try:
+            version = read_manifest(folder)['version']
+        except PluginError:
+            version = rec.manifest['version'] if rec and rec.manifest else '?'
+        prov = read_provenance(folder)
+        in_target = bool(target) and os.path.dirname(os.path.normpath(folder)) == os.path.normpath(target)
+        return {'version': version, 'dir': shown(folder), 'origin': (prov or {}).get('source') or
+                ('manual' if in_target else 'bundled'), 'state': self.manager.status_of(rec) if rec else 'disabled',
+                'enabled': self.manager.state.enabled(pid), 'active': bool(rec and rec.active)}
 
     # -- download and unpack --
 

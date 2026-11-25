@@ -35,12 +35,12 @@ def load(plugin, module):
 class ManifestTests(unittest.TestCase):
     def test_every_shipped_plugin_is_valid_and_built(self):
         ids = sorted(p.name for p in SHIPPED.iterdir() if p.is_dir() and not p.name.startswith(('_', '.')))
-        self.assertEqual(ids, ['ai_assistant', 'bag_convert', 'dynamic_removal', 'ground_seg'])
+        self.assertEqual(ids, ['ai_assistant', 'bag_convert', 'dynamic_removal', 'eye_care_ui', 'ground_seg'])
         for pid in ids:
             m = plugins.read_manifest(str(SHIPPED / pid))
             self.assertIn(m['api'], plugins.SUPPORTED_APIS)
             self.assertTrue((SHIPPED / pid / 'ui' / 'plugin.js').is_file(), pid)
-            if pid != 'ai_assistant':
+            if pid not in ('ai_assistant', 'eye_care_ui'):
                 self.assertTrue(m['python']['requirements'], pid)
                 self.assertTrue(all('==' in r for r in m['python']['requirements'][:1]), pid)   # main package pinned
                 self.assertTrue((SHIPPED / pid / 'worker.py').is_file(), pid)

@@ -464,7 +464,7 @@ html.dark .ro {
   margin-top: 4px;
   border-radius: 2px;
   background: var(--accent-grad);
-  box-shadow: 0 0 8px rgba(6, 182, 212, 0.6);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.55);
 }
 .head-text {
   min-width: 0;
@@ -828,7 +828,7 @@ html.dark .ro {
   transition: left 0.18s ease-out;
 }
 .changed .knob {
-  box-shadow: 0 0 0 1.5px var(--accent), 0 0 6px rgba(6, 182, 212, 0.55);
+  box-shadow: 0 0 0 1.5px var(--accent), 0 0 6px rgba(var(--accent-rgb), 0.55);
 }
 .bad .knob {
   box-shadow: 0 0 0 1.5px var(--bad);

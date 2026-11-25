@@ -10,6 +10,7 @@ description:
 author: Leonhart999
 license: MIT
 homepage: https://github.com/url-kaist/patchwork-plusplus
+upstream: https://github.com/url-kaist/patchwork-plusplus
 backend:
   module: backend
 frontend:

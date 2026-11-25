@@ -2,6 +2,7 @@
 // The SDK object the scripts see (window.RobotConsole) is built in sdk.ts.
 import { markRaw, shallowReactive } from 'vue'
 import type { Component } from 'vue'
+import { customThemes, registerPluginThemes, type ThemeDef } from '@/theme'
 import type { Bilingual } from '@/types'
 import type { PluginDef, PluginInfo } from './types'
 
@@ -40,6 +41,7 @@ let mergeMessages: MessageMerger = () => {}
 export function setMessageMerger(fn: MessageMerger) { mergeMessages = fn }
 
 const PAGE_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/
+const THEME_RE = /^[a-z0-9][a-z0-9_-]{1,39}$/
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const isComponent = (v: unknown) => (!!v && typeof v === 'object') || typeof v === 'function'
 
@@ -104,9 +106,46 @@ export function register(def: unknown): void {
   const header = ((d.header as unknown[]) ?? []).map((c, i) => ({
     pluginId: id, key: `${id}:${i}`, component: markRaw(c as object) as Component,
   }))
+  const themes: ThemeDef[] = []
+  if (d.themes !== undefined && !Array.isArray(d.themes)) fail('themes must be an array')
+  for (const [i, item] of ((d.themes as unknown[]) ?? []).entries()) {
+    if (!isObj(item)) fail(`themes[${i}] is not an object`)
+    const raw = item as Record<string, unknown>
+    if (typeof raw.id !== 'string' || !THEME_RE.test(raw.id) || raw.id === 'light' || raw.id === 'dark') {
+      fail(`themes[${i}].id must match ${THEME_RE} and not be light/dark`)
+    }
+    if (themes.some((q) => q.id === raw.id) || customThemes.value.some((q) => q.id === raw.id)) {
+      fail(`themes[${i}].id "${raw.id}" is already registered`)
+    }
+    const lbl = title(raw.label)
+    if (!lbl) fail(`themes[${i}].label is missing`)
+    if (raw.base !== 'light' && raw.base !== 'dark') fail(`themes[${i}].base must be "light" or "dark"`)
+    if (raw.pageColor !== undefined && typeof raw.pageColor !== 'string') fail(`themes[${i}].pageColor must be a string`)
+    const tokens: Record<string, string> = {}
+    if (raw.tokens !== undefined) {
+      if (!isObj(raw.tokens)) fail(`themes[${i}].tokens must be an object`)
+      for (const [k, v] of Object.entries(raw.tokens as Record<string, unknown>)) {
+        if (!k.startsWith('--') || typeof v !== 'string') fail(`themes[${i}].tokens["${k}"] must map --var to string`)
+        tokens[k] = v as string
+      }
+    }
+    if (raw.scene !== undefined && !isObj(raw.scene)) fail(`themes[${i}].scene must be an object`)
+    if (raw.charts !== undefined && !isObj(raw.charts)) fail(`themes[${i}].charts must be an object`)
+    themes.push({
+      id: raw.id as string,
+      pluginId: id,
+      label: lbl!,
+      base: raw.base as 'light' | 'dark',
+      pageColor: raw.pageColor as string | undefined,
+      tokens: raw.tokens ? tokens : undefined,
+      scene: raw.scene as ThemeDef['scene'],
+      charts: raw.charts as ThemeDef['charts'],
+    })
+  }
   if (messages) mergeMessages(id, messages as NonNullable<PluginDef['messages']>)
   registry.pages = [...registry.pages, ...pages]
   registry.header = [...registry.header, ...header]
+  registerPluginThemes(themes)
   registry.registered = [...registry.registered, id]
 }
 

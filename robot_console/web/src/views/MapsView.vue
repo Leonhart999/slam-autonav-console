@@ -18,13 +18,14 @@ import GlassPanel from '@/components/GlassPanel.vue'
 import NavGrid2D from '@/components/NavGrid2D.vue'
 import NavScene3D from '@/components/NavScene3D.vue'
 import MapRegridDialog from '@/components/MapRegridDialog.vue'
+import MapLoopDialog from '@/components/MapLoopDialog.vue'
 import MapEditDialog from '@/components/MapEditDialog.vue'
 import NavigationImportDialog, { type MapImportResult } from '@/components/NavigationImportDialog.vue'
 import TrashBin, { type TrashItem } from '@/components/TrashBin.vue'
 
 const { t } = useI18n({ messages: {
-  'zh-CN': { management: { import: '导入地图', regrid: '重新生成 2D', edit: '编辑 2D 地图', remove: '删除地图', trashTitle: '地图回收站', confirm: '确认', cancel: '取消', removeAsk: '将地图 {name} 移到回收站？原文件仍可恢复。', deleted: '地图已移到回收站', restored: '地图已恢复', purged: '回收站文件已永久删除', legacy: '旧平铺格式暂不支持删除（图像可能被其他地图共用）' } },
-  en: { management: { import: 'Import map', regrid: 'Regenerate 2D', edit: 'Edit 2D map', remove: 'Delete map', trashTitle: 'Map recycle bin', confirm: 'Confirm', cancel: 'Cancel', removeAsk: 'Move map {name} to the recycle bin? Its files remain recoverable.', deleted: 'Map moved to recycle bin', restored: 'Map restored', purged: 'Recycled files permanently deleted', legacy: 'Legacy flat maps cannot be deleted here (images may be shared)' } },
+  'zh-CN': { management: { import: '导入地图', regrid: '重新生成 2D', loop: '回环优化', loopNoScans: '这张地图没有保存原始扫描。回放时在回放页打开“保存原始扫描”，再保存地图。', loopDone: '这张地图已经做过回环优化。请对原地图重新优化。', edit: '编辑 2D 地图', remove: '删除地图', trashTitle: '地图回收站', confirm: '确认', cancel: '取消', removeAsk: '将地图 {name} 移到回收站？原文件仍可恢复。', deleted: '地图已移到回收站', restored: '地图已恢复', purged: '回收站文件已永久删除', legacy: '旧平铺格式暂不支持删除（图像可能被其他地图共用）' } },
+  en: { management: { import: 'Import map', regrid: 'Regenerate 2D', loop: 'Loop optimization', loopNoScans: 'This map has no raw scans. Switch Save raw scans on in the Playback page, then save the map.', loopDone: 'This map is already loop-optimized. Optimize its source map instead.', edit: 'Edit 2D map', remove: 'Delete map', trashTitle: 'Map recycle bin', confirm: 'Confirm', cancel: 'Cancel', removeAsk: 'Move map {name} to the recycle bin? Its files remain recoverable.', deleted: 'Map moved to recycle bin', restored: 'Map restored', purged: 'Recycled files permanently deleted', legacy: 'Legacy flat maps cannot be deleted here (images may be shared)' } },
 } })
 const store = useStatusStore()
 const route = useRoute()
@@ -229,13 +230,23 @@ async function copy(text: string) {
 
 const importOpen = ref(false)
 const regridOpen = ref(false)
-watch(regridOpen, visible => {
-  if (!visible && route.query.task) void router.replace({ query: { ...route.query, task: undefined } })
-})
+const loopOpen = ref(false)
+for (const dialog of [regridOpen, loopOpen]) {
+  watch(dialog, visible => {
+    if (!visible && route.query.task) void router.replace({ query: { ...route.query, task: undefined, dialog: undefined } })
+  })
+}
 watch(() => route.query.map, name => { if (typeof name === 'string') selected.value = name })
+// ?task=<id> reopens the dialog of a background task (regrid by default, ?dialog=loop for loop optimization)
 watch([() => route.query.task, () => detail.value?.name], ([task, name]) => {
-  if (typeof task === 'string' && name === route.query.map) regridOpen.value = true
+  if (typeof task !== 'string' || name !== route.query.map) return
+  if (route.query.dialog === 'loop') loopOpen.value = true
+  else regridOpen.value = true
 }, { immediate: true })
+const loopTitle = computed(() => {
+  const reason = detail.value?.loop?.reason
+  return reason === 'no_scans' ? t('management.loopNoScans') : reason === 'already_optimized' ? t('management.loopDone') : ''
+})
 const editOpen = ref(false)
 const trashOpen = ref(false)
 const trashItems = ref<TrashItem[]>([])
@@ -381,7 +392,8 @@ function fileRole(role: string | null) {
     </GlassPanel>
 
     <NavigationImportDialog v-model="importOpen" :disabled="false" allow-cloud-only @completed="imported" />
-    <MapRegridDialog v-model="regridOpen" :map="detail" :cloud="cloud" :task-id="typeof route.query.task === 'string' ? route.query.task : undefined" @saved="selectNew" />
+    <MapRegridDialog v-model="regridOpen" :map="detail" :cloud="cloud" :task-id="typeof route.query.task === 'string' && route.query.dialog !== 'loop' ? route.query.task : undefined" @saved="selectNew" />
+    <MapLoopDialog v-model="loopOpen" :map="detail" :task-id="typeof route.query.task === 'string' && route.query.dialog === 'loop' ? route.query.task : undefined" @saved="selectNew" />
     <MapEditDialog v-model="editOpen" :map="detail" @saved="selectNew" />
     <p v-if="detailError" class="warn">{{ detailError }}</p>
 
@@ -397,6 +409,7 @@ function fileRole(role: string | null) {
           </span>
           <div class="actions">
           <el-button :disabled="!detail.has_cloud" @click="regridOpen=true">{{ t('management.regrid') }}</el-button>
+          <el-button :disabled="!detail.loop || detail.loop.reason !== null" :title="loopTitle" @click="loopOpen=true">{{ t('management.loop') }}</el-button>
           <el-button :disabled="!detail.has_grid" @click="editOpen=true">{{ t('management.edit') }}</el-button>
           <el-button type="danger" plain :disabled="detail.kind==='flat' || mutationBusy" :title="detail.kind==='flat' ? t('management.legacy') : ''" @click="removed">{{ t('management.remove') }}</el-button>
           <el-button

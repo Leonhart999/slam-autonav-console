@@ -1,0 +1,45 @@
+# Eye-care / anti-blue-light UI extension: registers a warm amber low-blue-light theme
+# in the console appearance switcher and adds an interactive eye-care control page + header chip.
+id: eye_care_ui
+api: 1
+version: 0.1.0
+name: {zh: 护眼防蓝光 UI, en: Eye-care anti-blue-light UI}
+description:
+  zh: 为控制台提供“护眼防蓝光”外观主题，通过低色温暖琥珀纸感底色与柔化青蓝通道降低长时间实验时的蓝光刺激；支持一键切换并可调节蓝光过滤强度、色温暖度与对比度柔化。
+  en: Adds an eye-care anti-blue-light UI theme to the console appearance switcher with warm amber paper surfaces and attenuated cyan/blue channels to reduce eye strain during long SLAM and navigation sessions, plus live filter strength, warmth, and contrast controls.
+author: Leonhart999
+license: MIT
+backend:
+  module: backend
+frontend:
+  dir: ui
+  script: plugin.js
+  style: plugin.css
+settings:
+  - key: default_filter_strength
+    type: integer
+    label: {zh: 默认防蓝光过滤强度（%）, en: Default blue-light filter strength (%)}
+    help:
+      zh: 控制蓝光削减与暖色偏置强度（0–80%），可在护眼页面实时调节。
+      en: Controls blue-light attenuation and warm amber tint (0–80%); also adjustable live on the plugin page.
+    min: 0
+    max: 80
+    step: 5
+    default: 40
+  - key: default_warmth
+    type: integer
+    label: {zh: 默认色温暖度（K 偏移等级）, en: Default warmth level}
+    help:
+      zh: 1 为微暖纸白，5 为深琥珀护眼模式。
+      en: 1 is mildly warm paper; 5 is deep amber eye-care mode.
+    min: 1
+    max: 5
+    step: 1
+    default: 3
+  - key: auto_apply_on_load
+    type: boolean
+    label: {zh: 控制台启动时自动切换到护眼主题, en: Auto-apply eye-care theme on startup}
+    help:
+      zh: 开启后每次打开控制台如果当前不是护眼主题，会自动切换到护眼防蓝光主题。
+      en: Automatically switches to the eye-care theme on console load if another theme is active.
+    default: false

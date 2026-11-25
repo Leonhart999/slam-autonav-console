@@ -157,7 +157,7 @@ function wholeRange() {
   transition: width 0.4s linear;
 }
 .track.live i {
-  box-shadow: 0 0 6px rgba(6, 182, 212, 0.7);
+  box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.65);
 }
 .times {
   display: flex;

@@ -158,3 +158,59 @@ test('evaluation chart colors update synchronously when theme switches', async (
   assert.equal(colors.SERIES[0], lightSeries0)
   assert.equal(colors.AXIS.tipBg, lightTipBg)
 })
+
+test('plugin themes extend themeChoices, apply CSS tokens, and override scenePalette and chartPalette', async () => {
+  const styles = new Map()
+  const attrs = new Map()
+  const env = createDom('light', { reducedMotion: true })
+  // Augment root mock with style/attribute helpers matching browser DOM
+  const root = {
+    classList: {
+      add: (...xs) => xs.forEach((x) => env.classes.add(x)),
+      remove: (...xs) => xs.forEach((x) => env.classes.delete(x)),
+      toggle: (x, force) => (force === undefined ? (env.classes.has(x) ? env.classes.delete(x) : env.classes.add(x)) : force ? env.classes.add(x) : env.classes.delete(x)),
+      contains: (x) => env.classes.has(x),
+    },
+    style: {
+      setProperty: (k, v) => styles.set(k, v),
+      removeProperty: (k) => styles.delete(k),
+    },
+    setAttribute: (k, v) => attrs.set(k, v),
+    removeAttribute: (k) => attrs.delete(k),
+  }
+  const storage = new Map([['robot_console.theme', 'eye_care']])
+  let metaColor = '#eef2f8'
+  const mod = loadSource('../src/theme.ts', { vue }, {
+    document: {
+      documentElement: root,
+      querySelector: (sel) => (sel === 'meta[name="theme-color"]' ? { setAttribute: (_k, v) => (metaColor = v) } : null),
+    },
+    window: { innerWidth: 1200, innerHeight: 800, matchMedia: () => ({ matches: true }), addEventListener() {}, setTimeout, clearTimeout },
+    localStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)) },
+  })
+  mod.initTheme()
+  assert.equal(mod.theme.value, 'eye_care')
+  mod.registerPluginThemes([{
+    id: 'eye_care',
+    pluginId: 'eye_care_ui',
+    label: { zh: '护眼防蓝光', en: 'Eye Care' },
+    base: 'light',
+    pageColor: '#efe6d1',
+    tokens: { '--accent': '#a16207', '--page': '#efe6d1' },
+    scene: { estLine: 0x9a5b13 },
+    charts: { series: ['#9a5b13'] },
+  }])
+  assert.equal(mod.themeChoices.value.length, 3)
+  assert.equal(attrs.get('data-ui-theme'), 'eye_care')
+  assert.equal(styles.get('--accent'), '#a16207')
+  assert.equal(metaColor, '#efe6d1')
+  assert.equal(mod.scenePalette.value.estLine, 0x9a5b13)
+  assert.equal(mod.chartPalette.value.series[0], '#9a5b13')
+  assert.equal(mod.isDark.value, false)
+
+  await mod.setTheme('dark')
+  assert.equal(attrs.has('data-ui-theme'), false)
+  assert.equal(styles.has('--accent'), false)
+  assert.equal(mod.isDark.value, true)
+  assert.equal(mod.scenePalette.value.canvasBg, '#0d1424')
+})

@@ -30,7 +30,7 @@
   height: 18px;
   border-radius: 0 3px 3px 0;
   background: var(--accent-grad);
-  box-shadow: 0 0 8px rgba(6, 182, 212, 0.8);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.75);
 }
 .step.locked .step-head .title,
 .step.locked .field {

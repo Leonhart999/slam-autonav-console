@@ -1048,7 +1048,7 @@ html.dark .dot.pose {
 .sw.waypoint {
   width: 11px;
   height: 11px;
-  border: 2px solid #0891b2;
+  border: 2px solid var(--accent);
   border-radius: 50%;
 }
 .sw.cost {
@@ -1058,7 +1058,7 @@ html.dark .dot.pose {
   background: linear-gradient(90deg, rgba(56, 189, 248, 0.5), rgba(244, 63, 94, 0.7), #881337);
 }
 .picking.waypoint {
-  background: #0891b2;
+  background: var(--accent);
 }
 .variant {
   display: flex;

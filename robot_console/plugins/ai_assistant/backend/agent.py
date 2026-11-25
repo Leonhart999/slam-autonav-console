@@ -14,7 +14,7 @@ The full tool list is always sent (a stable prompt prefix, and old tool calls in
 level is told to the model with the question and enforced here.
 """
 from . import actions
-from .providers import ProviderError
+from .providers import ProviderError, measured_call, tokens
 
 SYSTEM = """You are the assistant built into the SLAM and AutoNav Console, a web console for LiDAR SLAM mapping \
 (FAST-LIO2 with optional LiDAR-only and ground-vehicle-constraint variants, GLIM), rosbag playback of real-robot data, \
@@ -89,7 +89,8 @@ def refusal(name, access):
             'user what you would run and that they can switch the access menu to "Ask before running".')
 
 
-def run_turn(provider, session, user_text, page, settings, call_tool, emit, cancelled, access='read', confirm=None):
+def run_turn(provider, session, user_text, page, settings, call_tool, emit, cancelled, access='read', confirm=None,
+             on_round=None):
     turns = session['turns']
     if not session.get('title'):
         session['title'] = ' '.join(user_text.split())[:60]
@@ -101,18 +102,27 @@ def run_turn(provider, session, user_text, page, settings, call_tool, emit, canc
     choice = 'none' if access == 'chat' else 'auto'
     max_rounds = int(settings.get('max_tool_rounds') or 12)
     rounds, over_limit = 0, False
-    usage = {'input': 0, 'output': 0}
+    usage = tokens()
+    number = 0
+
+    def record(row):
+        if on_round:
+            on_round(row)
+        emit({'type': 'usage', 'round': row['round'], 'model': row['model'], 'usage': tokens(row)})
+
     model = ''
     while True:
         if cancelled():
             raise Cancelled()
-        emit({'type': 'status', 'state': 'model', 'round': rounds + 1})
-        reply = provider.complete(system, turns, defs, choice)
+        number += 1
+        emit({'type': 'status', 'state': 'model', 'round': number})
+        reply = measured_call(provider, system, turns, defs, choice, number, record)
         model = reply.model or model
         for k in usage:
             usage[k] += reply.usage.get(k) or 0
         turns.append({'role': 'assistant', 'text': reply.text, 'tool_calls': reply.tool_calls,
-                      'raw': reply.raw, 'raw_provider': provider.name})
+                      'raw': reply.raw, 'raw_provider': provider.name,
+                      'final': not reply.tool_calls and reply.stop not in ('pause', 'refusal')})
         if reply.stop == 'refusal':
             raise ProviderError('refusal', category=reply.detail or '-')
         if not reply.tool_calls:
@@ -139,7 +149,7 @@ def run_turn(provider, session, user_text, page, settings, call_tool, emit, canc
                     if kind == 'run':
                         decision = 'auto'
                         if access == 'ask':
-                            emit({'type': 'status', 'state': 'confirm', 'round': rounds + 1})
+                            emit({'type': 'status', 'state': 'confirm', 'round': number})
                             decision = confirm(c) if confirm else 'denied'
                     if decision in ('denied', 'cancelled'):
                         content, is_error = ('Error: the user declined this call. Do not retry it; ask the user what '

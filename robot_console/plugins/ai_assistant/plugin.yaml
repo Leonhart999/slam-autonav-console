@@ -5,11 +5,11 @@
 # Messages API.
 id: ai_assistant
 api: 1
-version: 0.3.0
+version: 0.4.0
 name: {zh: AI 助手, en: AI assistant}
 description:
-  zh: 在页头打开一个聊天抽屉，用你自己配置的大模型（在“AI 模型服务”页添加，可保存多个并随时切换）回答关于地图、运行记录、评估结果、SLAM 参数、日志和传感器配置的问题。输入框下方可以选模型和推理强度，并选择权限：仅对话、只读（默认）、运行前询问或自动运行；后两种允许它启动或取消批量实验、计算评估。它不会删除数据或修改设置。对话内容和工具读取到的数据会发送给你配置的模型服务。
-  en: 'Opens a chat drawer in the header that answers questions about maps, run records, evaluation results, SLAM parameters, logs and sensor profiles with the model service you configure (add several on the AI model services page and switch any time). Under the input you pick the model, its reasoning effort and the access: chat only, read only (default), ask before running, or run automatically; the last two let it start or cancel batch experiments and compute evaluations. It never deletes data or changes settings. The conversation and the data the tools read are sent to that model service.'
+  zh: 在页头打开一个聊天抽屉，用你自己配置的大模型或在“AI 模型服务”页通过内置 CPA 引擎（CLIProxyAPI）OAuth 登录的订阅账号回答关于地图、运行记录、评估结果、SLAM 参数、日志和传感器配置的问题。支持历史对话搜索、置顶、重命名与导出，以及按模型、服务和对话的用量与单价估算统计。输入框下方可选模型、推理强度与权限：仅对话、只读（默认）、运行前询问或自动运行；后两种允许启动或取消批量实验、计算评估，不会删除控制台数据或修改设置。对话内容与读取到的数据会发送给所选模型服务。
+  en: 'Opens a chat drawer in the header that answers questions about maps, run records, evaluation results, SLAM parameters, logs and sensor profiles using model services you configure or subscription accounts signed in via OAuth through the embedded CPA engine (CLIProxyAPI). Includes searchable conversation history (pin, rename, Markdown export) and per-call usage and cost-estimate statistics. Under the input you pick the model, reasoning effort and access: chat only, read only (default), ask before running, or run automatically; the last two let it start or cancel batch experiments and compute evaluations without deleting console data or changing settings. Conversations and tool output are sent to the chosen model service.'
 author: Leonhart999
 license: MIT
 backend:

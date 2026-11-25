@@ -72,6 +72,21 @@ def scan_source(folder, meta):
     return recording, trajectory
 
 
+def loop_state(folder, meta):
+    """Can the Maps page run the loop back-end on this map (map_loop.py)? reason: None, 'no_scans' (no raw scans
+    recorded with it) or 'already_optimized' (a loop back-end result; optimize its source map instead).
+    ground: the map comes from a FAST-LIO2 variant with the ground constraint (else heights may drift and loops
+    be rejected as ground-inconsistent)."""
+    meta = meta if isinstance(meta, dict) else {}
+    if meta.get('postprocess') == 'fastlio_planar_loop':
+        reason = 'already_optimized'
+    elif scan_source(folder, meta) is None:
+        reason = 'no_scans'
+    else:
+        reason = None
+    return {'reason': reason, 'ground': str(meta.get('slam') or '').endswith('_ground')}
+
+
 def has_trajectory(folder):
     if not folder:
         return False
@@ -238,6 +253,7 @@ class MapCatalog:
         scans = scan_source(s['_folder'], meta)
         return {**self._public(s), **info,
                 'has_scans': scans is not None,
+                'loop': loop_state(s['_folder'], meta),
                 # recording folder (scans.bin + index.csv) and the per-scan trajectory, for tools that read scans
                 'scans': {'recording': str(scans[0]), 'trajectory': str(scans[1])} if scans else None,
                 'location': str(location), 'location_win': windows_path(location),
@@ -266,6 +282,9 @@ def register_map_routes(app, cfg, solids=None, library=None, procs=None):
     from .map_trash import register_trash_routes
     from .map_regrid import register_regrid_routes
     from .map_derive import register_derive_routes
+    from .map_loop import register_loop_routes
+    # Loop routes first: /api/maps/loop/env must not be read as a map named "loop"
+    register_loop_routes(app, catalog, cfg)
     register_trash_routes(app, catalog, library, procs, cfg)
     register_regrid_routes(app, catalog, cfg)
     register_derive_routes(app, catalog, cfg)

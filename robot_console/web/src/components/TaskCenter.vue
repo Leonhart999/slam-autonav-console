@@ -96,8 +96,9 @@ async function show(task: ConsoleTask) {
     return
   }
   open.value = false
-  await router.push(task.kind === 'regrid'
-    ? { path: '/maps', query: { map: task.saved_map ?? task.target, task: task.saved_map ? undefined : task.id } }
+  await router.push(task.kind === 'regrid' || task.kind === 'loop'
+    ? { path: '/maps', query: { map: task.saved_map ?? task.target, task: task.saved_map ? undefined : task.id,
+        dialog: task.kind === 'loop' && !task.saved_map ? 'loop' : undefined } }
     : { path: '/evaluation', query: { run: task.target, task: task.id } })
 }
 </script>

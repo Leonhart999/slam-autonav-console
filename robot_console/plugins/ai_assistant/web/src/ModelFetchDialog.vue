@@ -58,7 +58,7 @@ const ctx = (n: number | null) => (n ? (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` :
 </script>
 
 <template>
-  <el-dialog :model-value="modelValue" :title="t('fetch.title')" width="560px" append-to-body class="aip-dialog"
+  <el-dialog :model-value="modelValue" :title="t('fetch.title')" width="min(560px, 94vw)" append-to-body class="aip-dialog"
              @update:model-value="emit('update:modelValue', $event)">
     <div class="aip-fetch">
       <div class="aip-row">
