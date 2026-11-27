@@ -4,16 +4,16 @@ English | [中文](README.zh-CN.md)
 
 [![Online Demo](https://img.shields.io/badge/Live_Demo-Warehouse_Replay-0ea5e9)](https://leonhart999.github.io/slam-autonav-console/)
 [![Console Preview](https://img.shields.io/badge/Console_Preview-Read--Only_UI-6366f1)](https://leonhart999.github.io/slam-autonav-console/console/)
-[![Plugin Market](https://img.shields.io/badge/Plugin_Market-8_Plugins-10b981)](https://github.com/Leonhart999/slam-console-plugins)
+[![Plugin Market](https://img.shields.io/badge/Plugin_Market-GitHub_Catalog-10b981)](https://github.com/Leonhart999/slam-console-plugins)
 [![ROS 2 Humble](https://img.shields.io/badge/ROS_2-Humble-22314e)](https://docs.ros.org/en/humble/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b)](LICENSE)
 
-A browser-based console for **LiDAR SLAM mapping, real-robot bag playback, map post-processing, Nav2 autonomous navigation, automated batch benchmarking, and trajectory / map evaluation** on ROS 2 Humble and Gazebo Fortress. One workspace takes you from an empty simulation world or a recorded rosbag2 dataset to a cleaned 3D/2D map, closed-loop navigation trials, and reproducible `evo` reports.
+A browser-based console for **LiDAR SLAM mapping, rosbag2 playback, map cleanup, Nav2 navigation in Gazebo, batch runs, and `evo` evaluation** on ROS 2 Humble and Gazebo Fortress. If you already work with FAST-LIO2, GLIM, or Nav2 and want one workspace to run simulations, replay real-robot bags, inspect 2D/3D maps, and compare trajectories without juggling separate terminals and `rviz2` windows, this covers the workflow from raw scans to reproducible plots and CSVs.
 
-Built for the bachelor thesis *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* (Harbin Engineering University). The interface supports **Chinese / English**, **light / dark / plugin-extensible themes** (including a bundled low-blue-light Eye-Care theme), and a **unified plugin system + GitHub plugin market**.
+Closed-loop Nav2 navigation runs in Gazebo Fortress (including scenes generated from saved 2D grids), while real-robot datasets run through rosbag2 playback, topic and extrinsics probing, offline loop optimization, and map post-processing. The interface supports **Chinese / English**, **light / dark / plugin-extensible themes** (with a bundled low-blue-light Eye-Care theme), and a **plugin system backed by an independently updated GitHub catalog** ([`Leonhart999/slam-console-plugins`](https://github.com/Leonhart999/slam-console-plugins)). Built for the bachelor thesis *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* (Harbin Engineering University).
 
-- **[Online warehouse replay demo](https://leonhart999.github.io/slam-autonav-console/)**: step through a recorded 230 m FAST-LIO2 mapping run in the simulated warehouse with live 3D point cloud and APE metrics.
-- **[Full console preview (read-only)](https://leonhart999.github.io/slam-autonav-console/console/)**: explore the actual console pages, saved 2D/3D maps, navigation results, evaluation charts, and the published plugin catalog directly in your browser (no ROS 2 backend required).
+- **[Live warehouse replay](https://leonhart999.github.io/slam-autonav-console/)**: step through a recorded 230 m FAST-LIO2 mapping run in the simulated warehouse with live 3D point-cloud playback and APE metrics in your browser.
+- **[Read-only console preview](https://leonhart999.github.io/slam-autonav-console/console/)**: click through the console pages, saved 2D/3D maps, Gazebo navigation runs, `evo` charts, and the plugin market catalog with no ROS 2 backend. The preview is static and read-only; launching stacks, saving maps, or installing plugins requires a local installation.
 
 [![Video tour of the console, 2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 

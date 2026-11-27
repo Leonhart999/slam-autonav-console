@@ -4,16 +4,16 @@
 
 [![在线演示](https://img.shields.io/badge/在线演示-仓库建图回放-0ea5e9)](https://leonhart999.github.io/slam-autonav-console/)
 [![控制台预览](https://img.shields.io/badge/控制台预览-只读完整界面-6366f1)](https://leonhart999.github.io/slam-autonav-console/console/)
-[![插件市场](https://img.shields.io/badge/插件市场-8_个插件-10b981)](https://github.com/Leonhart999/slam-console-plugins)
+[![插件市场](https://img.shields.io/badge/插件市场-GitHub_目录-10b981)](https://github.com/Leonhart999/slam-console-plugins)
 [![ROS 2 Humble](https://img.shields.io/badge/ROS_2-Humble-22314e)](https://docs.ros.org/en/humble/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f59e0b)](LICENSE)
 
-面向 **LiDAR SLAM 建图、实车数据包回放、地图后处理、Nav2 自主导航、批量自动化实验与轨迹/地图质量评估** 的浏览器控制台，运行于 ROS 2 Humble 与 Gazebo Fortress。在同一个网页工作台里，即可从一个空仿真场景或录制的 rosbag2 数据包出发，完成建图、调参、地图清理/闭环、导航闭环测试以及可复现的 `evo` 评估报告。
+面向 ROS 2 Humble 与 Gazebo Fortress 的浏览器控制台，集成 **LiDAR SLAM 建图、rosbag2 数据回放、地图后处理、Gazebo 内 Nav2 导航、批量重复实验与 `evo` 轨迹评估**。如果你日常使用 FAST-LIO2、GLIM 或 Nav2，想在一个网页界面里完成仿真建图、实机数据包回放、2D/3D 地图检查与误差对比，而不必同时切多个终端和 `rviz2` 窗口，它能把从原始扫描到可复现实验图表的工作串起来。
 
-本项目是哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* 的配套软件。界面支持**中英文切换**、**浅色 / 深色 / 插件扩展主题**（内置护眼防蓝光暖色主题），并提供**统一插件机制与 GitHub 插件市场**。
+Nav2 闭环导航在 Gazebo Fortress 中运行（实车建出的地图可绑定或按栅格生成墙体场景），实机录制的 rosbag2 数据包则支持传感器自动探测、倍速回放、离线平面回环与地图后处理插件。界面支持**中英文切换**、**浅色 / 深色 / 插件扩展主题**（内置低蓝光护眼主题），并接入**目录独立更新的 GitHub 插件市场**（[`Leonhart999/slam-console-plugins`](https://github.com/Leonhart999/slam-console-plugins)）。本项目为哈尔滨工程大学本科毕业设计 *LiDAR-Based SLAM Mapping and Autonomous Navigation for Mobile Robots* 的配套软件。
 
-- **[仓库建图在线演示](https://leonhart999.github.io/slam-autonav-console/)**：在浏览器中回放一段 230 m 的 FAST-LIO2 仿真仓库建图过程，实时查看 3D 点云与 APE 误差曲线。
-- **[完整控制台只读预览](https://leonhart999.github.io/slam-autonav-console/console/)**：免安装浏览原版控制台各页面、已保存的 2D/3D 地图、导航实验、评估图表以及公开插件市场目录（只读，无需 ROS 2 后端）。
+- **[仓库建图在线演示](https://leonhart999.github.io/slam-autonav-console/)**：直接在浏览器里回放一段 230 m 的 FAST-LIO2 仿真仓库建图过程，同步查看 3D 点云增长与 APE 误差曲线。
+- **[控制台只读预览](https://leonhart999.github.io/slam-autonav-console/console/)**：无需 ROS 2 后端即可浏览各控制台页面、已保存的 2D/3D 地图、导航记录、评估图表与插件市场目录；该页面仅为静态只读预览，真正启停进程、保存地图或安装插件需要在本地部署运行。
 
 [![控制台视频导览，2:19](robot_console/docs/images/video_cover.jpg)](https://www.bilibili.com/video/BV1wm4v6GEQq)
 

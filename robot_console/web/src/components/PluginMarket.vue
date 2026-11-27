@@ -130,7 +130,7 @@ onMounted(async () => {
         </el-button>
         <input ref="fileInput" type="file" accept=".zip,application/zip" class="file" @change="upload">
       </template>
-      <div class="info">
+      <div class="market-info">
         <div class="row">
           <span class="label">{{ t('pluginsPage.market.source') }}</span>
           <span class="mono path">{{ view?.source ?? (view?.index_urls[0] ?? '') }}</span>
@@ -183,7 +183,7 @@ onMounted(async () => {
         <div v-if="e.installed" class="line">
           <span class="label">{{ t('pluginsPage.market.local') }}</span>
           <span>{{ t(`pluginsPage.market.origin.${e.installed.origin}`, { version: e.installed.version }) }}</span>
-          <span class="mono dim">{{ e.installed.dir }}</span>
+          <span class="mono dim path">{{ e.installed.dir }}</span>
         </div>
         <div v-if="e.status === 'incompatible'" class="warn">
           {{ t('pluginsPage.market.needsApi', { api: e.api, supported: view?.supported_apis.join(', ') ?? '' }) }}
@@ -220,7 +220,7 @@ onMounted(async () => {
 .file {
   display: none;
 }
-.info {
+.market-info {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -236,6 +236,10 @@ onMounted(async () => {
 .line {
   margin-top: 6px;
   font-size: 12.5px;
+}
+.line > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .label {
   color: var(--ink-3);
