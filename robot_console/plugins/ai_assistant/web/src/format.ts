@@ -24,6 +24,14 @@ export function money(m: Money): string {
   return `${sym}${m.amount.toFixed(digits)}`
 }
 
+/** A price per 1M tokens: two to four decimals, e.g. $0.80, $0.125, $15.00 */
+export function rate(amount: number, currency: string): string {
+  const sym = SYMBOL[currency] ?? `${currency} `
+  let text = amount.toFixed(4).replace(/0+$/, '')
+  if (/\.\d?$/.test(text)) text = amount.toFixed(2)
+  return `${sym}${text}`
+}
+
 export const moneyList = (list: Money[] | null | undefined) =>
   (list ?? []).filter((m) => m.amount > 0 || (list ?? []).length === 1).map(money).join(' + ')
 

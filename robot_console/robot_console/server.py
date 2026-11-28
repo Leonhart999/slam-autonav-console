@@ -35,6 +35,7 @@ from .bag_files import register_bag_file_routes
 from .sensor_profiles import register_sensor_profile_routes
 from .slam_config import register_slam_config_routes
 from .open_folder import register_open_folder_routes
+from .settings import register_settings_routes
 from .map_scene import register_map_scene_routes
 from .stream_cache import SharedSnapshot
 from .plugins import register_plugin_routes
@@ -131,6 +132,7 @@ def create_app(cfg, node, procs, mapping, teleop, library, nav_maps, navdata, pl
                 raise HTTPException(e.status, detail={'code': e.code, 'params': e.params})
         register_slam_config_routes(app, slam_configs, slam_preset)
     register_open_folder_routes(app, cfg)
+    register_settings_routes(app, cfg, plugins)
     sim_name = mapping.stacks.get('sim')
 
     def preset_args(name, preset):

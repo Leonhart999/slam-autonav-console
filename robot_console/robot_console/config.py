@@ -180,6 +180,8 @@ def load(path=None):
         with open(user, encoding='utf-8') as f:
             cfg = merge(cfg, yaml.safe_load(f) or {})
     cfg['config_files'] = [path] + ([user] if user else [])
+    target = os.environ.get('ROBOT_CONSOLE_USER_CONFIG') or (None if explicit else USER_CONFIG)
+    cfg['user_config_target'] = os.path.expanduser(target) if target else None
 
     cfg['paths'] = cfg.get('paths') or {}
     expand = Expander(cfg['paths'].get('data_root') or DEFAULT_DATA_ROOT)

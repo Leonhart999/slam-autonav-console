@@ -4,6 +4,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ElRadioButton, ElRadioGroup } from 'element-plus'
 import { t } from './sdk'
+import { vSpot } from './skin'
 import ProvidersPage from './ProvidersPage.vue'
 import OAuthPage from './OAuthPage.vue'
 import UsagePage from './UsagePage.vue'
@@ -38,7 +39,7 @@ onUnmounted(() => window.removeEventListener('hashchange', onHash))
 </script>
 
 <template>
-  <div class="aip-manage">
+  <div v-spot class="aip-manage">
     <div class="aip-tabs">
       <el-radio-group :model-value="tab" size="default" @update:model-value="pick">
         <el-radio-button v-for="k in TABS" :key="k" :value="k">{{ t(`tabs.${k}`) }}</el-radio-button>

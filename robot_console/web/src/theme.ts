@@ -196,7 +196,7 @@ export async function setTheme(next: Theme, origin?: { x: number; y: number }) {
   } catch { /* private mode: the choice lasts until the page is closed */ }
 
   const root = document.documentElement
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || root.classList.contains('reduce-motion')) {
     apply(next)
     return
   }

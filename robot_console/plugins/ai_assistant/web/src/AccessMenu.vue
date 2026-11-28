@@ -8,6 +8,7 @@ import { t } from './sdk'
 import { usePanelMenu } from './popover'
 import Icon from './Icon.vue'
 import SwapText from './SwapText.vue'
+import LiquidGlass from './glass/LiquidGlass.vue'
 
 const access = defineModel<Access>({ required: true })
 const ICONS: Record<Access, 'chat' | 'eye' | 'shield' | 'bolt'> = { chat: 'chat', read: 'eye', ask: 'shield', auto: 'bolt' }
@@ -25,10 +26,12 @@ function pick(a: Access) {
 
 <template>
   <div ref="root" class="aia-pick">
-    <button type="button" class="aia-chipbtn" :class="[{ open }, `acc-${access}`]" :title="t('access.title')"
-            :aria-expanded="open" @click="open = !open">
-      <Icon :name="ICONS[access]" /><SwapText class="aia-chip-text" :text="t(`access.${access}.name`)" :dir="dir" />
-    </button>
+    <LiquidGlass class="aia-chip-glass is-raised" magnetic>
+      <button type="button" class="aia-chipbtn" :class="[{ open }, `acc-${access}`]" :title="t('access.title')"
+              :aria-expanded="open" @click="open = !open">
+        <Icon :name="ICONS[access]" /><SwapText class="aia-chip-text" :text="t(`access.${access}.name`)" :dir="dir" />
+      </button>
+    </LiquidGlass>
     <transition name="aia-pop">
       <div v-if="open" class="aia-menu up aia-access-menu" role="menu" :style="menuStyle">
         <div class="aia-menu-cap">{{ t('access.title') }}</div>

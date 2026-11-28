@@ -2,6 +2,7 @@
 import type { Component } from 'vue'
 import { MapLocation, VideoPlay, Files, Position, DataAnalysis, Monitor, Box } from '@element-plus/icons-vue'
 import { createRouter, createWebHashHistory, type RouteRecordSingleView } from 'vue-router'
+import { startPath } from '@/settings/prefs'
 const MonitorView = () => import('@/views/MonitorView.vue')
 const MappingView = () => import('@/views/MappingView.vue')
 const PlaybackView = () => import('@/views/PlaybackView.vue')
@@ -10,6 +11,7 @@ const MapsView = () => import('@/views/MapsView.vue')
 const EvaluationView = () => import('@/views/EvaluationView.vue')
 const PluginsView = () => import('@/views/PluginsView.vue')
 const PluginPageHost = () => import('@/views/PluginPageHost.vue')
+const SettingsView = () => import('@/views/SettingsView.vue')
 
 /** step: set only on pages that still show PlaceholderView (all pages are built now; kept for future pages) */
 interface PageMeta {
@@ -42,5 +44,14 @@ export const router = createRouter({
   // hash 模式：地址形如 /#/monitor，后端只需提供 index.html，刷新页面不会 404
   history: createWebHashHistory(),
   // Pages added by plugins (plugins/host.ts) are not in `pages`: one route shows them all, also before they load
-  routes: [{ path: '/', redirect: import.meta.env.MODE === 'console-preview' ? '/mapping' : '/monitor' }, ...pages, { path: '/ext/:id/:page', name: 'plugin-page', component: PluginPageHost }],
+  // '/' leads to the start page chosen in Settings → General (the last page, or a fixed one)
+  routes: [
+    { path: '/', redirect: () => (import.meta.env.MODE === 'console-preview' ? '/mapping'
+      : startPath((p) => pages.some((x) => x.path === p) || /^\/ext\/[\w-]+\/[\w-]+$/.test(p))) },
+    ...pages,
+    { path: '/ext/:id/:page', name: 'plugin-page', component: PluginPageHost },
+    // Settings: the side menu shows the settings sections while one of these is open (App.vue)
+    { path: '/settings', redirect: '/settings/general' },
+    { path: '/settings/:section', name: 'settings', component: SettingsView },
+  ],
 })

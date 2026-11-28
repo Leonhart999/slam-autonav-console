@@ -4,6 +4,8 @@ import Assistant from './Assistant.vue'
 import ManagePage from './ManagePage.vue'
 import { messages } from './messages'
 import { PLUGIN_ID } from './sdk'
+import './prefs'
+import './glass.css'
 
 window.RobotConsole.register({
   id: PLUGIN_ID,

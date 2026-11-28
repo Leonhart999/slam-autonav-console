@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import Body, Depends, Query
 from fastapi.responses import StreamingResponse
 
-from . import profiles
+from .pricing import entry_cost
 from .store import SUMS
 
 DAY = 86400
@@ -27,20 +27,20 @@ def _csv_cell(col, value):
     return s
 
 
-def recorder(ctx, store, profile, provider, source, session=None):
-    """Snapshot the requested model's tariff, including when the reply names a versioned model."""
-    price = profiles.model_entry(profile, provider.model).get('price') or {}
-    rates = {k: v for k, v in price.items() if k != 'currency'}
+def recorder(ctx, store, table, profile, provider, source, session=None):
+    """Price each call from the pricing table as it is written: the model the reply names first, then the requested
+    one (see pricing.Pricing.lookup). The cost is a snapshot; later price changes leave it alone."""
 
     def record(row):
         if session is not None:
             session.update(model=row['model'], profile_id=profile['id'], profile_name=profile['name'])
         try:
-            cost = sum(row[k] / 1e6 * rate for k, rate in rates.items()) if rates else None
+            entry = table.lookup(row.get('model'), provider.model)
+            cost = entry_cost(entry, row) if entry else None
             store.add_usage({**row, 'source': source, 'session': session['id'] if session else None,
                              'ts': time.time(), 'format': profile['format'], 'effort': provider.effort,
                              'profile_id': profile['id'], 'profile_name': profile['name'],
-                             'cost': cost, 'currency': price['currency'] if rates else None})
+                             'cost': cost, 'currency': entry['currency'] if cost is not None else None})
         except Exception as e:  # noqa: BLE001  accounting must never interrupt the provider loop
             ctx.log.warn(f'usage record not saved: {e}')
     return record

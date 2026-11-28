@@ -4,7 +4,8 @@
 defineProps<{
   name: 'spark' | 'close' | 'chevron' | 'info' | 'copy' | 'check' | 'like' | 'plus' | 'bolt' | 'download' | 'trash' | 'gear'
     | 'chat' | 'eye' | 'shield' | 'gauge' | 'search' | 'history' | 'pin' | 'edit' | 'refresh' | 'key' | 'upload'
-    | 'link' | 'power' | 'external'
+    | 'link' | 'power' | 'external' | 'drop' | 'sliders' | 'server' | 'keyboard' | 'window' | 'wrench' | 'back' | 'save'
+    | 'reset' | 'compose'
   filled?: boolean
 }>()
 </script>
@@ -32,7 +33,8 @@ defineProps<{
     <path v-else-if="name === 'trash'" d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 13h9l1-13M10 11v5.5M14 11v5.5" class="aia-i-line" />
     <template v-else-if="name === 'gear'">
       <circle cx="12" cy="12" r="3" class="aia-i-line" />
-      <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7" class="aia-i-line" />
+      <path class="aia-i-line"
+            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.79 1 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </template>
     <path v-else-if="name === 'chat'" class="aia-i-line"
           d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5h-7.5L7 20v-3.5H5A1.5 1.5 0 0 1 3.5 15V6.5A1.5 1.5 0 0 1 5 5z" />
@@ -73,6 +75,40 @@ defineProps<{
     <template v-else-if="name === 'power'">
       <path d="M12 3.5v8" class="aia-i-line" />
       <path d="M7 6.5a7.5 7.5 0 1 0 10 0" class="aia-i-line" />
+    </template>
+    <path v-else-if="name === 'drop'" d="M12 3.5c3.6 4.1 6 7.4 6 10.5a6 6 0 0 1-12 0c0-3.1 2.4-6.4 6-10.5zM9 14.5a3 3 0 0 0 3 3" class="aia-i-line" />
+    <template v-else-if="name === 'sliders'">
+      <path d="M4 7h9M17 7h3M4 17h3M11 17h9" class="aia-i-line" />
+      <circle cx="15" cy="7" r="2" class="aia-i-line" />
+      <circle cx="9" cy="17" r="2" class="aia-i-line" />
+    </template>
+    <template v-else-if="name === 'server'">
+      <rect x="4" y="4" width="16" height="7" rx="2" class="aia-i-line" />
+      <rect x="4" y="13" width="16" height="7" rx="2" class="aia-i-line" />
+      <path d="M8 7.5h.01M8 16.5h.01" class="aia-i-line" />
+    </template>
+    <template v-else-if="name === 'keyboard'">
+      <rect x="3" y="6" width="18" height="12" rx="2.5" class="aia-i-line" />
+      <path d="M7 10h.01M10.5 10h.01M14 10h.01M17 10h.01M7.5 14h9" class="aia-i-line" />
+    </template>
+    <template v-else-if="name === 'window'">
+      <rect x="3.5" y="5" width="17" height="14" rx="2.5" class="aia-i-line" />
+      <path d="M7 8.5h.01M9.5 8.5h.01" class="aia-i-line" />
+    </template>
+    <path v-else-if="name === 'wrench'" class="aia-i-line"
+          d="M15.5 4.2a4.5 4.5 0 0 0-5.6 5.9L4.2 15.8a2 2 0 0 0 2.9 2.9l5.7-5.7a4.5 4.5 0 0 0 5.9-5.6l-2.6 2.6-2.4-.6-.6-2.4z" />
+    <path v-else-if="name === 'back'" d="M15 5l-7 7 7 7" class="aia-i-line" />
+    <template v-else-if="name === 'save'">
+      <path d="M5 4.5h11l3.5 3.5v11a1 1 0 0 1-1 1h-13a1 1 0 0 1-1-1v-13.5a1 1 0 0 1 .5-1z" class="aia-i-line" />
+      <path d="M8 4.5v4h7v-4M8 20v-6h8v6" class="aia-i-line" />
+    </template>
+    <template v-else-if="name === 'reset'">
+      <path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9" class="aia-i-line" />
+      <path d="M4.5 4.5V9H9" class="aia-i-line" />
+    </template>
+    <template v-else-if="name === 'compose'">
+      <path d="M11 4.5H6A1.5 1.5 0 0 0 4.5 6v12A1.5 1.5 0 0 0 6 19.5h12a1.5 1.5 0 0 0 1.5-1.5v-5" class="aia-i-line" />
+      <path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L13 14l-4 1 1-4z" class="aia-i-line" />
     </template>
     <path v-else-if="name === 'external'" d="M13.5 4.5h6v6M19.5 4.5L11 13M17 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1H10" class="aia-i-line" />
     <path

@@ -17,6 +17,14 @@ import CopyButton from './CopyButton.vue'
 import LikeButton from './LikeButton.vue'
 import ModelMenu from './ModelMenu.vue'
 import AccessMenu from './AccessMenu.vue'
+import { vSpot } from './skin'
+import { draft, isGlass, matchShortcut, prefs, shown, windowGlass, windowStyle } from './prefs'
+import LiquidGlass from './glass/LiquidGlass.vue'
+import EdgeGlow from './glass/EdgeGlow.vue'
+import OverlayScrollbar from './glass/OverlayScrollbar.vue'
+import SettingsView from './SettingsView.vue'
+import { useHoverLens } from './glass/lens'
+import { ripple } from './glass/ripple'
 
 const STORE = 'robot_console.ai_assistant.session'
 const OFFSET_STORE = 'robot_console.ai_assistant.offset'
@@ -26,6 +34,10 @@ const ACCESS_STORE = 'robot_console.ai_assistant.access'
 const DOCK_STORE = 'robot_console.ai_assistant.history.docked'
 const DOCK_WIDTH = 720
 const SUGGESTIONS = ['latest', 'batch', 'zdrift', 'params', 'status', 'runBatch']
+// round glass avatars of the suggestions in the glass skin: icon and tint
+const SUGGESTION_ICONS: Record<string, [string, number]> = {
+  latest: ['gauge', 0], batch: ['sliders', 1], zdrift: ['search', 2], params: ['wrench', 1], status: ['power', 3], runBatch: ['bolt', 2],
+}
 
 const open = ref(false)
 const status = ref<Status | null>(null)
@@ -64,6 +76,35 @@ const service = computed(() => {
 const storedAccess = localStorage.getItem(ACCESS_STORE) as Access | null
 const access = ref<Access>(storedAccess && ACCESS_LEVELS.includes(storedAccess) ? storedAccess : 'read')
 watch(access, (a) => localStorage.setItem(ACCESS_STORE, a))
+
+// ---- the settings page inside the panel; the glass look ----
+const view = ref<'chat' | 'settings'>('chat')
+function openPanelSettings() {
+  draft.value = JSON.parse(JSON.stringify(prefs))
+  view.value = 'settings'
+}
+function closePanelSettings() {
+  draft.value = null
+  view.value = 'chat'
+}
+const glassLook = computed(() => windowStyle(windowGlass.value, shown.value.cornerRadius))
+const headGroup = ref<HTMLElement | null>(null)
+const headLens = ref<InstanceType<typeof LiquidGlass> | null>(null)
+const headLensEl = computed(() => headLens.value?.root ?? null)
+useHoverLens(headGroup, headLensEl, isGlass)
+const mainEl = ref<HTMLElement | null>(null)
+let stopRipple: (() => void) | null = null
+
+/** New chat from the header: in the glass look a ring of liquid runs out from the button over the conversation */
+function newChatFromHeader(e: MouseEvent) {
+  if (busy.value || !items.value.length) return
+  newChat()
+  const host = mainEl.value
+  if (!isGlass.value || !host || !shown.value.animations) return
+  const b = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  stopRipple?.()
+  stopRipple = ripple(host, b.left + b.width / 2, b.top + b.height / 2)
+}
 
 function onMenuError(text: string) {
   items.value.push({ kind: 'note', text, tone: 'error' })
@@ -203,7 +244,10 @@ function onOpenSession(e: Event) {
 }
 
 watch(open, async (o) => {
-  if (!o) return
+  if (!o) {
+    if (view.value === 'settings') closePanelSettings()
+    return
+  }
   await Promise.all([refreshStatus(), restore()])
   scrollDown()
 })
@@ -420,7 +464,9 @@ function stop() {
 
 function onKey(ev: Event | KeyboardEvent) {
   const e = ev as KeyboardEvent
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  if (e.key !== 'Enter' || e.isComposing) return
+  const sends = prefs.sendKey === 'ctrlEnter' ? (e.ctrlKey || e.metaKey) && !e.shiftKey : !e.shiftKey && !e.ctrlKey && !e.metaKey
+  if (sends) {
     e.preventDefault()
     void send()
   }
@@ -439,6 +485,7 @@ async function test() {
   }
 }
 
+/** The model services page of the console */
 function openSettings() {
   location.hash = '#/ext/ai_assistant/providers'
 }
@@ -461,13 +508,14 @@ function markdown(text: string) {
 }
 
 // ---- where the panel sits and how big it is ----
-// The panel lives in a safe area: below the header clock (SAFE_TOP) and above the status bar (SAFE_BOTTOM, the E-STOP
-// button stays visible and clickable), 14 px from the window's sides. Its right edge is docked at the window's right
-// side; x (<= 0) moves it left from there, y is its top edge. Dragging the header moves it on springs (1200 / 80:
-// follows the pointer, never overshoots); dragging an edge or a corner resizes it directly. Height `null` = the full
-// height of the safe area, which follows the window. Kept in this browser.
-const SAFE_TOP = 64
-const SAFE_BOTTOM = 84
+// The panel can be moved and resized anywhere inside the window, 14 px from each edge. By default it is docked
+// below the header clock (DOCK_TOP) and above the status bar (DOCK_BOTTOM), so the E-STOP button stays visible until
+// the user moves the panel over it. Its right edge is docked at the window's right side; x (<= 0) moves it left from
+// there, y is its top edge. Dragging the header moves it on springs (1200 / 80: follows the pointer, never
+// overshoots); dragging an edge or a corner resizes it directly. Height `null` = the docked height (DOCK_TOP to
+// DOCK_BOTTOM), which follows the window. Kept in this browser.
+const DOCK_TOP = 64
+const DOCK_BOTTOM = 84
 const SIDE = 14
 const DEFAULT_W = 460
 const MIN_W = 340
@@ -481,27 +529,28 @@ function loadGeometry(): Geometry {
     const g = JSON.parse(localStorage.getItem(GEOMETRY_STORE) || 'null') as Partial<Geometry> | null
     if (g && typeof g === 'object') {
       const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d)
-      return { x: num(g.x, 0), y: num(g.y, SAFE_TOP), w: num(g.w, DEFAULT_W), h: typeof g.h === 'number' ? num(g.h, 0) || null : null }
+      return { x: num(g.x, 0), y: num(g.y, DOCK_TOP), w: num(g.w, DEFAULT_W), h: typeof g.h === 'number' ? num(g.h, 0) || null : null }
     }
   } catch { /* fall through to the default */ }
   // the sideways offset of plugin versions before the resizable panel
-  return { x: Math.min(0, Number(localStorage.getItem(OFFSET_STORE)) || 0), y: SAFE_TOP, w: DEFAULT_W, h: null }
+  return { x: Math.min(0, Number(localStorage.getItem(OFFSET_STORE)) || 0), y: DOCK_TOP, w: DEFAULT_W, h: null }
 }
 
 const geo = loadGeometry()
-const safeH = () => Math.max(200, window.innerHeight - SAFE_TOP - SAFE_BOTTOM)
+const maxH = () => Math.max(200, window.innerHeight - 2 * SIDE)
+const dockH = () => Math.min(maxH(), Math.max(200, window.innerHeight - DOCK_TOP - DOCK_BOTTOM))
 const maxW = () => Math.max(240, window.innerWidth - 2 * SIDE)
 const minW = () => Math.min(MIN_W, maxW())
-const minH = () => Math.min(MIN_H, safeH())
-const panelH = () => (geo.h === null ? safeH() : Math.max(minH(), Math.min(safeH(), geo.h)))
+const minH = () => Math.min(MIN_H, maxH())
+const panelH = () => (geo.h === null ? dockH() : Math.max(minH(), Math.min(maxH(), geo.h)))
 const panelW = () => Math.max(minW(), Math.min(maxW(), geo.w))
 const clampX = (x: number) => Math.max(Math.min(0, -(window.innerWidth - 2 * SIDE - panelW())), Math.min(0, x))
-const clampY = (y: number) => Math.max(SAFE_TOP, Math.min(SAFE_TOP + safeH() - panelH(), y))
+const clampY = (y: number) => Math.max(SIDE, Math.min(window.innerHeight - SIDE - panelH(), y))
 
 const dragging = ref(false)
 const resizing = ref<Dir | null>(null)
 let springX = 0
-let springY = SAFE_TOP
+let springY = DOCK_TOP
 function paintTranslate() {
   if (panel.value) panel.value.style.translate = `${springX.toFixed(2)}px ${springY.toFixed(2)}px`
 }
@@ -531,7 +580,8 @@ function saveGeometry() {
 // moving by the header
 let dragStart = { px: 0, py: 0, x: 0, y: 0 }
 function onHeadDown(e: PointerEvent) {
-  if (e.button !== 0 || (e.target as HTMLElement).closest('button, a, input, textarea, .aia-menu')) return
+  const target = e.target as HTMLElement
+  if (e.button !== 0 || target.closest('button, a, input, textarea, .aia-menu') || !target.closest('.aia-head, .aia-set-header')) return
   dragging.value = true
   dragStart = { px: e.clientX, py: e.clientY, x: moveX.target, y: moveY.target }
   ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
@@ -555,9 +605,9 @@ function onHeadUp() {
 /** Double-click on the header: back to the right side, at the top of the safe area */
 function dock() {
   geo.x = 0
-  geo.y = SAFE_TOP
+  geo.y = DOCK_TOP
   moveX.to(0)
-  moveY.to(SAFE_TOP)
+  moveY.to(DOCK_TOP)
   saveGeometry()
 }
 
@@ -584,16 +634,15 @@ function onResizeMove(e: PointerEvent) {
   const dy = e.clientY - s.py
   let { left, right, top, bottom } = s
   const winRight = window.innerWidth - SIDE
-  const safeBottom = SAFE_TOP + safeH()
+  const winBottom = window.innerHeight - SIDE
   if (dir.includes('w')) left = Math.max(SIDE, Math.min(right - minW(), left + dx))
   if (dir.includes('e')) right = Math.min(winRight, Math.max(left + minW(), right + dx))
-  if (dir.includes('n')) top = Math.max(SAFE_TOP, Math.min(bottom - minH(), top + dy))
-  if (dir.includes('s')) bottom = Math.min(safeBottom, Math.max(top + minH(), bottom + dy))
+  if (dir.includes('n')) top = Math.max(SIDE, Math.min(bottom - minH(), top + dy))
+  if (dir.includes('s')) bottom = Math.min(winBottom, Math.max(top + minH(), bottom + dy))
   geo.w = right - left
   geo.x = right - winRight
   geo.y = top
-  // touching both ends of the safe area = full height, which then follows the window
-  geo.h = top <= SAFE_TOP && bottom >= safeBottom - 0.5 ? null : bottom - top
+  geo.h = bottom - top
   el.style.width = `${geo.w}px`
   el.style.height = `${bottom - top}px`
   panelWidth.value = geo.w
@@ -612,7 +661,7 @@ function resetSize(dir: Dir) {
   const el = panel.value
   if (!el) return
   if (dir.includes('e') || dir.includes('w')) geo.w = DEFAULT_W
-  if (dir.includes('n') || dir.includes('s')) { geo.h = null; geo.y = SAFE_TOP }
+  if (dir.includes('n') || dir.includes('s')) { geo.h = null; geo.y = DOCK_TOP }
   el.classList.add('aia-gliding')
   panelWidth.value = panelW()
   el.style.width = `${panelW()}px`
@@ -651,8 +700,12 @@ onUnmounted(() => {
 })
 // Ctrl+/ toggles the panel from anywhere
 function onGlobalKey(e: KeyboardEvent) {
-  if (e.key === '/' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); open.value = !open.value }
-  else if (e.altKey && e.key.toLowerCase() === 'h' && open.value) { e.preventDefault(); toggleHistory() }
+  // the settings page is recording a shortcut
+  if ((e.target as HTMLElement | null)?.classList?.contains('aia-field-input')) return
+  const sc = prefs.shortcuts
+  if (sc.togglePanel && matchShortcut(e, sc.togglePanel)) { e.preventDefault(); open.value = !open.value }
+  else if (open.value && view.value === 'chat' && sc.toggleHistory && matchShortcut(e, sc.toggleHistory)) { e.preventDefault(); toggleHistory() }
+  else if (open.value && view.value === 'chat' && sc.newChat && matchShortcut(e, sc.newChat)) { e.preventDefault(); newChat() }
 }
 </script>
 
@@ -663,27 +716,42 @@ function onGlobalKey(e: KeyboardEvent) {
   <Teleport to="body">
     <transition name="aia-slide">
       <div v-if="open" ref="panel" class="aia-frame" :class="{ dragging, resizing: !!resizing }">
-      <aside class="aia-panel" role="dialog" :aria-label="t('title')">
-        <header
-          class="aia-head" :title="t('dragHint')"
-          @pointerdown="onHeadDown" @pointermove="onHeadMove" @pointerup="onHeadUp" @pointercancel="onHeadUp"
-          @dblclick="dock"
-        >
+      <aside
+        v-spot class="aia-panel" role="dialog" :aria-label="t('title')"
+        :class="{ 'is-busy': busy, 'aia-no-motion': !shown.animations }"
+        :data-tone="isGlass ? glassLook.tone : undefined" :style="isGlass ? glassLook.style : undefined"
+        @pointerdown="onHeadDown" @pointermove="onHeadMove" @pointerup="onHeadUp" @pointercancel="onHeadUp"
+      >
+        <EdgeGlow v-if="isGlass" :active="busy && shown.animations" />
+        <transition name="aia-view" mode="out-in">
+        <SettingsView v-if="view === 'settings'" key="settings" @close="closePanelSettings" />
+        <div v-else key="chat" class="aia-view-wrap">
+        <header class="aia-head aia-magnet-group" :title="t('dragHint')" @dblclick="dock">
           <div class="aia-title">
             <span class="aia-tick" />{{ t('title') }}
           </div>
           <span class="aia-grow" />
-          <button type="button" class="aia-ibtn" :class="{ on: showHistory }" :aria-pressed="showHistory"
-                  :aria-label="t('history.title')" :title="`${t('history.title')} (Alt+H)`" @click="toggleHistory">
-            <Icon name="history" />
-          </button>
-          <el-button size="small" text :disabled="busy || !items.length" @click="newChat">{{ t('newChat') }}</el-button>
-          <button type="button" class="aia-ibtn" :aria-label="t('switcher.manage')" :title="t('switcher.manage')" @click="openSettings">
-            <Icon name="gear" />
-          </button>
-          <button type="button" class="aia-ibtn" :aria-label="t('close')" :title="t('close')" @click="open = false">
-            <Icon name="close" />
-          </button>
+          <!-- glass: the buttons sit in one liquid capsule and a lens glides to the one under the pointer -->
+          <LiquidGlass class="aia-head-glass is-raised" magnetic>
+            <div ref="headGroup" class="aia-lensgroup">
+              <button type="button" class="aia-ibtn" data-lens :class="{ on: showHistory }" :aria-pressed="showHistory"
+                      :aria-label="t('history.title')" :title="`${t('history.title')} (${prefs.shortcuts.toggleHistory})`" @click="toggleHistory">
+                <Icon name="history" />
+              </button>
+              <button type="button" class="aia-ibtn" data-lens :disabled="busy || !items.length"
+                      :aria-label="t('newChat')" :title="`${t('newChat')} (${prefs.shortcuts.newChat})`" @click="newChatFromHeader">
+                <Icon name="compose" />
+              </button>
+              <button type="button" class="aia-ibtn" data-lens :aria-label="t('settings.title')" :title="t('settings.title')"
+                      @click="openPanelSettings">
+                <Icon name="gear" />
+              </button>
+              <button type="button" class="aia-ibtn" data-lens :aria-label="t('close')" :title="t('close')" @click="open = false">
+                <Icon name="close" />
+              </button>
+              <LiquidGlass ref="headLens" class="aia-button-lens" variant="lens" />
+            </div>
+          </LiquidGlass>
         </header>
 
         <div class="aia-body" :class="{ docked }">
@@ -693,13 +761,14 @@ function onGlobalKey(e: KeyboardEvent) {
             @open="openFromHistory" @new-chat="onHistoryNew" @close="historyOpen = false" @deleted="onHistoryDeleted"
           />
         </transition>
-        <div class="aia-main">
+        <div ref="mainEl" class="aia-main">
         <div v-if="pendingOpen" class="aia-busybar" role="alert">
           <span>{{ t('history.busy') }}</span>
           <span class="aia-grow" />
           <el-button size="small" @click="pendingOpen = null">{{ t('history.busyCancel') }}</el-button>
           <el-button size="small" type="warning" @click="stopAndOpen">{{ t('history.busyStop') }}</el-button>
         </div>
+        <div class="aia-scroll-area">
         <div ref="list" class="aia-list">
           <div v-if="statusError" class="aia-note error">{{ statusError }}</div>
           <div v-else-if="status && status.problem" class="aia-setup">
@@ -714,9 +783,12 @@ function onGlobalKey(e: KeyboardEvent) {
 
           <template v-if="!items.length && ready">
             <p class="aia-intro">{{ t('intro') }}</p>
+            <p class="aia-section-label">{{ t('suggestTitle') }}</p>
             <div class="aia-suggest">
               <button v-for="k in SUGGESTIONS" :key="k" type="button" class="aia-chip" @click="send(t(`suggestions.${k}`))">
-                {{ t(`suggestions.${k}`) }}
+                <span class="aia-card-hl" aria-hidden="true"><span class="aia-card-edge" /></span>
+                <span class="aia-chip-ico" :class="`t${SUGGESTION_ICONS[k][1]}`" aria-hidden="true"><Icon :name="(SUGGESTION_ICONS[k][0] as any)" /></span>
+                <span>{{ t(`suggestions.${k}`) }}</span>
               </button>
             </div>
           </template>
@@ -724,7 +796,7 @@ function onGlobalKey(e: KeyboardEvent) {
           <template v-for="(it, i) in items" :key="i">
             <div v-if="it.kind === 'user'" class="aia-user">{{ it.text }}</div>
             <div v-else-if="it.kind === 'assistant'" class="aia-answer-wrap">
-              <div v-reveal="!!it.live" class="aia-answer" :class="{ interim: !it.final }" @click="skipReveal"
+              <div v-reveal="!!it.live && shown.reveal" class="aia-answer" :class="{ interim: !it.final }" @click="skipReveal"
                    v-html="markdown(it.text)" />
               <div v-if="it.final" class="aia-acts">
                 <CopyButton :text="it.text" />
@@ -768,13 +840,17 @@ function onGlobalKey(e: KeyboardEvent) {
           <div v-if="busy" class="aia-busy"><span class="aia-pulse" />{{ busyText }}<span class="aia-elapsed">{{ elapsed }} s</span></div>
           <div v-else-if="usage" class="aia-usage mono">{{ usage }}</div>
         </div>
+        <OverlayScrollbar :scroller="list" />
+        </div>
 
         <footer class="aia-foot">
-          <el-input
-            v-model="input" type="textarea" :autosize="{ minRows: 2, maxRows: 7 }" resize="none" :maxlength="8000"
-            :placeholder="t('placeholder')" :disabled="!ready || switching" @keydown="onKey"
-          />
-          <div class="aia-row">
+          <LiquidGlass class="aia-input-glass" :radius="20">
+            <el-input
+              v-model="input" type="textarea" :autosize="{ minRows: 2, maxRows: 7 }" resize="none" :maxlength="8000"
+              :placeholder="t(prefs.sendKey === 'ctrlEnter' ? 'placeholderCtrl' : 'placeholder')" :disabled="!ready || switching" @keydown="onKey"
+            />
+          </LiquidGlass>
+          <div class="aia-row aia-magnet-group">
             <ModelMenu :status="status" :busy="busy" :testing="testing" @changed="refreshStatus" @test="test"
                        @manage="openSettings" @error="onMenuError" />
             <AccessMenu v-model="access" />
@@ -788,6 +864,8 @@ function onGlobalKey(e: KeyboardEvent) {
         </footer>
         </div>
         </div>
+        </div>
+        </transition>
       </aside>
       <!-- edges and corners resize the panel; double-click one to get that size's default back -->
       <div v-for="d in RESIZE_DIRS" :key="d" class="aia-rz" :class="[`aia-rz-${d}`, { on: resizing === d }]"
@@ -1022,11 +1100,14 @@ function onGlobalKey(e: KeyboardEvent) {
 }
 .aia-effort-dot.past::after { background: var(--accent); opacity: 0.7; }
 .aia-effort-dot:hover::after { opacity: 1; scale: 1.3; }
+/* no effort set (the model sends none): no knob and no fill until a level is picked; beats the glass skin's rules */
+.aia-panel .aia-effort-track.unset :is(.aia-effort-knob, .aia-effort-fill) { opacity: 0; }
 .aia-effort-help { font-size: 11px; color: var(--ink-3); line-height: 1.45; }
 
 /* text that rolls to its new value (SwapText.vue) */
 .aia-swapt { position: relative; display: inline-block; overflow: hidden; white-space: nowrap; vertical-align: bottom; }
 .aia-swapt-in { display: block; overflow: hidden; text-overflow: ellipsis; }
+.aia-swapt.gliding .aia-swapt-in { text-overflow: clip; }
 .aia-swapt-in.empty { width: 0; }
 .aia-swapt-enter-active, .aia-swapt-leave-active {
   transition: transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.26s ease, filter 0.26s ease;

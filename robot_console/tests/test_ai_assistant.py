@@ -521,7 +521,8 @@ class AssistantTests(unittest.TestCase):
                             models=[{'id': 'alias', 'price': price, 'effort': 'high'}])
         st = self.get(app, '/status')
         pid = st['active']
-        self.assertEqual(st['profiles'][0]['models'][0]['price'], price)
+        self.assertNotIn('price', st['profiles'][0]['models'][0])      # prices are no longer part of a service
+        self.set_price(app, 'alias', **price)
         first = openai_answer('transient', [('list_runs', {})])
         first[1]['usage'].update(prompt_tokens_details={'cached_tokens': 40},
                                  completion_tokens_details={'reasoning_tokens': 6})
@@ -611,9 +612,11 @@ class AssistantTests(unittest.TestCase):
                                                               'params': {'field': field}}))
         for payload in [{}, {'before': 'bad'}, {'before': True}]:
             self.assertEqual(self.call(app, 'POST', self.API + '/usage/prune', payload)[0], 400)
-        for price in [{'currency': 'EUR'}, {'input': -1}, {'reasoning': 2}, {'output': True}, {'cache_write': '2'}]:
-            profile = {'name': 'bad', 'models': [{'id': 'x', 'price': price}]}
-            self.assertEqual(self.call(app, 'POST', self.API + '/providers', {'profile': profile})[0], 400)
+        for entry, field in [({'id': 'x', 'currency': 'EUR', 'input': 1}, 'currency'), ({'id': 'x', 'input': -1}, 'input'),
+                             ({'id': 'x', 'output': True}, 'output'), ({'id': 'x', 'cache_write': '2'}, 'cache_write'),
+                             ({'id': 'x'}, 'input'), ({'id': ' ', 'input': 1}, 'id'), ({'id': 'x', 'input': 2e6}, 'input')]:
+            status, body = self.call(app, 'POST', self.API + '/pricing/entries', {'entry': entry})
+            self.assertEqual((status, body['detail']['params']), (400, {'field': field}), entry)
         module = sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.store']
         self.model.script = [openai_answer('paid')]
         with mock.patch.object(module.Store, 'add_usage', side_effect=sqlite3.OperationalError('disk full')):
@@ -804,7 +807,8 @@ class AssistantTests(unittest.TestCase):
     def test_r2_gateway_cache_write_is_not_billed_as_input(self):
         # CPA (Claude behind Chat Completions): prompt_tokens = input + cache read + cache write
         price = {'currency': 'USD', 'input': 3, 'cache_read': 0.3, 'cache_write': 3.75, 'output': 15}
-        _, app = self.start(model='c', base_url=self.model.url, models=[{'id': 'c', 'price': price}])
+        _, app = self.start(model='c', base_url=self.model.url, models=[{'id': 'c'}])
+        self.set_price(app, 'c', **price)
         answer = openai_answer('ok')
         answer[1]['usage'] = {'prompt_tokens': 170, 'completion_tokens': 10,
                               'prompt_tokens_details': {'cached_tokens': 50, 'cache_write_tokens': 20}}
@@ -813,6 +817,112 @@ class AssistantTests(unittest.TestCase):
         self.assertEqual((usage['input'], usage['cache_read'], usage['cache_write']), (100, 50, 20))
         row = list(csv.DictReader(io.StringIO(self.get(app, '/usage/export'))))[0]
         self.assertAlmostEqual(float(row['cost']), (100 * 3 + 50 * 0.3 + 20 * 3.75 + 10 * 15) / 1e6)
+
+    def set_price(self, app, mid, **price):
+        status, body = self.call(app, 'POST', self.API + '/pricing/entries', {'entry': {'id': mid, **price}})
+        self.assertEqual(status, 200, body)
+        return body
+
+    def pricing_module(self):
+        return sys.modules[plugins.MODULE_PREFIX + '.ai_assistant.pricing']
+
+    CATALOG = {
+        'anthropic': {'id': 'anthropic', 'name': 'Anthropic', 'models': {
+            'claude-opus-5-5': {'id': 'claude-opus-5-5', 'name': 'Claude Opus 5.5',
+                                'cost': {'input': 5, 'output': 25, 'cache_read': 0.5, 'cache_write': 6.25}},
+            'claude-opus-5': {'id': 'claude-opus-5', 'name': 'Claude Opus 5', 'cost': {'input': 15, 'output': 75}},
+            'no-price': {'id': 'no-price', 'name': 'Free?'}}},
+        'openai': {'id': 'openai', 'name': 'OpenAI', 'models': {
+            'gpt-5': {'id': 'gpt-5', 'name': 'GPT-5', 'cost': {'input': 1.25, 'output': 10, 'cache_read': 0.125}},
+            'claude-opus-5': {'id': 'claude-opus-5', 'name': 'dup', 'cost': {'input': 1, 'output': 1}}}},
+        'openrouter': {'id': 'openrouter', 'name': 'OpenRouter', 'models': {
+            'claude-opus-5-5': {'id': 'claude-opus-5-5', 'name': 'Claude Opus 5.5 (OR)', 'cost': {'input': 9, 'output': 9}}}},
+        'bad id!': {'models': {'x': {'cost': {'input': 1}}}},
+    }
+
+    def test_pricing_migrates_old_per_model_prices_once(self):
+        self.data.mkdir(parents=True)
+        (self.data / 'providers.json').write_text(json.dumps({'version': 1, 'active': 'p1', 'profiles': [
+            {'id': 'p1', 'name': 'old', 'format': 'openai', 'base_url': self.model.url, 'model': 'm', 'models': [
+                {'id': 'm', 'label': 'My M', 'effort': '', 'efforts': [], 'price': {'currency': 'CNY', 'input': 2, 'output': 8}},
+                {'id': 'n', 'label': 'n', 'effort': '', 'efforts': [], 'price': {'currency': 'USD'}}]}]}))
+        _, app = self.start()
+        self.call(app, 'PATCH', self.API + '/pricing/sync', {'enabled': False})
+        entries = self.get(app, '/pricing')['entries']
+        self.assertEqual([(e['id'], e['name'], e['currency'], e['input'], e['output'], e['cache_read'], e['source'])
+                          for e in entries], [('m', 'My M', 'CNY', 2.0, 8.0, None, 'manual')])
+        self.call(app, 'POST', self.API + '/pricing/entries/delete', {'ids': ['m']})
+        _, app = self.start()                      # the table exists now: nothing is migrated again
+        self.assertEqual(self.get(app, '/pricing')['entries'], [])
+
+    def test_pricing_sync_import_hide_and_backfill(self):
+        _, app = self.start(model='relay--claude-opus-5-5-kiro', base_url=self.model.url)
+        answer = openai_answer('hi')
+        answer[1]['model'] = 'relay--claude-opus-5-5-kiro'
+        answer[1]['usage'] = {'prompt_tokens': 1000, 'completion_tokens': 100}
+        self.model.script = [answer]
+        self.chat(app, 'one')
+        self.assertEqual(self.get(app, '/usage/summary')['unpriced_models'], ['relay--claude-opus-5-5-kiro'])
+        mod = self.pricing_module()
+        with mock.patch.object(mod, 'fetch_raw', return_value=self.CATALOG) as fetch:
+            self.call(app, 'PATCH', self.API + '/pricing/sync', {'providers': ['anthropic', 'openai']})
+            listing = self.get(app, '/pricing')                     # never synced: starts a sync in the background
+            for _ in range(100):
+                if listing['sync']['last'] and not listing['sync']['running']:
+                    break
+                time.sleep(0.05)
+                listing = self.get(app, '/pricing')
+            self.assertEqual(fetch.call_count, 1)
+            entries = {e['id']: e for e in listing['entries']}
+            self.assertEqual(sorted(entries), ['claude-opus-5', 'claude-opus-5-5', 'gpt-5'])
+            # the first provider in the list wins a shared model id; models without a price are left out
+            self.assertEqual((entries['claude-opus-5']['provider'], entries['claude-opus-5']['input']), ('anthropic', 15.0))
+            self.assertEqual(entries['gpt-5']['cache_write'], None)
+            self.assertEqual(listing['sync']['provider_names'], {'anthropic': 'Anthropic', 'openai': 'OpenAI'})
+            self.assertFalse(self.get(app, '/pricing')['sync']['running'])          # not due again for a day
+            self.assertEqual(fetch.call_count, 1)
+            # the unpriced call got the longest matching price (claude-opus-5-5, not claude-opus-5)
+            row = list(csv.DictReader(io.StringIO(self.get(app, '/usage/export'))))[0]
+            self.assertAlmostEqual(float(row['cost']), (1000 * 5 + 100 * 25) / 1e6)
+            self.assertEqual(row['currency'], 'USD')
+            # a deleted synced entry stays away until unhidden; an edited one becomes manual and is kept
+            self.call(app, 'POST', self.API + '/pricing/entries/delete', {'ids': ['gpt-5']})
+            edited = self.call(app, 'POST', self.API + '/pricing/entries',
+                               {'old_id': 'claude-opus-5', 'entry': {'id': 'claude-opus-5', 'input': 1, 'output': 2}})[1]
+            self.assertEqual(edited['source'], 'manual')
+            listing = self.call(app, 'POST', self.API + '/pricing/sync')[1]
+            entries = {e['id']: e for e in listing['entries']}
+            self.assertNotIn('gpt-5', entries)
+            self.assertEqual((listing['hidden'], entries['claude-opus-5']['input']), (1, 1.0))
+            listing = self.call(app, 'PATCH', self.API + '/pricing/sync', {'unhide': True})[1]
+            self.assertEqual(listing['hidden'], 0)
+            self.assertIn('gpt-5', {e['id'] for e in self.call(app, 'POST', self.API + '/pricing/sync')[1]['entries']})
+            # import one model from a provider outside the list; it replaces the synced one and is refreshed by sync
+            found = self.get(app, '/pricing/catalog?q=opus-5-5&provider=openrouter')
+            self.assertEqual([(m['provider'], m['id'], m['added']) for m in found['models']],
+                             [('openrouter', 'claude-opus-5-5', True)])
+            self.assertNotIn('bad id!', [p['id'] for p in found['providers']])
+            status, body = self.call(app, 'POST', self.API + '/pricing/import',
+                                     {'models': [{'provider': 'openrouter', 'id': 'claude-opus-5-5'}]})
+            self.assertEqual((status, body['imported']), (200, 1))
+            listing = self.call(app, 'PATCH', self.API + '/pricing/sync', {'providers': ['openai']})[1]
+            entries = {e['id']: e for e in listing['entries']}
+            self.assertEqual(sorted(entries), ['claude-opus-5', 'claude-opus-5-5', 'gpt-5'])
+            self.assertEqual((entries['claude-opus-5-5']['source'], entries['claude-opus-5-5']['input']), ('import', 9.0))
+            self.assertEqual(entries['claude-opus-5']['source'], 'manual')
+            status, body = self.call(app, 'POST', self.API + '/pricing/import', {'models': [{'provider': 'x', 'id': 'y'}]})
+            self.assertEqual((status, body['detail']['code']), (404, 'plugin.ai_assistant.pricing_not_found'))
+            # the earlier record keeps its price (a snapshot)
+            row = list(csv.DictReader(io.StringIO(self.get(app, '/usage/export'))))[0]
+            self.assertAlmostEqual(float(row['cost']), (1000 * 5 + 100 * 25) / 1e6)
+        with mock.patch.object(mod, 'fetch_raw', side_effect=OSError('offline')):
+            status, body = self.call(app, 'POST', self.API + '/pricing/sync')
+            self.assertEqual((status, body['detail']['code']), (502, 'plugin.ai_assistant.pricing_fetch_failed'))
+            self.assertEqual(self.get(app, '/pricing')['sync']['error'], 'offline')
+        status, body = self.call(app, 'POST', self.API + '/pricing/entries', {'entry': {'id': 'gpt-5', 'input': 1}})
+        self.assertEqual((status, body['detail']['code']), (409, 'plugin.ai_assistant.pricing_exists'))
+        for payload in [{'providers': ['ok', 'not ok']}, {'enabled': 'yes'}, {'providers': 'openai'}]:
+            self.assertEqual(self.call(app, 'PATCH', self.API + '/pricing/sync', payload)[0], 400)
 
     def test_r2_half_hour_dst_hour_buckets(self):
         from datetime import datetime
@@ -975,3 +1085,45 @@ class SummaryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PricingLookupTest(unittest.TestCase):
+    """Matching a call's model ids against the pricing table (no plugin, no network)."""
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO / 'plugins'))
+        import importlib
+        self.mod = importlib.import_module('ai_assistant.backend.pricing')
+        self.tmp = tempfile.TemporaryDirectory(prefix='ai-pricing-test-')
+        self.table = self.mod.Pricing(os.path.join(self.tmp.name, 'p.json'), os.path.join(self.tmp.name, 'c.json'))
+        for mid, rate in [('claude-opus-5', 15), ('claude-opus-5-5', 5), ('claude-3-5-haiku-20241022', 0.8),
+                          ('gpt-5', 1.25), ('o3', 2), ('Alias-Model', 7)]:
+            self.table.save_entry({'id': mid, 'input': rate})
+
+    def tearDown(self):
+        sys.path.remove(str(REPO / 'plugins'))
+        for name in [m for m in sys.modules if m.startswith('ai_assistant')]:
+            del sys.modules[name]
+        self.tmp.cleanup()
+
+    def found(self, *ids):
+        e = self.table.lookup(*ids)
+        return e['id'] if e else None
+
+    def test_lookup_order(self):
+        self.assertEqual(self.found('claude-opus-5'), 'claude-opus-5')
+        self.assertEqual(self.found('alias-model'), 'Alias-Model')                      # case
+        self.assertEqual(self.found('anthropic/claude-opus-5-5'), 'claude-opus-5-5')    # vendor prefix
+        self.assertEqual(self.found('claude-opus-5-5-20261001'), 'claude-opus-5-5')     # date suffix of the call
+        self.assertEqual(self.found('claude-3-5-haiku'), 'claude-3-5-haiku-20241022')   # date suffix of the entry
+        self.assertEqual(self.found('relay--claude-opus-5-5-kiro'), 'claude-opus-5-5')  # longest part wins
+        self.assertEqual(self.found('xclaude-opus-5'), None)                            # not between separators
+        self.assertEqual(self.found('o3-pro'), None)                                    # parts shorter than 4 are ignored
+        self.assertEqual(self.found('gpt-5', 'claude-opus-5'), 'gpt-5')                 # the reply's model first
+        self.assertEqual(self.found('relay--gpt-5-x', 'claude-opus-5'), 'claude-opus-5')  # an exact id beats a part
+        self.assertEqual(self.found('', None), None)
+
+    def test_cost(self):
+        e = {'input': 2.0, 'output': None, 'cache_read': 0.5, 'cache_write': None}
+        self.assertAlmostEqual(self.mod.entry_cost(e, {'input': 1000, 'output': 500, 'cache_read': 2000}), 0.003)
+        self.assertIsNone(self.mod.entry_cost({f: None for f in self.mod.FIELDS}, {'input': 1}))

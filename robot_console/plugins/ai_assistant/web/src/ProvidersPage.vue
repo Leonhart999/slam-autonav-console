@@ -413,7 +413,7 @@ defineExpose({ confirmLeave })
 .aip-models { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .aip-mrow {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 1fr) 132px 112px 44px 28px;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 1fr) 132px 44px 28px;
   align-items: center;
   gap: 8px;
   padding: 4px 4px 4px 6px;
@@ -423,7 +423,7 @@ defineExpose({ confirmLeave })
 .aip-mrow:not(.head):hover { background: var(--aip-l1); }
 .aip-mrow.dragging { opacity: 0.45; }
 .aip-mrow.head { font-size: 12px; color: var(--ink-3); padding-bottom: 0; }
-.aip-mrow.head > span:nth-child(6) { text-align: center; }
+.aip-mrow.head > span:nth-child(5) { text-align: center; }
 .aip-grip { cursor: grab; color: var(--ink-3); text-align: center; user-select: none; }
 .aip-radio {
   justify-self: center;
@@ -513,20 +513,6 @@ defineExpose({ confirmLeave })
   cursor: pointer;
 }
 .aip-epick-btn.unset { color: var(--ink-3); }
-.aip-price-btn { justify-content: center; }
-/* price popover of a model row (PricePicker.vue) */
-.aip-price { width: 270px; gap: 8px; padding: 10px 12px; }
-.aip-price-head { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; font-weight: 600; }
-.dark .aip-price-head { font-weight: 560; }
-.aip-price-row { display: grid; grid-template-columns: minmax(0, 1fr) 112px; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-2); }
-.aip-price-row .el-input-number { width: 112px; }
-.aip-price-row .el-input__wrapper { box-shadow: none; background: rgba(var(--tint-rgb), 0.05); }
-.aip-price-row .el-input__inner { text-align: right; }
-.aip-price-unit { margin: 0; font-size: 11px; color: var(--ink-3); }
-.aip-price-foot { display: flex; align-items: center; gap: 6px; }
-.aip-price .el-radio-group { padding: 2px; border-radius: 8px; background: rgba(var(--tint-rgb), 0.05); }
-.aip-price .el-radio-button__inner { border: 0 !important; border-radius: 6px !important; padding: 4px 9px; background: transparent; box-shadow: none !important; color: var(--ink-2); }
-.aip-price .el-radio-button.is-active .el-radio-button__inner { color: var(--ink); background: var(--card-solid); box-shadow: 0 1px 3px rgba(var(--shade-rgb), 0.12) !important; }
 .aip-epick-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .aip-epick-caret { flex: none; color: var(--ink-3); font-size: 11px; rotate: 90deg; transition: rotate 0.18s ease; }
 .aip-epick-btn.open .aip-epick-caret { rotate: -90deg; }

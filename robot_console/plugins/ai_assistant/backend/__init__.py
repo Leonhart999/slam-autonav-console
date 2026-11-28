@@ -18,6 +18,7 @@ Routes (under /api/ext/ai_assistant):
   GET  /sessions/{id}/export   Markdown attachment or displayed transcript as JSON
   GET  /usage/{summary,series,breakdown,filters,export}   aggregates, filter choices and CSV (see usage.py)
   GET  /usage/prune/preview; POST /usage/prune   preview and delete usage records
+  /pricing/...          model prices for the usage estimate, synced from models.dev (see pricing.py)
   /cpa/...              the embedded CLIProxyAPI engine and its OAuth sign-ins (see cpa.py, cpa_api.py)
 """
 import asyncio
@@ -31,7 +32,7 @@ import time
 from fastapi import Body
 from fastapi.responses import Response, StreamingResponse
 
-from . import actions, agent, cpa, cpa_api, profiles, providers, usage
+from . import actions, agent, cpa, cpa_api, pricing, profiles, providers, usage
 from .sessions import ID_RE, SessionBusy, Sessions, markdown
 from .store import Store
 
@@ -60,6 +61,11 @@ def setup(ctx):
     migrated = store.migrate(legacy_settings(ctx))
     if migrated:
         ctx.log.info(f'model service settings moved to profile "{migrated["name"]}"')
+    prices = pricing.Pricing(os.path.join(ctx.data_dir, 'pricing.json'), os.path.join(ctx.data_dir, 'models_dev.json'))
+    pricing.register(ctx, prices, ledger)
+    moved = prices.migrate(store.all())
+    if moved:
+        ctx.log.info(f'{moved} model prices moved from the model services to the pricing table')
     engine = cpa.Engine(ctx.data_dir)
     ctx.on_shutdown(engine.stop)
     # The engine-owned profile is recorded in providers.json itself (managed_by) and in the engine's metadata; either
@@ -154,8 +160,7 @@ def setup(ctx):
                'profiles': [{'id': x['id'], 'name': x['name'], 'color': x.get('color', ''), 'format': x['format'],
                              'model': x.get('model', ''), 'managed': is_managed(x),
                              'models': [{'id': m['id'], 'label': m['label'], 'effort': m.get('effort', ''),
-                                         'efforts': m.get('efforts') or [],
-                                         **({'price': m['price']} if 'price' in m else {})}
+                                         'efforts': m.get('efforts') or []}
                                         for m in x.get('models') or []]}
                             for x in store.all()]}
         if p is None:
@@ -267,7 +272,7 @@ def setup(ctx):
         else:
             p, s = active_settings()
         provider = provider_or_error(s)
-        record = usage.recorder(ctx, ledger, p, provider, 'test')
+        record = usage.recorder(ctx, ledger, prices, p, provider, 'test')
         try:
             model, seconds, reply = await asyncio.to_thread(providers.check, provider, record)
         except providers.ProviderError as e:
@@ -409,7 +414,7 @@ def setup(ctx):
         def worker():
             try:
                 agent.run_turn(provider, session, message.strip(), page[:200], settings, call_tool, emit, stop.is_set,
-                               access, confirm, usage.recorder(ctx, ledger, p, provider, 'chat', session))
+                               access, confirm, usage.recorder(ctx, ledger, prices, p, provider, 'chat', session))
             except agent.Cancelled:
                 emit({'type': 'error', 'code': 'cancelled', 'params': {}})
             except providers.ProviderError as e:

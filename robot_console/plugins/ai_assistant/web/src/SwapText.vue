@@ -19,8 +19,18 @@ watch(() => props.text, async () => {
   await nextTick()
   const to = el.getBoundingClientRect().width
   if (Math.abs(to - from) < 0.5) return
-  anim = el.animate([{ width: `${from}px` }, { width: `${to}px` }], { duration: 320, easing: EASE })
-  anim.onfinish = () => { anim = null }
+  const a = el.animate([{ width: `${from}px` }, { width: `${to}px` }], { duration: 320, easing: EASE })
+  anim = a
+  // While the box glides, the new text is wider than the box for a moment: cut it at the edge instead of showing
+  // an ellipsis. The ellipsis stays for text that is still too long once the box has its final width.
+  el.classList.add('gliding')
+  const done = () => {
+    if (anim !== a) return // a newer change already took over
+    anim = null
+    el.classList.remove('gliding')
+  }
+  a.onfinish = done
+  a.oncancel = done
 }, { flush: 'pre' })
 </script>
 

@@ -50,6 +50,7 @@ Closed-loop Nav2 navigation runs in Gazebo Fortress (including scenes generated 
 | **05 Evaluation** | Separate records for **Mapping**, **Navigation**, and **Playback**; `evo` ATE / RPE metrics, per-goal navigation metrics, playback closure/height-drift/reference-odometry deviation and SLAM lag; **Side by side** or **Stacked** layouts; automated **Batch mapping** and **Batch navigation** experiments (mean ± std), user-override badges, relative trajectory comparison, CSV / PNG export |
 | **Monitor** | Live status of console-managed process groups, topic publish rates vs. expected rates, TF tree chain, active ROS 2 nodes, and process exit reasons |
 | **Plugins** | Unified **Installed / Plugin market** tabs: enable/disable plugins (takes effect on restart), auto-generated settings forms, per-plugin isolated Python virtual environments and background job queues, one-click install/update from [`Leonhart999/slam-console-plugins`](https://github.com/Leonhart999/slam-console-plugins) (SHA-256 verified) or local `.zip` upload; market updates cleanly shadow bundled copies |
+| **Settings** | Centralized browser preferences and machine overrides (`/settings`): **General** (language, theme / follow system / plugin themes, density, UI scale, reduced motion, start page, task-completion notifications), **Data & storage** (data folder paths, size breakdown, config export/import/reset), **Experiment defaults** (`evo` tolerances, batch timeouts, nav & playback defaults), **Teleop & safety** (velocity limits, watchdog, E-stop zero-velocity hold), **Network & connection** (port, GitHub/pip proxies with connectivity test), and **About** (release update check and runtime diagnostics) |
 
 Long-running operations (2D regridding, offline loop optimization, `evo` evaluation, relative trajectory comparison, report export) run through the header **Background tasks** drawer so progress survives page switches and reloads, and finished jobs can be inspected, retried, removed, or cleared.
 
@@ -109,7 +110,7 @@ All plugins share the same **Plugin Interface v1** (`plugin.yaml`, `/api/ext/<id
 
 | Plugin | Distribution | Powered by | What it does |
 |---|---|---|---|
-| **`ai_assistant`** AI assistant (`0.4.0`) | Bundled + Market | OpenAI-compatible / Anthropic APIs, embedded CPA OAuth engine | Resizable header chat drawer with searchable SQLite history, token & cost usage charts, OAuth subscription sign-in, read-only console inspection tools, and approval-gated batch/evaluation run tools |
+| **`ai_assistant`** AI assistant (`0.6.0`) | Bundled + Market | OpenAI-compatible / Anthropic APIs, embedded CPA OAuth engine | Freely resizable header chat drawer with glass (liquid glass / busy edge glow) and classic skins plus in-panel settings, searchable SQLite history, token & cost usage charts (with price table sync from `models.dev`), OAuth subscription sign-in, read-only console inspection tools, and approval-gated batch/evaluation run tools |
 | **`bag_convert`** Bag converter | Bundled + Market | [rosbags](https://gitlab.com/ternaris/rosbags) (Apache-2.0) | Converts ROS 1 `.bag` files to ROS 2 (`sqlite3` / `MCAP`) with topic selection and Livox `CustomMsg` → `PointCloud2` conversion |
 | **`dynamic_removal`** Dynamic object removal | Bundled + Market | [DUFOMap](https://github.com/KTH-RPL/dufomap) (BSD-3) | Removes moving-object ghost points using raw-scan free-space visibility and derives a cleaned map version |
 | **`ground_seg`** Ground segmentation | Bundled + Market | [Patchwork++](https://github.com/url-kaist/patchwork-plusplus) (BSD-2) | Segments local ground vs. non-ground points and rebuilds the Nav2 2D occupancy grid by local height |
@@ -192,7 +193,7 @@ See [docker/README.md](docker/README.md) for details (tested on WSL2 + Docker En
   ```
 
 - **Offline planar loop back-end environment**: to enable **Loop optimization** on the **Maps** page (and the CLI tools `fastlio_loop_record`, `fastlio_loop`, `fastlio_loop_export`), install `robot_console/install/requirements-loop.txt` into a separate Python venv (default `~/venvs/loop`) so system GLIM / GTSAM stays untouched. See [robot_console/docs/fastlio-loop-backend.md](robot_console/docs/fastlio-loop-backend.md).
-- **Machine-specific configuration**: place overrides in `~/.config/robot_console/console.yaml` (template: `robot_console/config/user_console.example.yaml`). Maps, run records, logs, bags, sensor profiles, plugin data/venvs, and exports live under `~/robot_console_data` by default.
+- **Machine-specific configuration**: edit data folders, experiment defaults, teleop limits, and proxies directly from the **Settings** button at the bottom of the sidebar (atomically writes `~/.config/robot_console/console.yaml` with comment preservation and rotating backups), or edit the file manually (template: `robot_console/config/user_console.example.yaml`). Maps, run records, logs, bags, sensor profiles, plugin data/venvs, and exports live under `~/robot_console_data` by default.
 
 ## Repository Layout
 

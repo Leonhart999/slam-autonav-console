@@ -50,6 +50,7 @@ Nav2 闭环导航在 Gazebo Fortress 中运行（实车建出的地图可绑定�
 | **05 实验评估** | 区分**建图、导航、回放**三类运行记录；计算 `evo` ATE / RPE、单目标点导航指标、回放首尾闭合/高度漂移/参考里程计偏差与 SLAM 滞后；支持**左右分栏 / 上下排列**视图；内置**批量建图**与**批量导航**重复实验（统计均值 ± 标准差）、用户改参标记、同片段相对轨迹对比以及 CSV / PNG 导出 |
 | **系统监控** | 展示控制台管理的进程组状态、话题实际/期望频率、TF 变换链、活跃节点列表以及进程退出原因 |
 | **插件** | **已安装 / 插件市场**双标签管理：开关启停（重启生效）、清单驱动设置表单、插件独立 Python 虚拟环境与后台作业队列；支持从 [`Leonhart999/slam-console-plugins`](https://github.com/Leonhart999/slam-console-plugins) 在线安装/更新（SHA-256 校验）或上传本地 `.zip`；市场升级平滑覆盖内置副本而不产生冲突 |
+| **设置** | 集中管理浏览器偏好与本机配置（`/settings`）：**通用**（语言、明暗/跟随系统/插件主题、紧凑/舒适密度、界面缩放、动效减弱、默认起始页、任务完成提醒）、**数据与存储**（数据目录路径、占用空间统计、配置导入/导出/恢复默认）、**实验默认参数**（`evo` 容差、批量超时、导航与回放默认值）、**遥控与安全**（速度上限、断联停机、急停零速时长）、**网络与连接**（端口、GitHub/pip 代理与连通性测试）及**关于**（版本检测与运行环境诊断） |
 
 2D 重投影、离线回环优化、`evo` 评估、相对轨迹对比与报告导出等耗时操作均接入页头**后台任务**抽屉，切换页面或刷新后仍可持续追踪进度、找回结果、重试或清理记录。
 
@@ -109,7 +110,7 @@ Nav2 闭环导航在 Gazebo Fortress 中运行（实车建出的地图可绑定�
 
 | 插件 | 分发方式 | 核心依赖 | 功能说明 |
 |---|---|---|---|
-| **`ai_assistant`** AI 助手（`0.4.0`） | 内置 + 市场 | OpenAI 兼容 / Anthropic 接口、内置 CPA OAuth 引擎 | 可拖拽调宽的页头聊天抽屉，支持 SQLite 历史对话检索/置顶/导出、Token 用量与费用估算图表、OAuth 订阅账号登录、只读查询控制台数据及带审批的实验/评估执行工具 |
+| **`ai_assistant`** AI 助手（`0.6.0`） | 内置 + 市场 | OpenAI 兼容 / Anthropic 接口、内置 CPA OAuth 引擎 | 可自由拖拽调尺寸的页头聊天抽屉，支持玻璃（液态玻璃/边沿流光）与经典双外观及面板内设置页、SQLite 历史对话检索/置顶/导出、Token 用量与费用估算图表（支持从 `models.dev` 同步模型定价）、OAuth 订阅账号登录、只读查询控制台数据及带审批的实验/评估执行工具 |
 | **`bag_convert`** 数据包转换 | 内置 + 市场 | [rosbags](https://gitlab.com/ternaris/rosbags)（Apache-2.0） | 将 ROS 1 `.bag` 转为 ROS 2（`sqlite3` / `MCAP`），支持话题筛选与 Livox `CustomMsg` → `PointCloud2` 转换 |
 | **`dynamic_removal`** 动态物体去除 | 内置 + 市场 | [DUFOMap](https://github.com/KTH-RPL/dufomap)（BSD-3） | 利用原始扫描空闲空间剔除行人/车辆残留鬼影点，并派生新版本地图 |
 | **`ground_seg`** 地面分割 | 内置 + 市场 | [Patchwork++](https://github.com/url-kaist/patchwork-plusplus)（BSD-2） | 分离局部地面与障碍物点云，按相对地面高度重建 Nav2 2D 占据栅格 |
@@ -192,7 +193,7 @@ docker compose up -d
   ```
 
 - **离线平面回环后端环境**：如需在**地图管理**页使用**回环优化**（或命令行 `fastlio_loop_record`、`fastlio_loop`、`fastlio_loop_export`），请将 `robot_console/install/requirements-loop.txt` 安装至独立虚拟环境（默认 `~/venvs/loop`），避免与系统 GLIM / GTSAM 冲突。详见 [robot_console/docs/fastlio-loop-backend.md](robot_console/docs/fastlio-loop-backend.md)（英文）。
-- **本机配置**：覆盖项写在 `~/.config/robot_console/console.yaml`（示例见 `robot_console/config/user_console.example.yaml`）。地图、运行记录、日志、数据包、传感器配置、插件数据/环境及导出文件默认存放在 `~/robot_console_data`。
+- **本机配置**：可在控制台左侧边栏底部的 **设置** 页直接修改数据目录、实验默认值、遥控限速与代理（自动原子写入 `~/.config/robot_console/console.yaml` 并保留注释与轮转备份），也可手动编辑该文件（示例见 `robot_console/config/user_console.example.yaml`）。地图、运行记录、日志、数据包、传感器配置、插件数据/环境及导出文件默认存放在 `~/robot_console_data`。
 
 ## 仓库结构
 

@@ -10,7 +10,6 @@ import { COLORS, USER_AGENTS, avatarColor, initial } from './presets'
 import { RC, t } from './sdk'
 import Icon from './Icon.vue'
 import EffortPicker from './EffortPicker.vue'
-import PricePicker from './PricePicker.vue'
 import ModelFetchDialog from './ModelFetchDialog.vue'
 
 const props = defineProps<{ profile: Profile | null; draft: ProfileInput | null; active: boolean }>()
@@ -57,7 +56,6 @@ function fromSource(): ProfileInput {
     format: p.format ?? 'openai', base_url: p.base_url ?? '', endpoints: p.endpoints ?? [], full_url: !!p.full_url,
     models: (p.models ?? []).map((m) => ({
       id: m.id, label: m.label === m.id ? '' : m.label, effort: m.effort ?? '', efforts: (m.efforts ?? []) as EffortValue[],
-      price: m.price ?? null,
     })),
     model: p.model ?? '', proxy: p.proxy ?? '', user_agent: p.user_agent ?? '', headers: p.headers ?? {}, body: p.body ?? {},
   }
@@ -109,7 +107,6 @@ const invalid = computed(() => !pf.value.name.trim() || !!headersParsed.value.er
 function toInput(): ProfileInput {
   const models: ModelEntry[] = pf.value.models.map((m) => ({
     id: m.id.trim(), label: m.label.trim() || m.id.trim(), effort: m.effort, efforts: m.efforts ?? [],
-    ...(m.price ? { price: m.price } : {}),
   }))
   return {
     ...pf.value,
@@ -363,7 +360,7 @@ function pickUserAgent(v: string) {
       <div v-if="pf.models.length" ref="modelInputs" class="aip-models">
         <div class="aip-mrow head">
           <span /><span>{{ t('editor.models.label') }}</span><span>{{ t('editor.models.id') }}</span>
-          <span>{{ t('editor.models.effort') }}</span><span>{{ t('editor.pricing.column') }}</span><span>{{ t('editor.models.default') }}</span><span />
+          <span>{{ t('editor.models.effort') }}</span><span>{{ t('editor.models.default') }}</span><span />
         </div>
         <div v-for="(m, i) in pf.models" :key="i" class="aip-mrow" :class="{ dragging: dragRow === i }"
              @dragover.prevent @drop="onRowDrop(i)">
@@ -371,7 +368,6 @@ function pickUserAgent(v: string) {
           <el-input v-model="m.label" size="small" :placeholder="m.id || t('editor.models.labelPlaceholder')" />
           <el-input v-model="m.id" size="small" class="aip-model-id" :placeholder="t('editor.models.idPlaceholder')" />
           <EffortPicker v-model:efforts="m.efforts" v-model:effort="m.effort" />
-          <PricePicker v-model="m.price" />
           <button type="button" class="aip-radio" :class="{ on: pf.model === m.id && !!m.id }" :aria-pressed="pf.model === m.id"
                   :title="t('editor.models.makeDefault')" :disabled="!m.id" @click="pf.model = m.id" />
           <button type="button" class="aip-ibtn" :title="t('editor.models.remove')" @click="removeModel(i)"><Icon name="trash" /></button>

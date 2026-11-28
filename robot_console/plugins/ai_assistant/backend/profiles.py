@@ -12,7 +12,6 @@ import copy
 import json
 import os
 import re
-import sys
 import threading
 import uuid
 
@@ -68,23 +67,6 @@ def _efforts(value):
     return [e for e in EFFORT_VALUES if e in picked]
 
 
-def _price(value):
-    fields = ('input', 'output', 'cache_read', 'cache_write')
-    if not isinstance(value, dict) or value.keys() - {*fields, 'currency'}:
-        raise ProfileError('profile_invalid', field='price')
-    currency = value.get('currency', 'USD')
-    if currency not in ('USD', 'CNY'):
-        raise ProfileError('profile_invalid', field='price')
-    price = {'currency': currency}
-    for field in fields:
-        if field in value:
-            rate = value[field]
-            if type(rate) not in (int, float) or not (0 <= rate <= sys.float_info.max):
-                raise ProfileError('profile_invalid', field='price')
-            price[field] = float(rate)
-    return price
-
-
 def _models(value):
     if value is None:
         return []
@@ -106,9 +88,7 @@ def _models(value):
             effort = ''
         entry = {'id': mid, 'label': _text(m.get('label'), 'models', 200) or mid,
                  'effort': effort, 'efforts': efforts}
-        if 'price' in m:
-            entry['price'] = _price(m['price'])
-        out.append(entry)
+        out.append(entry)          # a 'price' from version 0.5 is dropped: prices live in pricing.json now
     return out
 
 

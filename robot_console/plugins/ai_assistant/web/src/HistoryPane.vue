@@ -7,6 +7,8 @@ import { deleteSession, download, exportSessionUrl, listSessions, patchSession, 
 import { compact, relative, shortModel } from './format'
 import { RC, t } from './sdk'
 import Icon from './Icon.vue'
+import HistActs from './HistActs.vue'
+import LiquidGlass from './glass/LiquidGlass.vue'
 
 const props = defineProps<{ current: string; busy: boolean; docked: boolean; reload: number }>()
 const emit = defineEmits<{ open: [id: string]; newChat: []; close: []; deleted: [id: string] }>()
@@ -183,10 +185,12 @@ onUnmounted(() => {
 <template>
   <section class="aia-hist" :class="{ docked }" :aria-label="t('history.title')" @keydown="onKey">
     <div class="aia-hist-top">
-      <label class="aia-hist-search">
-        <Icon name="search" class="aia-hist-sicon" />
-        <input ref="searchInput" v-model="query" type="search" :placeholder="t('history.search')" :aria-label="t('history.search')">
-      </label>
+      <LiquidGlass class="aia-hist-search-glass">
+        <label class="aia-hist-search">
+          <Icon name="search" class="aia-hist-sicon" />
+          <input ref="searchInput" v-model="query" type="search" :placeholder="t('history.search')" :aria-label="t('history.search')">
+        </label>
+      </LiquidGlass>
       <button type="button" class="aia-ibtn" :title="t('history.newChat')" :aria-label="t('history.newChat')"
               :disabled="busy" @click="emit('newChat')"><Icon name="plus" /></button>
     </div>
@@ -206,6 +210,7 @@ onUnmounted(() => {
           :class="{ on: s.id === current, confirming: confirmDel === s.id }"
           role="button" tabindex="0" @click="open(s)" @keydown.enter.self="open(s)"
         >
+          <span class="aia-card-hl" aria-hidden="true"><span class="aia-card-edge" /></span>
           <input
             v-if="renaming === s.id" ref="renameInput" v-model="renameText" class="aia-hist-rename" maxlength="120"
             @click.stop @keydown.enter.prevent="saveRename(s)" @keydown.esc.stop.prevent="renaming = ''" @blur="saveRename(s)"
@@ -219,23 +224,23 @@ onUnmounted(() => {
             <span class="aia-hist-metatext">
               {{ relative(s.updated) }}<template v-if="s.model"> · {{ shortModel(s.model) }}</template><template v-if="tokens(s)"> · {{ compact(tokens(s)) }}</template>
             </span>
-            <span class="aia-hist-acts" @click.stop>
+            <HistActs>
               <template v-if="confirmDel !== s.id">
-                <button type="button" class="aia-hist-act" :title="t(s.pinned ? 'history.unpin' : 'history.pin')" @click="togglePin(s)">
+                <button type="button" class="aia-hist-act" data-lens :title="t(s.pinned ? 'history.unpin' : 'history.pin')" @click="togglePin(s)">
                   <Icon name="pin" :filled="s.pinned" />
                 </button>
-                <button type="button" class="aia-hist-act" :title="t('history.rename')" @click="startRename(s)"><Icon name="edit" /></button>
-                <button type="button" class="aia-hist-act" :title="t('history.export')" @click="exportMd(s)">
+                <button type="button" class="aia-hist-act" data-lens :title="t('history.rename')" @click="startRename(s)"><Icon name="edit" /></button>
+                <button type="button" class="aia-hist-act" data-lens :title="t('history.export')" @click="exportMd(s)">
                   <Icon :name="exported === s.id ? 'check' : 'download'" />
                 </button>
               </template>
               <button
-                type="button" class="aia-hist-act del" :class="{ ask: confirmDel === s.id }"
+                type="button" class="aia-hist-act del" data-lens :class="{ ask: confirmDel === s.id }"
                 :disabled="busy && s.id === current" :title="t('history.delete')" @click="askDelete(s)"
               >
                 <template v-if="confirmDel === s.id">{{ t('history.confirmDelete') }}</template><Icon v-else name="trash" />
               </button>
-            </span>
+            </HistActs>
           </span>
         </div>
       </template>

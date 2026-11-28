@@ -9,6 +9,7 @@ import App from './App.vue'
 import { router } from './router'
 import { applyDocumentLang, i18n } from './i18n'
 import { initTheme } from './theme'
+import { initPrefs } from './settings/prefs'
 import { startPlugins } from './plugins/start'
 
 async function start() {
@@ -29,6 +30,7 @@ async function start() {
   app.use(i18n)
   applyDocumentLang()
   initTheme()
+  initPrefs()
   app.mount('#app')
   if (!preview) startPlugins()
 }

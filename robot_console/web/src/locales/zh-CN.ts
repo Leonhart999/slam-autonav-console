@@ -935,6 +935,18 @@ const zhCN = {
     },
   },
   // 后端返回的错误代码
+  settingsNav: {
+    title: '设置',
+    back: '返回',
+    group: '设置',
+    general: '通用',
+    storage: '数据与存储',
+    experiment: '实验默认值',
+    safety: '遥控与安全',
+    network: '网络与连接',
+    about: '关于',
+    updateDot: '有新版本',
+  },
   error: {
     preview_read_only: '此操作需要安装完整版控制台，只读预览中不可用。',
     request_timeout: '请求等待超过 {seconds} 秒；请检查后台状态后再重试。',
@@ -1107,6 +1119,12 @@ const zhCN = {
     plugin_setting_range: '设置项 {key} 超出范围（{min} – {max}）',
     plugin_setting_option: '设置项 {key} 的值不在可选项里',
     plugin_setting_unknown: '插件没有名为 {key} 的设置项',
+    setting_unknown: '没有名为 {key} 的设置项',
+    setting_invalid: '设置项 {key} 的值不符合要求（{reason}）',
+    settings_read_only: '控制台用 --config 启动（测试实例），设置不能保存',
+    settings_file_error: '读写设置文件失败（{reason}），请检查文件权限和内容',
+    settings_json_required: '请求格式不对：设置接口只接受 JSON 请求',
+    settings_import_invalid: '导入的设置文件无效：{reason}',
     unknown: '请求失败：{reason}',
   },
 }

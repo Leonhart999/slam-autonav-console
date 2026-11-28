@@ -97,7 +97,11 @@ watch(
 
 onUnmounted(() => {
   if (restartTimer !== undefined) window.clearTimeout(restartTimer)
+  window.removeEventListener('console-restart-request', onRestartRequest)
 })
+// Settings page "Save and restart" / "Restart now": same flow as the restart button here
+function onRestartRequest() { void restartConsole() }
+window.addEventListener('console-restart-request', onRestartRequest)
 
 async function restartConsole() {
   if (restarting.value) return

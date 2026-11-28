@@ -486,3 +486,25 @@ html.theme-fade *::after {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Settings → General (settings/prefs.ts) */
+/* "Reduced" animations: no transitions or animations anywhere (theme reveal is skipped in theme.ts) */
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+}
+/* Interface scale: zoom the console (#app) and the popups Element Plus teleports to <body>. #app keeps the size of
+   the window: its box is divided by the zoom factor, which the zoom then multiplies back. */
+html.ui-zoomed #app {
+  zoom: var(--ui-zoom, 1);
+  height: calc(100vh / var(--ui-zoom, 1));
+}
+html.ui-zoomed body > .el-popper,
+html.ui-zoomed body > .el-overlay,
+html.ui-zoomed body > .el-message,
+html.ui-zoomed body > .el-select-dropdown {
+  zoom: var(--ui-zoom, 1);
+}

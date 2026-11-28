@@ -9,7 +9,7 @@ export interface ProfileBrief {
   color: string
   format: 'openai' | 'anthropic'
   model: string
-  models: { id: string; label: string; effort: Effort; efforts: EffortValue[]; price?: Price | null }[]
+  models: { id: string; label: string; effort: Effort; efforts: EffortValue[] }[]
 }
 
 /** What the assistant may do for a question: chat only, read data, run experiments after asking, or freely */
@@ -32,9 +32,7 @@ export interface Status {
 export type EffortValue = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'
 export type Effort = '' | EffortValue
 export type Currency = 'USD' | 'CNY'
-/** Price of a model per 1M tokens, set by the user (every field optional) */
-export interface Price { currency: Currency; input?: number | null; output?: number | null; cache_read?: number | null; cache_write?: number | null }
-export interface ModelEntry { id: string; label: string; effort: Effort; efforts: EffortValue[]; price?: Price | null }
+export interface ModelEntry { id: string; label: string; effort: Effort; efforts: EffortValue[] }
 
 /** A model service profile as the backend shows it (the key itself never comes back) */
 export interface Profile {
@@ -174,6 +172,34 @@ export const usageExportUrl = (q: UsageQuery) => `${BASE}/usage/export?${qs({ ..
 export const usagePrunePreview = (before: number | null) =>
   RC().request<{ rows: number }>('GET', `${BASE}/usage/prune/preview?${qs({ before })}`)
 export const usagePrune = (before: number | null) => RC().request<{ deleted: number }>('POST', `${BASE}/usage/prune`, { before })
+
+// ---- prices for the usage estimate (pricing.py): one table by model id, synced from models.dev ----
+export const PRICE_FIELDS = ['input', 'output', 'cache_read', 'cache_write'] as const
+export type PriceField = typeof PRICE_FIELDS[number]
+export type PriceRates = Record<PriceField, number | null>
+export interface PriceEntry extends PriceRates {
+  id: string; name: string; currency: Currency; source: 'manual' | 'sync' | 'import'; provider?: string; updated: number
+}
+export interface PricingSync {
+  enabled: boolean; providers: string[]; provider_names: Record<string, string>; last: number | null
+  attempt: number | null; error: string | null; running: boolean
+}
+export interface Pricing {
+  entries: PriceEntry[]; hidden: number; sync: PricingSync; catalog: { fetched: number | null; providers: number }
+}
+export interface CatalogModel extends PriceRates { provider: string; provider_name: string; id: string; name: string; added: boolean }
+export interface Catalog { fetched: number | null; providers: { id: string; name: string; count: number }[]; models: CatalogModel[] }
+export const getPricing = () => RC().request<Pricing>('GET', `${BASE}/pricing`)
+export const savePrice = (entry: Partial<PriceRates> & { id: string; name?: string; currency: Currency }, oldId?: string) =>
+  RC().request<PriceEntry>('POST', `${BASE}/pricing/entries`, { entry, old_id: oldId ?? null })
+export const deletePrices = (ids: string[]) => RC().request<{ deleted: number }>('POST', `${BASE}/pricing/entries/delete`, { ids })
+export const setPricingSync = (change: { enabled?: boolean; providers?: string[]; unhide?: boolean }) =>
+  RC().request<Pricing>('PATCH', `${BASE}/pricing/sync`, change)
+export const syncPricing = () => RC().request<Pricing>('POST', `${BASE}/pricing/sync`)
+export const searchCatalog = (q: string, provider = '', limit = 200) =>
+  RC().request<Catalog>('GET', `${BASE}/pricing/catalog?${qs({ q, provider, limit })}`)
+export const importPrices = (models: { provider: string; id: string }[]) =>
+  RC().request<Pricing & { imported: number }>('POST', `${BASE}/pricing/import`, { models })
 
 // ---- embedded CPA engine and OAuth sign-in ----
 export type EngineState = 'missing' | 'installing' | 'stopped' | 'starting' | 'ready' | 'error'

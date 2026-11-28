@@ -49,6 +49,7 @@ def allowed_roots(cfg):
     m = cfg.get('mapping') or {}
     p = cfg.get('playback') or {}
     roots = [m.get('maps_dir'), m.get('runs_dir'), (cfg.get('evaluation') or {}).get('results_dir'),
+             (cfg.get('paths') or {}).get('data_root'), (cfg.get('server') or {}).get('log_dir'),
              *(p.get('bag_dirs') or []), p.get('upload_dir'), *((cfg.get('plugins') or {}).get('dirs') or [])]
     return [os.path.realpath(os.path.expanduser(r)) for r in roots if r]
 

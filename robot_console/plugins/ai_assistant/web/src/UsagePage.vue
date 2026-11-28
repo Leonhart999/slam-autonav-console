@@ -1,12 +1,12 @@
 <!-- Usage tab: what the assistant's model calls used, from the plugin's own records (one per model call, also of
      answers that were stopped or failed). Range and filters, four totals, tokens over time, share per model or
-     service, and a table by model / service / conversation. Cost is an estimate from the prices the user set per
-     model; calls without a price are counted but not priced. -->
+     service, a table by model / service / conversation, and the pricing panel. Cost is an estimate from the price
+     table (PricingDialog.vue, synced from models.dev); calls without a price are counted but not priced. -->
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElButton, ElDialog, ElOption, ElRadio, ElRadioButton, ElRadioGroup, ElSelect, ElTable, ElTableColumn } from 'element-plus'
 import {
-  download, usageBreakdown, usageExportUrl, usageFilters, usagePrune, usagePrunePreview, usageSeries, usageSummary,
+  download, getPricing, usageBreakdown, usageExportUrl, usageFilters, usagePrune, usagePrunePreview, usageSeries, usageSummary,
   type UsageBy, type UsagePoint, type UsageQuery, type UsageRow, type UsageSummary,
 } from './api'
 import { compact, grouped, moneyList, relative, seconds, shortModel } from './format'
@@ -14,6 +14,7 @@ import { RC, t } from './sdk'
 import Icon from './Icon.vue'
 import StackedBars from './StackedBars.vue'
 import ShareBars from './ShareBars.vue'
+import PricingDialog from './PricingDialog.vue'
 
 const { GlassPanel } = RC().ui
 type Range = 'today' | '7d' | '30d' | 'all'
@@ -36,8 +37,20 @@ const pruneKeep = ref<'7' | '30' | '90' | 'all'>('30')
 const prunePreview = ref<number | null>(null)
 const pruning = ref(false)
 const pruneArmed = ref(false)
+const pricingOpen = ref(false)
+const priced = ref<number | null>(null)
 let seq = 0
 let armTimer = 0
+
+async function loadPriced() {
+  try {
+    priced.value = (await getPricing()).entries.length
+  } catch { /* the panel shows no count */ }
+}
+function onPricingChanged() {
+  void loadPriced()
+  void load()
+}
 
 function query(): UsageQuery {
   const now = new Date()
@@ -83,6 +96,7 @@ watch([range, profile, model, by, shareBy], () => void load())
 onMounted(() => {
   void loadFilters()
   void load()
+  void loadPriced()
 })
 
 const tokensTotal = computed(() => {
@@ -207,7 +221,8 @@ async function prune() {
         <span v-if="costText" class="aiu-kpi-value">{{ costText }}</span>
         <span v-else class="aiu-kpi-value none">{{ summary && summary.calls ? t('usage.kpi.noPrice') : '—' }}</span>
         <span class="aiu-kpi-sub">
-          <template v-if="summary && summary.unpriced_models.length">{{ t('usage.kpi.unpriced', { n: summary.unpriced_models.length }) }}</template>
+          <button v-if="summary && summary.unpriced_models.length" type="button" class="aip-link aiu-kpi-link"
+                  :title="summary.unpriced_models.join(', ')" @click="pricingOpen = true">{{ t('usage.kpi.unpriced', { n: summary.unpriced_models.length }) }}</button>
           <template v-else>{{ t('usage.kpi.costHint') }}</template>
         </span>
       </div>
@@ -286,6 +301,17 @@ async function prune() {
         </el-table-column>
       </el-table>
     </GlassPanel>
+
+    <GlassPanel :title="t('pricing.title')">
+      <div class="aiu-pricing">
+        <div class="aiu-pricing-text">
+          <span>{{ t('pricing.panel.text') }}</span>
+          <span v-if="priced !== null" class="aiu-cell-sub">{{ t('pricing.panel.count', { n: priced }) }}</span>
+        </div>
+        <el-button @click="pricingOpen = true">{{ t('pricing.panel.manage') }}</el-button>
+      </div>
+    </GlassPanel>
+    <PricingDialog v-model="pricingOpen" @changed="onPricingChanged" />
 
     <el-dialog v-model="pruneOpen" :title="t('usage.prune.title')" width="min(420px, 94vw)" append-to-body class="aip-dialog">
       <div class="aiu-prune">
@@ -431,6 +457,10 @@ async function prune() {
 .aiu-table .el-table__row.gone td { color: var(--ink-3); }
 .aiu-cell-sub { margin-left: 8px; font-size: 11.5px; color: var(--ink-3); }
 .aiu-cell-none { color: var(--ink-3); }
+.aiu-pricing { display: flex; align-items: center; gap: 16px; }
+.aiu-pricing-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--ink-2); }
+.aiu-pricing-text .aiu-cell-sub { margin-left: 0; }
+.aiu-kpi-link { font-size: 11.5px; }
 .aiu-prune { display: flex; flex-direction: column; gap: 10px; }
 .aiu-prune-opts { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .aiu-prune-preview { margin: 0; font-size: 12.5px; color: var(--ink-2); }

@@ -1,16 +1,20 @@
-<!-- 公共框架：左侧导航栏（品牌、流程页面菜单、插件页面、底部工具组 系统监控/插件、外观与语言切换），
+<!-- 公共框架：左侧导航栏（品牌、流程页面菜单、插件页面、底部工具组 系统监控/插件、设置入口、外观与语言切换），
+     打开设置页时侧栏换成设置的分组菜单（返回 + 各分组），
      右侧页头 + 页面内容 + 底部状态栏。视觉风格是白色磨砂玻璃 + 科幻 HUD，颜色等变量在 style.css -->
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Grid, Moon, Sunny, View } from '@element-plus/icons-vue'
+import { Back, Coin, Connection, DataLine, Grid, InfoFilled, Moon, Operation, Setting, Sunny, Umbrella, View } from '@element-plus/icons-vue'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import enLocale from 'element-plus/es/locale/lang/en'
 import { footPages, mainPages } from './router'
 import { LANGS, pick, setLang } from './i18n'
 import { pagePath, registry } from './plugins/host'
-import { customThemes, setTheme, theme, themeChoices, type Theme } from './theme'
+import { customThemes, theme, themeChoices, type Theme } from './theme'
+import { pickThemeManually, prefs, rememberPage } from './settings/prefs'
+import { checkUpdate, update } from './settings/update'
+import { startTaskNotifier } from './settings/taskNotify'
 import { useStatusStore } from './stores/status'
 import { isReadOnlyPreview } from './http'
 import StatusBar from './components/StatusBar.vue'
@@ -37,8 +41,23 @@ function themeLabel(c: (typeof themeChoices.value)[number]) {
 const activeThemeIndex = computed(() => Math.max(0, themeChoices.value.findIndex((c) => c.id === theme.value)))
 function pickTheme(next: Theme, e: MouseEvent) {
   const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
-  setTheme(next, { x: box.left + box.width / 2, y: box.top + box.height / 2 })
+  pickThemeManually(next, { x: box.left + box.width / 2, y: box.top + box.height / 2 })
 }
+
+// Settings: while a settings page is open the side menu lists the settings sections; "Back" returns to the page
+// that was open before (the last console page)
+const SETTINGS_SECTIONS = [
+  { id: 'general', icon: Operation }, { id: 'storage', icon: Coin }, { id: 'experiment', icon: DataLine },
+  { id: 'safety', icon: Umbrella }, { id: 'network', icon: Connection }, { id: 'about', icon: InfoFilled },
+] as const
+const settingsMode = computed(() => route.path.startsWith('/settings'))
+const backTo = ref('/monitor')
+watch(() => route.fullPath, (path) => {
+  if (route.path.startsWith('/settings') || route.path === '/') return
+  backTo.value = path
+  rememberPage(route.path)
+}, { immediate: true })
+const updateDot = computed(() => !!update.value?.newer)
 
 const no = (i: number) => String(i + 1).padStart(2, '0')
 // Pages added by plugins: their own group under the workflow pages, numbered on from them
@@ -54,7 +73,9 @@ const current = computed(() => {
   const j = pluginPages.value.findIndex((p) => p.path === route.path)
   if (j >= 0) return { no: no(mainPages.length + j), title: pluginPages.value[j].title }
   const f = footPages.find((p) => p.path === route.path)
-  return f ? { icon: f.meta.icon, title: t(f.meta.titleKey) } : null
+  if (f) return { icon: f.meta.icon, title: t(f.meta.titleKey) }
+  const sec = SETTINGS_SECTIONS.find((x) => route.path === `/settings/${x.id}`)
+  return sec ? { icon: sec.icon, title: t(`settingsNav.${sec.id}`) } : null
 })
 
 // 页头右侧的本地时钟（24 小时制，和语言无关）
@@ -65,12 +86,16 @@ const clock = computed(() => now.value.toLocaleTimeString('en-GB', { hour12: fal
 onMounted(() => {
   store.connect()
   clockTimer = window.setInterval(() => (now.value = new Date()), 1000)
+  if (!preview) {
+    void checkUpdate(false)
+    startTaskNotifier()
+  }
 })
 onUnmounted(() => window.clearInterval(clockTimer))
 </script>
 
 <template>
-  <el-config-provider :locale="epLocale">
+  <el-config-provider :locale="epLocale" :size="prefs.density === 'compact' ? 'small' : 'default'">
     <div class="shell">
       <aside class="rail glass">
         <div class="brand">
@@ -81,17 +106,35 @@ onUnmounted(() => window.clearInterval(clockTimer))
           </div>
         </div>
 
-        <nav class="nav">
+        <nav v-if="settingsMode" class="nav">
+          <router-link :to="backTo" class="nav-item back">
+            <el-icon class="nav-icon" :size="16"><Back /></el-icon>
+            <span class="nav-label">{{ t('settingsNav.back') }}</span>
+          </router-link>
+          <div class="nav-group">
+            <span class="nav-group-label">{{ t('settingsNav.group') }}</span>
+          </div>
+          <router-link
+            v-for="sec in SETTINGS_SECTIONS" :key="sec.id" :to="`/settings/${sec.id}`" class="nav-item"
+            active-class="active" :title="t(`settingsNav.${sec.id}`)"
+          >
+            <el-icon class="nav-icon" :size="17"><component :is="sec.icon" /></el-icon>
+            <span class="nav-label">{{ t(`settingsNav.${sec.id}`) }}</span>
+            <span v-if="sec.id === 'about' && updateDot" class="tool-dot warn" :title="t('settingsNav.updateDot')" />
+          </router-link>
+        </nav>
+
+        <nav v-else class="nav">
           <router-link
             v-for="(p, i) in mainPages" :key="p.path" :to="p.path" class="nav-item"
             active-class="active" :class="{ planned: p.meta.step }" :title="t(p.meta.titleKey)"
           >
-            <span class="nav-no mono">{{ no(i) }}</span>
+            <span v-if="prefs.showNumbers" class="nav-no mono">{{ no(i) }}</span>
             <el-icon class="nav-icon" :size="17"><component :is="p.meta.icon" /></el-icon>
             <span class="nav-label">{{ t(p.meta.titleKey) }}</span>
             <span v-if="p.meta.step" class="nav-soon">{{ t('planned.badge') }}</span>
           </router-link>
-          <template v-if="pluginPages.length">
+          <template v-if="pluginPages.length && prefs.showPluginGroup">
             <div class="nav-group">
               <span class="nav-group-label">{{ t('app.extensions') }}</span>
             </div>
@@ -99,7 +142,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
               v-for="(p, i) in pluginPages" :key="p.path" :to="p.path" class="nav-item" active-class="active"
               :title="p.title"
             >
-              <span class="nav-no mono">{{ no(mainPages.length + i) }}</span>
+              <span v-if="prefs.showNumbers" class="nav-no mono">{{ no(mainPages.length + i) }}</span>
               <el-icon class="nav-icon" :size="17"><component :is="p.icon" /></el-icon>
               <span class="nav-label">{{ p.title }}</span>
             </router-link>
@@ -107,7 +150,7 @@ onUnmounted(() => window.clearInterval(clockTimer))
         </nav>
 
         <!-- Tool pages: a compact group at the bottom, apart from the numbered workflow above -->
-        <nav class="tools">
+        <nav v-if="!settingsMode" class="tools">
           <router-link
             v-for="p in footPages" :key="p.path" :to="p.path" class="nav-item tool"
             active-class="active" :title="t(p.meta.titleKey)"
@@ -126,6 +169,13 @@ onUnmounted(() => window.clearInterval(clockTimer))
         </nav>
 
         <div class="rail-foot">
+          <router-link
+            to="/settings/general" class="settings-btn" :class="{ on: settingsMode }" :title="t('settingsNav.title')"
+          >
+            <el-icon :size="16"><Setting /></el-icon>
+            <span class="nav-label">{{ t('settingsNav.title') }}</span>
+            <span v-if="updateDot" class="tool-dot warn" :title="t('settingsNav.updateDot')" />
+          </router-link>
           <div class="prefs" :class="{ multi: customThemes.length > 0 }">
             <div
               class="seg seg-theme" role="group" :aria-label="t('app.theme')"
@@ -155,14 +205,14 @@ onUnmounted(() => window.clearInterval(clockTimer))
       <div class="stage">
         <header class="topbar">
           <div v-if="current" class="crumb">
-            <span v-if="current.no" class="crumb-no mono">{{ current.no }}</span>
-            <el-icon v-else class="crumb-icon" :size="18"><component :is="current.icon" /></el-icon>
+            <span v-if="current.no && prefs.showNumbers" class="crumb-no mono">{{ current.no }}</span>
+            <el-icon v-else-if="current.icon" class="crumb-icon" :size="18"><component :is="current.icon" /></el-icon>
             <h1>{{ current.title }}</h1>
             <span class="crumb-path mono">{{ route.path }}</span>
           </div>
           <PluginSlot v-for="h in registry.header" :key="h.key" :plugin-id="h.pluginId" :component="h.component" />
           <TaskCenter />
-          <div class="clock">
+          <div v-if="prefs.showClock" class="clock">
             <span class="clock-label">{{ t('app.localTime') }}</span>
             <span class="clock-time mono">{{ clock }}</span>
           </div>
@@ -369,6 +419,10 @@ onUnmounted(() => window.clearInterval(clockTimer))
   background: var(--ok);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
 }
+.tool-dot.warn {
+  background: var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 18%, transparent);
+}
 .tool-dot.down {
   background: var(--bad);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 18%, transparent);
@@ -387,6 +441,27 @@ onUnmounted(() => window.clearInterval(clockTimer))
   background: color-mix(in srgb, var(--warn) 14%, transparent);
 }
 
+/* Settings entry at the bottom of the side menu (above the theme / language switches) */
+.settings-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 11px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  text-decoration: none;
+  background: rgba(var(--tint-rgb), 0.06);
+  transition: background 0.2s, color 0.2s;
+}
+.settings-btn:hover { color: var(--ink); background: rgba(var(--paper-rgb), 0.7); }
+.settings-btn.on { color: var(--accent); background: var(--glass-strong); font-weight: 600; }
+.settings-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav-item.back { height: 36px; font-size: 13.5px; }
+html.density-compact .nav-item { height: 36px; }
+html.density-compact .nav-item.tool,
+html.density-compact .nav-item.back { height: 32px; }
 .rail-foot {
   display: flex;
   flex-direction: column;

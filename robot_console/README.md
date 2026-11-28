@@ -126,6 +126,9 @@ They contain no machine-specific paths. Put the settings of your machine in
 `config/console.yaml` (dicts key by key, lists replaced). `config/user_console.example.yaml` is a starting
 point. The variable `ROBOT_CONSOLE_USER_CONFIG` names another override file. A console started with
 `--config FILE` (test instances) ignores `~/.config/robot_console/console.yaml`.
+Most common overrides (data folders, experiment defaults, teleop/E-stop limits, port and proxies) can also
+be edited directly from the sidebar **Settings** page (`/settings`), which validates and writes the override
+file atomically with rotating backups.
 
 Strings in the configuration may use `~`, `${data_root}` (the value of `paths.data_root`) and
 `${pkg:NAME}` (the `share/NAME` folder of an installed ROS package).
@@ -263,11 +266,13 @@ rights, so only enable plugins you trust. `ROBOT_CONSOLE_NO_PLUGINS=1` starts th
 
 The console ships four plugins (all disabled until you enable them):
 
-- **AI assistant** (`ai_assistant`): a resizable header chat drawer with a dedicated model-service profiles
-  page (OpenAI-compatible Chat Completions or Anthropic Messages API), inline model / reasoning-effort /
-  access pickers, read-only tools for maps, runs, ATE/RPE, batch experiments, SLAM parameters, logs and
-  sensor profiles, and optional approval-gated action tools for starting/cancelling batch experiments and
-  running evaluations. See [docs/plugins.md](docs/plugins.md#the-ai-assistant-plugin).
+- **AI assistant** (`ai_assistant`): a freely resizable header chat drawer with glass and classic skins, an
+  in-panel settings view, searchable SQLite conversation history, usage/cost charts synced with `models.dev`,
+  a model-service profiles page (OpenAI-compatible Chat Completions, Anthropic Messages API, or OAuth
+  subscription sign-in via the embedded CPA engine), inline model / reasoning-effort / access pickers,
+  read-only tools for maps, runs, ATE/RPE, batch experiments, SLAM parameters, logs and sensor profiles, and
+  optional approval-gated action tools for starting/cancelling batch experiments and running evaluations.
+  See [docs/plugins.md](docs/plugins.md#the-ai-assistant-plugin).
 - **Bag converter** (`bag_convert`): converts ROS 1 `.bag` files to ROS 2 bags (sqlite3 or MCAP) via
   `rosbags`, including optional Livox `CustomMsg` to `PointCloud2` conversion.
 - **Dynamic object removal** (`dynamic_removal`): removes traces of moving objects from maps saved with raw

@@ -5,11 +5,11 @@
 # Messages API.
 id: ai_assistant
 api: 1
-version: 0.4.0
+version: 0.6.0
 name: {zh: AI 助手, en: AI assistant}
 description:
-  zh: 在页头打开一个聊天抽屉，用你自己配置的大模型或在“AI 模型服务”页通过内置 CPA 引擎（CLIProxyAPI）OAuth 登录的订阅账号回答关于地图、运行记录、评估结果、SLAM 参数、日志和传感器配置的问题。支持历史对话搜索、置顶、重命名与导出，以及按模型、服务和对话的用量与单价估算统计。输入框下方可选模型、推理强度与权限：仅对话、只读（默认）、运行前询问或自动运行；后两种允许启动或取消批量实验、计算评估，不会删除控制台数据或修改设置。对话内容与读取到的数据会发送给所选模型服务。
-  en: 'Opens a chat drawer in the header that answers questions about maps, run records, evaluation results, SLAM parameters, logs and sensor profiles using model services you configure or subscription accounts signed in via OAuth through the embedded CPA engine (CLIProxyAPI). Includes searchable conversation history (pin, rename, Markdown export) and per-call usage and cost-estimate statistics. Under the input you pick the model, reasoning effort and access: chat only, read only (default), ask before running, or run automatically; the last two let it start or cancel batch experiments and compute evaluations without deleting console data or changing settings. Conversations and tool output are sent to the chosen model service.'
+  zh: 在页头打开一个聊天抽屉，用你自己配置的大模型或在“AI 模型服务”页通过内置 CPA 引擎（CLIProxyAPI）OAuth 登录的订阅账号回答关于地图、运行记录、评估结果、SLAM 参数、日志和传感器配置的问题。支持历史对话搜索、置顶、重命名与导出，以及按模型、服务和对话的用量与费用估算统计（单价表可从 models.dev 同步）；提供玻璃/经典两种外观与面板内设置页（发送方式、快捷键、窗口玻璃与液态玻璃效果）。输入框下方可选模型、推理强度与权限：仅对话、只读（默认）、运行前询问或自动运行；后两种允许启动或取消批量实验、计算评估，不会删除控制台数据或修改设置。对话内容与读取到的数据会发送给所选模型服务；开启定价同步时会从 models.dev 下载公开的价格表。
+  en: 'Opens a chat drawer in the header that answers questions about maps, run records, evaluation results, SLAM parameters, logs and sensor profiles using model services you configure or subscription accounts signed in via OAuth through the embedded CPA engine (CLIProxyAPI). Includes searchable conversation history (pin, rename, Markdown export), per-call usage and cost-estimate statistics with a price table synced from models.dev, and a glass/classic appearance switcher with an in-panel settings page (send key, shortcuts, window glass and liquid glass tuning). Under the input you pick the model, reasoning effort and access: chat only, read only (default), ask before running, or run automatically; the last two let it start or cancel batch experiments and compute evaluations without deleting console data or changing settings. Conversations and tool output are sent to the chosen model service; with the pricing sync on, the public price list is downloaded from models.dev.'
 author: Leonhart999
 license: MIT
 backend:

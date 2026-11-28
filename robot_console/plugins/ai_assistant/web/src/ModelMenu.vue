@@ -13,13 +13,14 @@ import { createSpring, type SpringConfig } from './spring'
 import { usePanelMenu } from './popover'
 import Icon from './Icon.vue'
 import SwapText from './SwapText.vue'
+import LiquidGlass from './glass/LiquidGlass.vue'
 
 const props = defineProps<{ status: Status | null; busy: boolean; testing: boolean }>()
 const emit = defineEmits<{ changed: []; test: []; manage: []; error: [text: string] }>()
 
 const DEFAULT_EFFORTS: Record<string, Effort[]> = {
-  anthropic: ['', 'low', 'medium', 'high', 'xhigh', 'max'],
-  openai: ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+  anthropic: ['low', 'medium', 'high', 'xhigh', 'max'],
+  openai: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
 }
 /** Effort knob: damping ratio 40 / (2 * sqrt(640)) = 0.79, settles in about 0.25 s with a barely visible overshoot */
 const KNOB_SPRING: SpringConfig = { stiffness: 640, damping: 40, precision: 0.002 }
@@ -41,10 +42,12 @@ const modelId = computed(() => want.value?.model ?? active.value?.model ?? '')
 const model = computed(() => active.value?.models.find((m) => m.id === modelId.value) ?? null)
 const label = computed(() => model.value?.label || (want.value ? modelId.value : props.status?.model) || t('composer.noModel'))
 const effort = computed<Effort>(() => (want.value?.effort ?? model.value?.effort ?? (want.value ? '' : props.status?.effort) ?? '') as Effort)
+// The track only offers real levels; '' (send no effort) stays possible for a model whose saved effort is unset, the
+// track then shows no knob until a level is picked.
 const levels = computed<Effort[]>(() => {
-  const custom = model.value?.efforts
+  const custom = model.value?.efforts?.filter(Boolean)
   const base: Effort[] = custom?.length
-    ? ['', ...custom]
+    ? [...custom]
     : [...(DEFAULT_EFFORTS[active.value?.format ?? 'openai'] ?? DEFAULT_EFFORTS.openai)]
   if (effort.value && !base.includes(effort.value)) {
     base.push(effort.value)
@@ -52,8 +55,8 @@ const levels = computed<Effort[]>(() => {
   }
   return base
 })
-const level = computed(() => Math.max(0, levels.value.indexOf(effort.value)))
-const effortName = (e: Effort) => (e || 'default')
+/** Index of the saved effort on the track, -1 when no effort is set */
+const level = computed(() => levels.value.indexOf(effort.value))
 const isOn = (pid: string, mid?: string) => pid === activeId.value && (mid === undefined || mid === modelId.value)
 
 // a fresh status from the backend replaces the optimistic choice once nothing is being saved
@@ -102,9 +105,10 @@ const shownLevel = computed(() => preview.value ?? level.value)
 const valueDir = ref(1)
 watch(shownLevel, (now, before) => { valueDir.value = now >= before ? 1 : -1 })
 
+// with no effort set the knob is hidden and parked at the first dot, so the first pick slides in from the left
 const knob = createSpring(0, KNOB_SPRING, (k) => track.value?.style.setProperty('--k', k.toFixed(4)))
-watch(track, (el) => { if (el) knob.jump(level.value) }, { flush: 'post' })
-watch([level, () => levels.value.length], () => { if (!pressing.value) knob.to(level.value) })
+watch(track, (el) => { if (el) knob.jump(Math.max(0, level.value)) }, { flush: 'post' })
+watch([level, () => levels.value.length], () => { if (!pressing.value) knob.to(Math.max(0, level.value)) })
 onUnmounted(() => knob.stop())
 
 /** Fractional level under the pointer (0 = first dot, n-1 = last dot) */
@@ -171,12 +175,14 @@ watch(open, (o) => {
 
 <template>
   <div ref="root" class="aia-pick">
-    <button type="button" class="aia-chipbtn" :class="{ open }" :title="t('composer.modelTitle')"
-            :aria-expanded="open" :disabled="!profiles.length" @click="open = !open">
-      <span v-if="active" class="aia-dotav sm" :style="{ background: avatarColor(active.color, active.name) }">{{ initial(active.name) }}</span>
-      <SwapText class="aia-chip-text" :text="label" />
-      <SwapText class="aia-chip-sub" :text="effort ? effortName(effort) : ''" :dir="valueDir" />
-    </button>
+    <LiquidGlass class="aia-chip-glass is-raised" magnetic>
+      <button type="button" class="aia-chipbtn" :class="{ open }" :title="t('composer.modelTitle')"
+              :aria-expanded="open" :disabled="!profiles.length" @click="open = !open">
+        <span v-if="active" class="aia-dotav sm" :style="{ background: avatarColor(active.color, active.name) }">{{ initial(active.name) }}</span>
+        <SwapText class="aia-chip-text" :text="label" />
+        <SwapText class="aia-chip-sub" :text="effort" :dir="valueDir" />
+      </button>
+    </LiquidGlass>
     <transition name="aia-pop">
       <div v-if="open" class="aia-menu up aia-model-menu" role="menu" :style="menuStyle">
         <div class="aia-menu-cap">{{ t('composer.modelTitle') }}</div>
@@ -199,16 +205,16 @@ watch(open, (o) => {
         <div v-if="active" class="aia-effort">
           <div class="aia-effort-head">
             <Icon name="gauge" /><span>{{ t('composer.effort') }}</span>
-            <SwapText class="aia-effort-val mono" :text="effortName(shownEffort)" :dir="valueDir" />
+            <SwapText class="aia-effort-val mono" :text="shownEffort" :dir="valueDir" />
           </div>
-          <div ref="track" class="aia-effort-track" :class="{ pressing }" role="radiogroup" :aria-label="t('composer.effort')"
-               :style="{ '--n': levels.length }"
+          <div ref="track" class="aia-effort-track" :class="{ pressing, unset: shownLevel < 0 }" role="radiogroup"
+               :aria-label="t('composer.effort')" :style="{ '--n': levels.length }"
                @pointerdown="onTrackDown" @pointermove="onTrackMove" @pointerup="onTrackUp" @pointercancel="onTrackUp"
                @pointerleave="onTrackLeave" @keydown="onTrackKey">
             <span class="aia-effort-fill" />
-            <button v-for="(e, i) in levels" :key="e || 'default'" type="button" role="radio" class="aia-effort-dot"
+            <button v-for="(e, i) in levels" :key="e" type="button" role="radio" class="aia-effort-dot"
                     :class="{ past: i < shownLevel, on: i === level }" :aria-checked="i === level"
-                    :tabindex="i === level ? 0 : -1" :aria-label="effortName(e)" :title="effortName(e)"
+                    :tabindex="i === Math.max(0, level) ? 0 : -1" :aria-label="e" :title="e"
                     @click="$event.detail === 0 && setEffort(e)" />
             <span class="aia-effort-knob" />
           </div>
